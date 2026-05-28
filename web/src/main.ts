@@ -71,6 +71,7 @@ const resetFogButton = document.querySelector<HTMLButtonElement>('#resetFogButto
 const exportButton = document.querySelector<HTMLButtonElement>('#exportButton')
 const runtimeStatus = document.querySelector<HTMLElement>('#runtimeStatus')
 const tileList = document.querySelector<HTMLElement>('#tileList')
+const doorList = document.querySelector<HTMLElement>('#doorList')
 const boardStat = document.querySelector<HTMLElement>('#boardStat')
 const occluderStat = document.querySelector<HTMLElement>('#occluderStat')
 const doorStat = document.querySelector<HTMLElement>('#doorStat')
@@ -89,6 +90,7 @@ if (
   !exportButton ||
   !runtimeStatus ||
   !tileList ||
+  !doorList ||
   !boardStat ||
   !occluderStat ||
   !doorStat ||
@@ -202,6 +204,63 @@ const renderTileList = (): void => {
   )
 }
 
+const doorOccluders = (): DoorOccluder[] =>
+  occluders.filter((occluder): occluder is DoorOccluder => occluder.type === 'door')
+
+const isDoorOpen = (door: DoorOccluder): boolean =>
+  doorStates[door.id]?.open ?? door.open
+
+const shortDoorName = (door: DoorOccluder, index: number): string => {
+  const id = door.id.includes(':') ? door.id.split(':').at(-1) : door.id
+  return id && id.length <= 18 ? id : `door-${index + 1}`
+}
+
+const setDoorOpen = (doorId: string, open: boolean): void => {
+  const door = doorOccluders().find((candidate) => candidate.id === doorId)
+  if (!door) return
+  doorStates[door.id] = {open}
+  markExplored()
+  render()
+}
+
+const renderDoorList = (): void => {
+  const doors = doorOccluders()
+
+  if (doors.length === 0) {
+    const empty = document.createElement('p')
+    empty.className = 'empty-state'
+    empty.textContent = 'No doors detected'
+    doorList.replaceChildren(empty)
+    return
+  }
+
+  doorList.replaceChildren(
+    ...doors.map((door, index) => {
+      const open = isDoorOpen(door)
+      const item = document.createElement('div')
+      item.className = `door-item ${open ? 'door-item-open' : 'door-item-closed'}`
+
+      const name = document.createElement('span')
+      name.className = 'door-name'
+      name.textContent = shortDoorName(door, index)
+      name.title = door.id
+
+      const state = document.createElement('span')
+      state.className = 'door-state'
+      state.textContent = open ? 'OPEN' : 'CLOSED'
+
+      const toggle = document.createElement('button')
+      toggle.className = 'door-toggle'
+      toggle.type = 'button'
+      toggle.textContent = open ? 'Close' : 'Open'
+      toggle.addEventListener('click', () => setDoorOpen(door.id, !isDoorOpen(door)))
+
+      item.append(name, state, toggle)
+      return item
+    })
+  )
+}
+
 const analyzeTiles = async (): Promise<void> => {
   if (placements.length === 0) {
     setStatus('Select one or more map images first.')
@@ -306,6 +365,7 @@ const render = (): void => {
   drawPreview()
   drawViewer()
   renderStats()
+  renderDoorList()
 }
 
 const drawGrid = (): void => {
@@ -348,7 +408,7 @@ const drawOccluders = (): void => {
   ctx.lineCap = 'round'
   for (const occluder of occluders) {
     const isDoor = occluder.type === 'door'
-    const open = isDoor ? (doorStates[occluder.id]?.open ?? occluder.open) : false
+    const open = isDoor ? isDoorOpen(occluder) : false
     ctx.strokeStyle = isDoor
       ? open
         ? '#24a148'
@@ -360,7 +420,30 @@ const drawOccluders = (): void => {
     ctx.moveTo(occluder.x1, occluder.y1)
     ctx.lineTo(occluder.x2, occluder.y2)
     ctx.stroke()
+
+    if (isDoor) drawDoorStateMarker(occluder, open)
   }
+  ctx.restore()
+}
+
+const drawDoorStateMarker = (door: DoorOccluder, open: boolean): void => {
+  const x = (door.x1 + door.x2) / 2
+  const y = (door.y1 + door.y2) / 2
+  ctx.save()
+  ctx.setLineDash([])
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.82)'
+  ctx.strokeStyle = open ? '#24a148' : '#f97316'
+  ctx.lineWidth = 2
+  ctx.beginPath()
+  ctx.roundRect(x - 9, y - 9, 18, 18, 4)
+  ctx.fill()
+  ctx.stroke()
+  ctx.fillStyle = open ? '#39ff14' : '#ffb020'
+  ctx.font =
+    'bold 11px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.fillText(open ? 'O' : 'C', x, y + 0.5)
   ctx.restore()
 }
 
@@ -395,9 +478,12 @@ const drawViewer = (): void => {
 }
 
 const renderStats = (): void => {
+  const doors = doorOccluders()
+  const openCount = doors.filter(isDoorOpen).length
   boardStat.textContent = `${Math.round(boardWidth)} x ${Math.round(boardHeight)}`
   occluderStat.textContent = String(occluders.length)
-  doorStat.textContent = String(occluders.filter((occluder) => occluder.type === 'door').length)
+  doorStat.textContent =
+    doors.length === 0 ? '0' : `${doors.length} (${openCount} open)`
 }
 
 const positionFromEvent = (event: PointerEvent): Point => {
@@ -452,10 +538,7 @@ const handlePointerDown = (event: PointerEvent): void => {
   if (tool === 'viewer') {
     const door = nearestOccluder(point, (occluder) => occluder.type === 'door')
     if (door && door.type === 'door') {
-      const open = !(doorStates[door.id]?.open ?? door.open)
-      doorStates[door.id] = {open}
-      markExplored()
-      render()
+      setDoorOpen(door.id, !isDoorOpen(door))
       return
     }
     viewer = point
@@ -550,7 +633,7 @@ const exportSidecar = async (): Promise<void> => {
       occluder.type === 'door'
         ? {
             ...occluder,
-            open: doorStates[occluder.id]?.open ?? occluder.open
+            open: isDoorOpen(occluder)
           }
         : occluder
     )

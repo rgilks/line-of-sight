@@ -309,6 +309,66 @@ input[type="number"] {
   overflow-wrap: anywhere;
 }
 
+.door-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.empty-state {
+  margin: 0;
+  color: var(--tre-faint);
+  font-size: 12px;
+}
+
+.door-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  border: 1px solid var(--tre-border);
+  border-radius: 6px;
+  background: var(--tre-panel);
+  padding: 6px;
+}
+
+.door-name {
+  min-width: 0;
+  color: var(--tre-white);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.door-state {
+  min-width: 56px;
+  border: 1px solid currentcolor;
+  border-radius: 999px;
+  padding: 2px 7px;
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: center;
+}
+
+.door-item-open .door-state {
+  color: var(--tre-green);
+}
+
+.door-item-closed .door-state {
+  color: var(--door);
+}
+
+.door-toggle {
+  min-height: 28px;
+  padding: 0 9px;
+  font-size: 12px;
+}
+
 .stats {
   margin: 10px 0 0;
   display: grid;
