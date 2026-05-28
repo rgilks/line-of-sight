@@ -128,7 +128,7 @@ pub fn analyze_image_rgba(
 
     let mask = build_dark_mask(width, height, rgba);
     let dark_pixels = mask.iter().filter(|&&dark| dark).count() as u32;
-    let min_run = effective_grid.mul_add(0.65, 0.0).max(30.0) as u32;
+    let min_run = effective_grid.mul_add(0.45, 0.0).max(18.0) as u32;
     let snap = (effective_grid / 4.0).max(4.0);
 
     let mut horizontal = scan_horizontal(width, height, &mask, min_run, snap);
@@ -436,10 +436,9 @@ fn detect_axis_door_candidates(
     grid_scale: f64,
     snap: f64,
 ) -> Vec<Candidate> {
-    let min_gap = (grid_scale * 0.18).max(6.0);
-    let max_gap = (grid_scale * 1.18).max(min_gap + 1.0);
-    let min_support = (grid_scale * 0.45).max(22.0);
-    let grid_tolerance = (grid_scale * 0.14).max(snap);
+    let min_gap = (grid_scale * 0.12).max(4.0);
+    let max_gap = (grid_scale * 1.45).max(min_gap + 1.0);
+    let min_support = (grid_scale * 0.28).max(12.0);
     let mut by_line: BTreeMap<i64, Vec<&Candidate>> = BTreeMap::new();
 
     for candidate in candidates {
@@ -452,10 +451,6 @@ fn detect_axis_door_candidates(
         } else {
             candidate.x1
         };
-        if !near_grid_line(line_coord, grid_scale, grid_tolerance) {
-            continue;
-        }
-
         by_line
             .entry(quantize(line_coord, snap))
             .or_default()
@@ -526,15 +521,6 @@ fn detect_axis_door_candidates(
     }
 
     doors
-}
-
-fn near_grid_line(value: f64, grid_scale: f64, tolerance: f64) -> bool {
-    if !value.is_finite() || !grid_scale.is_finite() || grid_scale <= 0.0 {
-        return true;
-    }
-
-    let offset = value.rem_euclid(grid_scale);
-    offset.min(grid_scale - offset) <= tolerance
 }
 
 fn average(first: f64, second: f64) -> f64 {
@@ -862,6 +848,44 @@ mod tests {
         assert_eq!(door.x1, 200.0);
         assert_eq!(door.y1, 125.0);
         assert_eq!(door.y2, 175.0);
+    }
+
+    #[test]
+    fn detects_off_grid_door_gap_between_wall_runs() {
+        let doors = detect_door_candidates(
+            &[
+                horizontal_candidate(0.0, 96.0, 123.0),
+                horizontal_candidate(118.0, 240.0, 123.0),
+            ],
+            &[],
+            50.0,
+            12.5,
+        );
+
+        assert_eq!(doors.len(), 1);
+        let door = &doors[0];
+        assert!(door.horizontal);
+        assert_eq!(door.x1, 96.0);
+        assert_eq!(door.x2, 118.0);
+        assert_eq!(door.y1, 123.0);
+    }
+
+    #[test]
+    fn detects_door_gap_with_short_wall_supports() {
+        let doors = detect_door_candidates(
+            &[
+                horizontal_candidate(40.0, 58.0, 100.0),
+                horizontal_candidate(70.0, 92.0, 100.0),
+            ],
+            &[],
+            50.0,
+            12.5,
+        );
+
+        assert_eq!(doors.len(), 1);
+        let door = &doors[0];
+        assert_eq!(door.x1, 58.0);
+        assert_eq!(door.x2, 70.0);
     }
 
     #[test]

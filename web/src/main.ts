@@ -122,6 +122,8 @@ let dropDepth = 0
 
 const minZoom = 0.35
 const maxZoom = 4
+const doorCarveTolerance = 8
+const minCarvedWallLength = 8
 
 const exploredCanvas = document.createElement('canvas')
 const exploredCtx = exploredCanvas.getContext('2d')
@@ -310,7 +312,7 @@ const analyzeTiles = async (): Promise<void> => {
     }
   }
 
-  occluders = [...generated, ...manual]
+  occluders = carveDoorGaps([...generated, ...manual])
   doorStates = Object.fromEntries(
     Object.entries(doorStates).filter(([doorId]) =>
       occluders.some((occluder) => occluder.type === 'door' && occluder.id === doorId)
@@ -333,6 +335,111 @@ const transformOccluder = (occluder: Occluder, placement: Placement): Occluder =
   return occluder.type === 'door'
     ? {...base, type: 'door', open: occluder.open}
     : {...base, type: 'wall'}
+}
+
+const occluderAxis = (occluder: Occluder): 'horizontal' | 'vertical' | null => {
+  const dx = Math.abs(occluder.x2 - occluder.x1)
+  const dy = Math.abs(occluder.y2 - occluder.y1)
+  if (dx >= minCarvedWallLength && dy <= doorCarveTolerance) return 'horizontal'
+  if (dy >= minCarvedWallLength && dx <= doorCarveTolerance) return 'vertical'
+  return null
+}
+
+const lineCoordinate = (
+  occluder: Occluder,
+  axis: 'horizontal' | 'vertical'
+): number =>
+  axis === 'horizontal'
+    ? (occluder.y1 + occluder.y2) / 2
+    : (occluder.x1 + occluder.x2) / 2
+
+const intervalFor = (
+  occluder: Occluder,
+  axis: 'horizontal' | 'vertical'
+): [number, number] => {
+  const first = axis === 'horizontal' ? occluder.x1 : occluder.y1
+  const second = axis === 'horizontal' ? occluder.x2 : occluder.y2
+  return first <= second ? [first, second] : [second, first]
+}
+
+const mergeIntervals = (intervals: Array<[number, number]>): Array<[number, number]> => {
+  const sorted = intervals
+    .filter(([start, end]) => end - start >= minCarvedWallLength)
+    .sort(([a], [b]) => a - b)
+  const merged: Array<[number, number]> = []
+
+  for (const [start, end] of sorted) {
+    const previous = merged.at(-1)
+    if (!previous || start > previous[1]) {
+      merged.push([start, end])
+    } else {
+      previous[1] = Math.max(previous[1], end)
+    }
+  }
+
+  return merged
+}
+
+const carveDoorGaps = (items: Occluder[]): Occluder[] => {
+  const doors = items.filter((item): item is DoorOccluder => item.type === 'door')
+  if (doors.length === 0) return items
+
+  const carved: Occluder[] = []
+  for (const item of items) {
+    if (item.type === 'door') {
+      carved.push(item)
+      continue
+    }
+
+    const axis = occluderAxis(item)
+    if (!axis) {
+      carved.push(item)
+      continue
+    }
+
+    const wallLine = lineCoordinate(item, axis)
+    const [wallStart, wallEnd] = intervalFor(item, axis)
+    const exclusions = mergeIntervals(
+      doors.flatMap((door): Array<[number, number]> => {
+        const doorAxis = occluderAxis(door)
+        if (doorAxis !== axis) return []
+        if (Math.abs(lineCoordinate(door, axis) - wallLine) > doorCarveTolerance) {
+          return []
+        }
+
+        const [doorStart, doorEnd] = intervalFor(door, axis)
+        const start = Math.max(wallStart, doorStart - doorCarveTolerance / 2)
+        const end = Math.min(wallEnd, doorEnd + doorCarveTolerance / 2)
+        return end - start >= minCarvedWallLength ? [[start, end]] : []
+      })
+    )
+
+    if (exclusions.length === 0) {
+      carved.push(item)
+      continue
+    }
+
+    const pieces: Array<[number, number]> = []
+    let cursor = wallStart
+    for (const [start, end] of exclusions) {
+      if (start - cursor >= minCarvedWallLength) pieces.push([cursor, start])
+      cursor = Math.max(cursor, end)
+    }
+    if (wallEnd - cursor >= minCarvedWallLength) pieces.push([cursor, wallEnd])
+
+    for (const [index, [start, end]] of pieces.entries()) {
+      carved.push({
+        ...item,
+        id: `${item.id}:part-${index + 1}`,
+        x1: axis === 'horizontal' ? start : item.x1,
+        y1: axis === 'vertical' ? start : item.y1,
+        x2: axis === 'horizontal' ? end : item.x2,
+        y2: axis === 'vertical' ? end : item.y2
+      })
+    }
+  }
+
+  return carved
 }
 
 const drawPolygonPath = (
@@ -416,7 +523,7 @@ const drawGrid = (): void => {
 const drawFog = (): void => {
   const polygon = getVisiblePolygon()
   ctx.save()
-  ctx.fillStyle = '#d8d8d8'
+  ctx.fillStyle = '#eeeeee'
   ctx.beginPath()
   ctx.rect(0, 0, boardWidth, boardHeight)
   if (polygon.length > 2) {
@@ -737,6 +844,7 @@ const handlePointerUp = (event: PointerEvent): void => {
         y2: point.y
       })
     }
+    occluders = carveDoorGaps(occluders)
   }
 
   dragStart = null
