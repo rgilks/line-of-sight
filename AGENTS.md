@@ -36,19 +36,20 @@ Live verification should include:
 
 ## Project Shape
 
-- `crates/los-core/` contains the Rust geometry and image-analysis core compiled
-  to WebAssembly with `wasm-pack`.
+- `web/src/los-core.ts` contains the deterministic TypeScript geometry and
+  image-analysis core.
 - `web/` contains the browser UI built by Vite.
 - `src/worker.ts` is the Cloudflare Worker shell that serves static assets and
   `/healthz`.
 - `wrangler.toml` owns Cloudflare deployment config for `los.tre.systems`.
-- `dist/`, `target/`, and `crates/los-core/pkg/` are generated outputs.
+- `dist/` is generated output.
+- The previous Rust/WASM implementation is preserved on the
+  `rust-wasm-version` branch.
 
 ## Common Commands
 
 ```bash
 npm run build
-npm run build:wasm
 npm run build:web
 npm run test
 npm run check
@@ -58,7 +59,7 @@ npm run deploy
 Use the narrowest check that proves the change:
 
 - CSS or HTML only: `npm run build:web` is usually enough.
-- Rust/WASM changes: `npm run check`.
+- TypeScript core or UI changes: `npm run check`.
 - Worker or deployment config changes: `npm run check`, then `npm run deploy`.
 - Documentation-only changes: no build is required unless the docs affect a
   generated or served artifact.
@@ -73,7 +74,8 @@ Use the narrowest check that proves the change:
 
 ## Coding Rules
 
-- Keep the Rust core deterministic and free of browser or Cloudflare concerns.
+- Keep `web/src/los-core.ts` deterministic and free of browser or Cloudflare
+  concerns.
 - Keep browser-only code in `web/src/`.
 - Keep Cloudflare platform code in `src/worker.ts`.
 - Avoid adding runtime dependencies unless there is a clear reason.
@@ -93,4 +95,3 @@ The app should feel related to the main TRE site:
 - JetBrains Mono for brand/navigation/tool labels
 - restrained green borders and glow
 - avoid overly bright UI chrome that competes with the map canvas
-

@@ -1,37 +1,16 @@
-import initWasm, {
-  analyze_image_rgba,
-  visibility_polygon
-} from '../../crates/los-core/pkg/los_core.js'
 import {detectWebGpu} from './gpu'
+import {
+  analyzeImageRgba,
+  visibilityPolygon,
+  type AnalysisResult,
+  type DoorOccluder,
+  type Occluder,
+  type Point,
+  type WallOccluder
+} from './los-core'
 import './styles.css'
 
 type Tool = 'viewer' | 'wall' | 'door' | 'erase'
-
-type Point = {
-  x: number
-  y: number
-}
-
-type WallOccluder = {
-  type: 'wall'
-  id: string
-  x1: number
-  y1: number
-  x2: number
-  y2: number
-}
-
-type DoorOccluder = {
-  type: 'door'
-  id: string
-  x1: number
-  y1: number
-  x2: number
-  y2: number
-  open: boolean
-}
-
-type Occluder = WallOccluder | DoorOccluder
 
 type Tile = {
   id: string
@@ -46,19 +25,6 @@ type Placement = {
   tile: Tile
   x: number
   y: number
-}
-
-type AnalysisResult = {
-  width: number
-  height: number
-  grid_scale: number
-  occluders: Occluder[]
-  stats: {
-    dark_pixels: number
-    horizontal_candidates: number
-    vertical_candidates: number
-    door_candidates: number
-  }
 }
 
 const canvas = document.querySelector<HTMLCanvasElement>('#boardCanvas')
@@ -300,12 +266,12 @@ const analyzeTiles = async (): Promise<void> => {
     scratchCtx.clearRect(0, 0, scratch.width, scratch.height)
     scratchCtx.drawImage(placement.tile.image, 0, 0)
     const imageData = scratchCtx.getImageData(0, 0, scratch.width, scratch.height)
-    const result = analyze_image_rgba(
+    const result = analyzeImageRgba(
       scratch.width,
       scratch.height,
-      new Uint8Array(imageData.data.buffer),
+      imageData.data,
       gridScale()
-    ) as AnalysisResult
+    ) satisfies AnalysisResult
 
     for (const occluder of result.occluders) {
       generated.push(transformOccluder(occluder, placement))
@@ -456,7 +422,7 @@ const drawPolygonPath = (
 }
 
 const getVisiblePolygon = (): Point[] =>
-  visibility_polygon(
+  visibilityPolygon(
     viewer.x,
     viewer.y,
     boardWidth,
@@ -464,7 +430,7 @@ const getVisiblePolygon = (): Point[] =>
     sightRadius(),
     occluders,
     doorStates
-  ) as Point[]
+  )
 
 const markExplored = (): void => {
   if (!hasMap()) return
@@ -954,7 +920,6 @@ for (const button of toolButtons) {
   })
 }
 
-await initWasm()
 gpuStat.textContent = await detectWebGpu()
 setStatus('Ready. Select local map images to start.')
 renderWallToggle()

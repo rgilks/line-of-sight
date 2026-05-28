@@ -17,8 +17,7 @@ ignored and are not deployed.
 
 ## Stack
 
-- Rust geometry and image-analysis core compiled to WebAssembly.
-- TypeScript browser UI.
+- TypeScript geometry, image-analysis, and browser UI.
 - WebGPU-ready frontend with a runtime capability check.
 - Cloudflare Workers static assets for deployment.
 

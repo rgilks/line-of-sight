@@ -1,9 +1,0 @@
-[workspace]
-members = ["crates/los-core"]
-resolver = "2"
-
-[workspace.package]
-edition = "2021"
-license = "MIT"
-repository = "https://github.com/rgilks/line-of-sight"
-
