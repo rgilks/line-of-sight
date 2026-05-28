@@ -67,6 +67,7 @@ const fileInput = document.querySelector<HTMLInputElement>('#fileInput')
 const columnsInput = document.querySelector<HTMLInputElement>('#columnsInput')
 const gridInput = document.querySelector<HTMLInputElement>('#gridInput')
 const radiusInput = document.querySelector<HTMLInputElement>('#radiusInput')
+const radiusValue = document.querySelector<HTMLOutputElement>('#radiusValue')
 const showWallsButton = document.querySelector<HTMLButtonElement>('#showWallsButton')
 const analyzeButton = document.querySelector<HTMLButtonElement>('#analyzeButton')
 const resetFogButton = document.querySelector<HTMLButtonElement>('#resetFogButton')
@@ -77,7 +78,6 @@ const boardStat = document.querySelector<HTMLElement>('#boardStat')
 const occluderStat = document.querySelector<HTMLElement>('#occluderStat')
 const doorStat = document.querySelector<HTMLElement>('#doorStat')
 const gpuStat = document.querySelector<HTMLElement>('#gpuStat')
-const exportOutput = document.querySelector<HTMLTextAreaElement>('#exportOutput')
 const toolButtons = document.querySelectorAll<HTMLButtonElement>('.tool-button')
 
 if (
@@ -87,6 +87,7 @@ if (
   !columnsInput ||
   !gridInput ||
   !radiusInput ||
+  !radiusValue ||
   !showWallsButton ||
   !analyzeButton ||
   !resetFogButton ||
@@ -96,8 +97,7 @@ if (
   !boardStat ||
   !occluderStat ||
   !doorStat ||
-  !gpuStat ||
-  !exportOutput
+  !gpuStat
 ) {
   throw new Error('Line of Sight UI failed to mount.')
 }
@@ -118,6 +118,7 @@ let showWalls = false
 let dragStart: Point | null = null
 let previewPoint: Point | null = null
 let isMovingViewer = false
+let dropDepth = 0
 
 const minZoom = 0.35
 const maxZoom = 4
@@ -137,6 +138,18 @@ const nextId = (prefix: string): string =>
 const setStatus = (message: string): void => {
   runtimeStatus.textContent = message
 }
+
+const renderSightValue = (): void => {
+  radiusValue.value = String(sightRadius())
+  radiusValue.textContent = String(sightRadius())
+}
+
+const imageFilesFrom = (files: Iterable<File>): File[] =>
+  Array.from(files).filter(
+    (file) =>
+      file.type.startsWith('image/') ||
+      /\.(avif|bmp|gif|jpe?g|png|webp)$/i.test(file.name)
+  )
 
 const loadImage = async (file: File): Promise<Tile> =>
   new Promise((resolve, reject) => {
@@ -158,6 +171,35 @@ const loadImage = async (file: File): Promise<Tile> =>
     }
     image.src = url
   })
+
+const loadMapFiles = async (files: Iterable<File>): Promise<void> => {
+  const imageFiles = imageFilesFrom(files)
+  if (imageFiles.length === 0) {
+    setStatus('Select or drop one or more image map files.')
+    return
+  }
+
+  setStatus(`Loading ${imageFiles.length} image(s)...`)
+  const loadedTiles: Tile[] = []
+  try {
+    for (const file of imageFiles) {
+      loadedTiles.push(await loadImage(file))
+    }
+  } catch (error) {
+    for (const tile of loadedTiles) URL.revokeObjectURL(tile.url)
+    setStatus(error instanceof Error ? error.message : 'Could not load map images.')
+    return
+  }
+
+  for (const tile of tiles) URL.revokeObjectURL(tile.url)
+  tiles = loadedTiles
+  occluders = []
+  doorStates = {}
+  fileInput.value = ''
+  arrangeTiles()
+  markExplored()
+  setStatus(`Loaded ${tiles.length} image(s). Run analysis, then review walls and doors.`)
+}
 
 const arrangeTiles = (): void => {
   if (tiles.length === 0) {
@@ -720,29 +762,25 @@ const exportSidecar = async (): Promise<void> => {
     )
   }
   const json = `${JSON.stringify(sidecar, null, 2)}\n`
-  exportOutput.value = json
   try {
     await navigator.clipboard.writeText(json)
     setStatus('Exported sidecar JSON and copied it to the clipboard.')
   } catch {
-    setStatus('Exported sidecar JSON.')
+    const blob = new Blob([json], {type: 'application/json'})
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'line-of-sight-sidecar.json'
+    document.body.append(link)
+    link.click()
+    link.remove()
+    window.setTimeout(() => URL.revokeObjectURL(url), 0)
+    setStatus('Exported sidecar JSON as a download.')
   }
 }
 
 fileInput.addEventListener('change', async () => {
-  const files = Array.from(fileInput.files ?? []).filter((file) =>
-    file.type.startsWith('image/')
-  )
-  if (files.length === 0) return
-
-  setStatus(`Loading ${files.length} image(s)...`)
-  for (const tile of tiles) URL.revokeObjectURL(tile.url)
-  tiles = await Promise.all(files.map(loadImage))
-  occluders = []
-  doorStates = {}
-  arrangeTiles()
-  markExplored()
-  setStatus(`Loaded ${tiles.length} image(s). Run analysis, then review walls and doors.`)
+  await loadMapFiles(fileInput.files ?? [])
 })
 
 columnsInput.addEventListener('change', arrangeTiles)
@@ -750,7 +788,8 @@ gridInput.addEventListener('change', () => {
   markExplored()
   render()
 })
-radiusInput.addEventListener('change', () => {
+radiusInput.addEventListener('input', () => {
+  renderSightValue()
   markExplored()
   render()
 })
@@ -770,6 +809,29 @@ canvas.addEventListener('pointerdown', handlePointerDown)
 canvas.addEventListener('pointermove', handlePointerMove)
 canvas.addEventListener('pointerup', handlePointerUp)
 boardViewport.addEventListener('wheel', handleWheel, {passive: false})
+boardViewport.addEventListener('dragenter', (event) => {
+  if (!event.dataTransfer?.types.includes('Files')) return
+  event.preventDefault()
+  dropDepth += 1
+  boardViewport.classList.add('drag-over')
+})
+boardViewport.addEventListener('dragover', (event) => {
+  if (!event.dataTransfer?.types.includes('Files')) return
+  event.preventDefault()
+  event.dataTransfer.dropEffect = 'copy'
+})
+boardViewport.addEventListener('dragleave', (event) => {
+  if (!event.dataTransfer?.types.includes('Files')) return
+  dropDepth = Math.max(0, dropDepth - 1)
+  if (dropDepth === 0) boardViewport.classList.remove('drag-over')
+})
+boardViewport.addEventListener('drop', (event) => {
+  if (!event.dataTransfer) return
+  event.preventDefault()
+  dropDepth = 0
+  boardViewport.classList.remove('drag-over')
+  void loadMapFiles(event.dataTransfer.files)
+})
 canvas.addEventListener('pointercancel', () => {
   dragStart = null
   previewPoint = null
@@ -788,5 +850,6 @@ await initWasm()
 gpuStat.textContent = await detectWebGpu()
 setStatus('Ready. Select local map images to start.')
 renderWallToggle()
+renderSightValue()
 markExplored()
 render()
