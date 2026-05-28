@@ -419,6 +419,59 @@ fn collapse_candidates(candidates: &mut Vec<Candidate>, snap: f64) {
     });
 }
 
+fn dedupe_overlapping_doors(doors: &mut Vec<Candidate>, snap: f64) {
+    let mut kept = Vec::new();
+    for door in doors.drain(..) {
+        if !kept
+            .iter()
+            .any(|existing| candidates_overlap(existing, &door, snap))
+        {
+            kept.push(door);
+        }
+    }
+    *doors = kept;
+}
+
+fn candidates_overlap(first: &Candidate, second: &Candidate, snap: f64) -> bool {
+    if first.horizontal != second.horizontal {
+        return false;
+    }
+
+    let first_line = if first.horizontal { first.y1 } else { first.x1 };
+    let second_line = if second.horizontal {
+        second.y1
+    } else {
+        second.x1
+    };
+    if (first_line - second_line).abs() > snap {
+        return false;
+    }
+
+    let (first_start, first_end) = candidate_interval(first);
+    let (second_start, second_end) = candidate_interval(second);
+    let overlap = first_end.min(second_end) - first_start.max(second_start);
+    if overlap <= 0.0 {
+        return false;
+    }
+
+    let shorter = (first_end - first_start).min(second_end - second_start);
+    overlap >= shorter * 0.6
+}
+
+fn candidate_interval(candidate: &Candidate) -> (f64, f64) {
+    let first = if candidate.horizontal {
+        candidate.x1
+    } else {
+        candidate.y1
+    };
+    let second = if candidate.horizontal {
+        candidate.x2
+    } else {
+        candidate.y2
+    };
+    (first.min(second), first.max(second))
+}
+
 fn detect_door_candidates(
     horizontal: &[Candidate],
     vertical: &[Candidate],
@@ -430,16 +483,17 @@ fn detect_door_candidates(
 ) -> Vec<Candidate> {
     let mut doors = Vec::new();
     doors.extend(detect_axis_gap_door_candidates(
-        horizontal, true, width, height, mask, grid_scale, snap,
+        horizontal, true, grid_scale, snap,
     ));
     doors.extend(detect_axis_gap_door_candidates(
-        vertical, false, width, height, mask, grid_scale, snap,
+        vertical, false, grid_scale, snap,
     ));
     doors.extend(detect_sliding_door_candidates(
         width, height, mask, horizontal, vertical, grid_scale, snap,
     ));
     collapse_candidates(&mut doors, snap);
     doors.sort_by(|a, b| b.length.total_cmp(&a.length));
+    dedupe_overlapping_doors(&mut doors, snap);
     doors.truncate(200);
     doors
 }
@@ -447,9 +501,6 @@ fn detect_door_candidates(
 fn detect_axis_gap_door_candidates(
     candidates: &[Candidate],
     horizontal: bool,
-    width: u32,
-    height: u32,
-    mask: &[bool],
     grid_scale: f64,
     snap: f64,
 ) -> Vec<Candidate> {
@@ -519,19 +570,6 @@ fn detect_axis_gap_door_candidates(
             } else {
                 average(left.x1, right.x1)
             };
-
-            if gap_has_dark_marks(
-                width,
-                height,
-                mask,
-                horizontal,
-                left_end,
-                right_start,
-                line_coord,
-                grid_scale,
-            ) {
-                continue;
-            }
 
             doors.push(if horizontal {
                 Candidate {
@@ -791,50 +829,6 @@ fn scan_short_vertical(
         }
     }
     candidates
-}
-
-fn gap_has_dark_marks(
-    width: u32,
-    height: u32,
-    mask: &[bool],
-    horizontal: bool,
-    start: f64,
-    end: f64,
-    line_coord: f64,
-    grid_scale: f64,
-) -> bool {
-    let inset = (grid_scale * 0.04).max(2.0);
-    let band = (grid_scale * 0.08).max(3.0);
-    let min_axis = start.min(end) + inset;
-    let max_axis = start.max(end) - inset;
-    if max_axis <= min_axis {
-        return false;
-    }
-
-    let mut dark = 0usize;
-    let mut samples = 0usize;
-    if horizontal {
-        for y in bounded_range(line_coord - band, line_coord + band, height) {
-            for x in bounded_range(min_axis, max_axis, width) {
-                samples += 1;
-                if mask[(y * width + x) as usize] {
-                    dark += 1;
-                }
-            }
-        }
-    } else {
-        for y in bounded_range(min_axis, max_axis, height) {
-            for x in bounded_range(line_coord - band, line_coord + band, width) {
-                samples += 1;
-                if mask[(y * width + x) as usize] {
-                    dark += 1;
-                }
-            }
-        }
-    }
-
-    let allowance = ((samples as f64) * 0.02).ceil() as usize + 2;
-    dark > allowance
 }
 
 fn has_sliding_end_caps(
@@ -1386,7 +1380,7 @@ mod tests {
     }
 
     #[test]
-    fn ignores_iris_symbol_side_gaps_as_doors() {
+    fn detects_iris_symbol_as_single_door() {
         let mut mask = empty_mask(320, 220);
         draw_horizontal(&mut mask, 320, 100, 112, 136);
 
@@ -1404,7 +1398,11 @@ mod tests {
             12.5,
         );
 
-        assert!(doors.is_empty());
+        assert_eq!(doors.len(), 1);
+        let door = &doors[0];
+        assert_eq!(door.x1, 100.0);
+        assert_eq!(door.x2, 152.0);
+        assert_eq!(door.y1, 100.0);
     }
 
     #[test]
@@ -1428,8 +1426,8 @@ mod tests {
         assert_eq!(doors.len(), 1);
         let door = &doors[0];
         assert!(door.horizontal);
-        assert!((door.x1 - 62.5).abs() < 0.1);
-        assert_eq!(door.x2, 100.0);
+        assert_eq!(door.x1, 55.0);
+        assert_eq!(door.x2, 105.0);
         assert_eq!(door.y1, 50.0);
     }
 
