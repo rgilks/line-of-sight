@@ -5,6 +5,7 @@ metadata from geomorphic tactical maps. It is intended to support:
 
 - arranging local geomorph images into a board grid;
 - detecting candidate wall segments from raster map art;
+- detecting candidate door openings from short gaps between aligned wall runs;
 - correcting walls and doors by hand;
 - toggling closed doors open to recalculate visibility;
 - tracking areas that are visible now and areas that have been seen before;
@@ -44,4 +45,3 @@ The Worker is configured for `los.tre.systems`.
 
 MIT. This license applies to the source code in this repository, not to any
 locally copied map or counter artwork.
-

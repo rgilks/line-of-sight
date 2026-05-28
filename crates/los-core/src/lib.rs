@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use wasm_bindgen::prelude::*;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -59,6 +59,7 @@ struct AnalysisStats {
     dark_pixels: u32,
     horizontal_candidates: usize,
     vertical_candidates: usize,
+    door_candidates: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -137,12 +138,15 @@ pub fn analyze_image_rgba(
 
     let horizontal_count = horizontal.len();
     let vertical_count = vertical.len();
+    let door_candidates = detect_door_candidates(&horizontal, &vertical, effective_grid, snap);
+    let door_count = door_candidates.len();
+
     let mut candidates = horizontal;
     candidates.extend(vertical);
     candidates.sort_by(|a, b| b.length.total_cmp(&a.length));
     candidates.truncate(500);
 
-    let occluders = candidates
+    let mut occluders = candidates
         .into_iter()
         .enumerate()
         .map(|(index, candidate)| {
@@ -157,6 +161,23 @@ pub fn analyze_image_rgba(
         })
         .collect::<Vec<_>>();
 
+    occluders.extend(
+        door_candidates
+            .into_iter()
+            .enumerate()
+            .map(|(index, candidate)| {
+                let id = format!("door-{:04}", index + 1);
+                Occluder::Door {
+                    id,
+                    x1: candidate.x1.clamp(0.0, width as f64),
+                    y1: candidate.y1.clamp(0.0, height as f64),
+                    x2: candidate.x2.clamp(0.0, width as f64),
+                    y2: candidate.y2.clamp(0.0, height as f64),
+                    open: false,
+                }
+            }),
+    );
+
     let result = AnalysisResult {
         width,
         height,
@@ -166,6 +187,7 @@ pub fn analyze_image_rgba(
             dark_pixels,
             horizontal_candidates: horizontal_count,
             vertical_candidates: vertical_count,
+            door_candidates: door_count,
         },
     };
 
@@ -389,6 +411,136 @@ fn collapse_candidates(candidates: &mut Vec<Candidate>, snap: f64) {
     });
 }
 
+fn detect_door_candidates(
+    horizontal: &[Candidate],
+    vertical: &[Candidate],
+    grid_scale: f64,
+    snap: f64,
+) -> Vec<Candidate> {
+    let mut doors = Vec::new();
+    doors.extend(detect_axis_door_candidates(
+        horizontal, true, grid_scale, snap,
+    ));
+    doors.extend(detect_axis_door_candidates(
+        vertical, false, grid_scale, snap,
+    ));
+    collapse_candidates(&mut doors, snap);
+    doors.sort_by(|a, b| b.length.total_cmp(&a.length));
+    doors.truncate(200);
+    doors
+}
+
+fn detect_axis_door_candidates(
+    candidates: &[Candidate],
+    horizontal: bool,
+    grid_scale: f64,
+    snap: f64,
+) -> Vec<Candidate> {
+    let min_gap = (grid_scale * 0.18).max(6.0);
+    let max_gap = (grid_scale * 1.18).max(min_gap + 1.0);
+    let min_support = (grid_scale * 0.45).max(22.0);
+    let grid_tolerance = (grid_scale * 0.14).max(snap);
+    let mut by_line: BTreeMap<i64, Vec<&Candidate>> = BTreeMap::new();
+
+    for candidate in candidates {
+        if candidate.horizontal != horizontal || candidate.length < min_support {
+            continue;
+        }
+
+        let line_coord = if horizontal {
+            candidate.y1
+        } else {
+            candidate.x1
+        };
+        if !near_grid_line(line_coord, grid_scale, grid_tolerance) {
+            continue;
+        }
+
+        by_line
+            .entry(quantize(line_coord, snap))
+            .or_default()
+            .push(candidate);
+    }
+
+    let mut doors = Vec::new();
+    for line_candidates in by_line.values_mut() {
+        line_candidates.sort_by(|a, b| {
+            let a_start = if horizontal {
+                a.x1.min(a.x2)
+            } else {
+                a.y1.min(a.y2)
+            };
+            let b_start = if horizontal {
+                b.x1.min(b.x2)
+            } else {
+                b.y1.min(b.y2)
+            };
+            a_start.total_cmp(&b_start)
+        });
+
+        for pair in line_candidates.windows(2) {
+            let left = pair[0];
+            let right = pair[1];
+            let left_end = if horizontal {
+                left.x1.max(left.x2)
+            } else {
+                left.y1.max(left.y2)
+            };
+            let right_start = if horizontal {
+                right.x1.min(right.x2)
+            } else {
+                right.y1.min(right.y2)
+            };
+            let gap = right_start - left_end;
+
+            if gap < min_gap || gap > max_gap {
+                continue;
+            }
+
+            let line_coord = if horizontal {
+                average(left.y1, right.y1)
+            } else {
+                average(left.x1, right.x1)
+            };
+
+            doors.push(if horizontal {
+                Candidate {
+                    horizontal: true,
+                    x1: left_end,
+                    y1: line_coord,
+                    x2: right_start,
+                    y2: line_coord,
+                    length: gap,
+                }
+            } else {
+                Candidate {
+                    horizontal: false,
+                    x1: line_coord,
+                    y1: left_end,
+                    x2: line_coord,
+                    y2: right_start,
+                    length: gap,
+                }
+            });
+        }
+    }
+
+    doors
+}
+
+fn near_grid_line(value: f64, grid_scale: f64, tolerance: f64) -> bool {
+    if !value.is_finite() || !grid_scale.is_finite() || grid_scale <= 0.0 {
+        return true;
+    }
+
+    let offset = value.rem_euclid(grid_scale);
+    offset.min(grid_scale - offset) <= tolerance
+}
+
+fn average(first: f64, second: f64) -> f64 {
+    (first + second) / 2.0
+}
+
 fn snap_value(value: f64, snap: f64) -> f64 {
     (value / snap).round() * snap
 }
@@ -594,6 +746,28 @@ mod tests {
         HashMap::from([("door-1".to_string(), DoorState::Boolean(open))])
     }
 
+    fn horizontal_candidate(x1: f64, x2: f64, y: f64) -> Candidate {
+        Candidate {
+            horizontal: true,
+            x1,
+            y1: y,
+            x2,
+            y2: y,
+            length: (x2 - x1).abs(),
+        }
+    }
+
+    fn vertical_candidate(y1: f64, y2: f64, x: f64) -> Candidate {
+        Candidate {
+            horizontal: false,
+            x1: x,
+            y1,
+            x2: x,
+            y2,
+            length: (y2 - y1).abs(),
+        }
+    }
+
     #[test]
     fn wall_blocks_line_of_sight() {
         let occluders = vec![Occluder::Wall {
@@ -648,5 +822,60 @@ mod tests {
             &occluders,
             &door_states(false)
         ));
+    }
+
+    #[test]
+    fn detects_horizontal_door_gap_between_wall_runs() {
+        let doors = detect_door_candidates(
+            &[
+                horizontal_candidate(0.0, 125.0, 100.0),
+                horizontal_candidate(150.0, 300.0, 100.0),
+            ],
+            &[],
+            50.0,
+            12.5,
+        );
+
+        assert_eq!(doors.len(), 1);
+        let door = &doors[0];
+        assert!(door.horizontal);
+        assert_eq!(door.x1, 125.0);
+        assert_eq!(door.x2, 150.0);
+        assert_eq!(door.y1, 100.0);
+    }
+
+    #[test]
+    fn detects_vertical_door_gap_between_wall_runs() {
+        let doors = detect_door_candidates(
+            &[],
+            &[
+                vertical_candidate(0.0, 125.0, 200.0),
+                vertical_candidate(175.0, 300.0, 200.0),
+            ],
+            50.0,
+            12.5,
+        );
+
+        assert_eq!(doors.len(), 1);
+        let door = &doors[0];
+        assert!(!door.horizontal);
+        assert_eq!(door.x1, 200.0);
+        assert_eq!(door.y1, 125.0);
+        assert_eq!(door.y2, 175.0);
+    }
+
+    #[test]
+    fn ignores_large_corridor_gaps_as_doors() {
+        let doors = detect_door_candidates(
+            &[
+                horizontal_candidate(0.0, 100.0, 100.0),
+                horizontal_candidate(220.0, 320.0, 100.0),
+            ],
+            &[],
+            50.0,
+            12.5,
+        );
+
+        assert!(doors.is_empty());
     }
 }

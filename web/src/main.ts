@@ -57,6 +57,7 @@ type AnalysisResult = {
     dark_pixels: number
     horizontal_candidates: number
     vertical_candidates: number
+    door_candidates: number
   }
 }
 
