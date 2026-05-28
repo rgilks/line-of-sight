@@ -389,8 +389,8 @@ const render = (): void => {
   }
 
   drawGrid()
-  drawFog()
   drawOccluders()
+  drawFog()
   drawPreview()
   drawViewer()
   renderStats()
@@ -421,7 +421,7 @@ const drawGrid = (): void => {
 const drawFog = (): void => {
   const polygon = getVisiblePolygon()
   ctx.save()
-  ctx.fillStyle = 'rgba(220, 220, 220, 0.68)'
+  ctx.fillStyle = '#d8d8d8'
   ctx.beginPath()
   ctx.rect(0, 0, boardWidth, boardHeight)
   if (polygon.length > 2) {
