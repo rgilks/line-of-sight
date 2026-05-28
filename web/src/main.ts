@@ -421,15 +421,19 @@ const drawGrid = (): void => {
 const drawFog = (): void => {
   const polygon = getVisiblePolygon()
   ctx.save()
-  ctx.fillStyle = 'rgba(152, 152, 152, 0.58)'
-  ctx.fillRect(0, 0, boardWidth, boardHeight)
-  ctx.globalCompositeOperation = 'destination-out'
-  ctx.globalAlpha = 0.32
-  ctx.drawImage(exploredCanvas, 0, 0)
-  ctx.globalAlpha = 1
-  ctx.fillStyle = '#fff'
-  drawPolygonPath(ctx, polygon)
-  ctx.fill()
+  ctx.fillStyle = 'rgba(220, 220, 220, 0.68)'
+  ctx.beginPath()
+  ctx.rect(0, 0, boardWidth, boardHeight)
+  if (polygon.length > 2) {
+    ctx.moveTo(polygon[0].x, polygon[0].y)
+    for (const point of polygon.slice(1)) {
+      ctx.lineTo(point.x, point.y)
+    }
+    ctx.closePath()
+    ctx.fill('evenodd')
+  } else {
+    ctx.fill()
+  }
   ctx.restore()
 }
 
@@ -440,42 +444,94 @@ const drawOccluders = (): void => {
     const isDoor = occluder.type === 'door'
     if (!isDoor && !showWalls) continue
 
-    const open = isDoor ? isDoorOpen(occluder) : false
-    ctx.strokeStyle = isDoor
-      ? open
-        ? '#24a148'
-        : '#f97316'
-      : '#d72638'
-    ctx.lineWidth = isDoor ? 7 : 4
-    ctx.setLineDash(isDoor && open ? [12, 10] : [])
+    if (isDoor) {
+      drawDoorStateMarker(occluder, isDoorOpen(occluder))
+      continue
+    }
+
+    ctx.strokeStyle = '#d72638'
+    ctx.lineWidth = 4
+    ctx.setLineDash([])
     ctx.beginPath()
     ctx.moveTo(occluder.x1, occluder.y1)
     ctx.lineTo(occluder.x2, occluder.y2)
     ctx.stroke()
-
-    if (isDoor) drawDoorStateMarker(occluder, open)
   }
   ctx.restore()
 }
 
 const drawDoorStateMarker = (door: DoorOccluder, open: boolean): void => {
-  const x = (door.x1 + door.x2) / 2
-  const y = (door.y1 + door.y2) / 2
+  const dx = door.x2 - door.x1
+  const dy = door.y2 - door.y1
+  const length = Math.max(1, Math.hypot(dx, dy))
+  const ux = dx / length
+  const uy = dy / length
+  const px = -uy
+  const py = ux
+  const cap = Math.min(8, Math.max(5, length * 0.22))
+
+  const strokeSegment = (
+    x1: number,
+    y1: number,
+    x2: number,
+    y2: number,
+    width: number,
+    color: string
+  ): void => {
+    ctx.strokeStyle = color
+    ctx.lineWidth = width
+    ctx.beginPath()
+    ctx.moveTo(x1, y1)
+    ctx.lineTo(x2, y2)
+    ctx.stroke()
+  }
+
   ctx.save()
+  ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
   ctx.setLineDash([])
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.82)'
-  ctx.strokeStyle = open ? '#24a148' : '#f97316'
+
+  if (!open) {
+    strokeSegment(door.x1, door.y1, door.x2, door.y2, 9, 'rgba(0, 0, 0, 0.72)')
+    strokeSegment(door.x1, door.y1, door.x2, door.y2, 5, '#f97316')
+    strokeSegment(
+      door.x1 - px * cap,
+      door.y1 - py * cap,
+      door.x1 + px * cap,
+      door.y1 + py * cap,
+      4,
+      '#f97316'
+    )
+    strokeSegment(
+      door.x2 - px * cap,
+      door.y2 - py * cap,
+      door.x2 + px * cap,
+      door.y2 + py * cap,
+      4,
+      '#f97316'
+    )
+    ctx.restore()
+    return
+  }
+
+  ctx.setLineDash([3, 8])
+  strokeSegment(door.x1, door.y1, door.x2, door.y2, 7, 'rgba(0, 0, 0, 0.62)')
+  strokeSegment(door.x1, door.y1, door.x2, door.y2, 3, '#24a148')
+  ctx.setLineDash([])
+
+  const swingRadius = Math.min(28, Math.max(12, length * 0.72))
+  const closedAngle = Math.atan2(uy, ux)
+  const openAngle = closedAngle + Math.PI / 2
+  const leafX = door.x1 + Math.cos(openAngle) * swingRadius
+  const leafY = door.y1 + Math.sin(openAngle) * swingRadius
+
+  strokeSegment(door.x1, door.y1, leafX, leafY, 6, 'rgba(0, 0, 0, 0.62)')
+  strokeSegment(door.x1, door.y1, leafX, leafY, 3, '#24a148')
+  ctx.strokeStyle = '#24a148'
   ctx.lineWidth = 2
   ctx.beginPath()
-  ctx.roundRect(x - 9, y - 9, 18, 18, 4)
-  ctx.fill()
+  ctx.arc(door.x1, door.y1, swingRadius, closedAngle, openAngle)
   ctx.stroke()
-  ctx.fillStyle = open ? '#39ff14' : '#ffb020'
-  ctx.font =
-    'bold 11px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace'
-  ctx.textAlign = 'center'
-  ctx.textBaseline = 'middle'
-  ctx.fillText(open ? 'O' : 'C', x, y + 0.5)
   ctx.restore()
 }
 
