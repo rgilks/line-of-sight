@@ -182,12 +182,13 @@ const arrangeTiles = (): void => {
   const colCount = columns()
   const cellWidth = Math.max(...tiles.map((tile) => tile.width))
   const cellHeight = Math.max(...tiles.map((tile) => tile.height))
+  const usedColumns = Math.min(colCount, tiles.length)
   placements = tiles.map((tile, index) => ({
     tile,
     x: (index % colCount) * cellWidth,
     y: Math.floor(index / colCount) * cellHeight
   }))
-  boardWidth = colCount * cellWidth
+  boardWidth = usedColumns * cellWidth
   boardHeight = Math.ceil(tiles.length / colCount) * cellHeight
   viewer = {
     x: Math.min(viewer.x, boardWidth),
