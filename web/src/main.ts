@@ -73,7 +73,6 @@ const resetFogButton = document.querySelector<HTMLButtonElement>('#resetFogButto
 const exportButton = document.querySelector<HTMLButtonElement>('#exportButton')
 const runtimeStatus = document.querySelector<HTMLElement>('#runtimeStatus')
 const tileList = document.querySelector<HTMLElement>('#tileList')
-const doorList = document.querySelector<HTMLElement>('#doorList')
 const boardStat = document.querySelector<HTMLElement>('#boardStat')
 const occluderStat = document.querySelector<HTMLElement>('#occluderStat')
 const doorStat = document.querySelector<HTMLElement>('#doorStat')
@@ -94,7 +93,6 @@ if (
   !exportButton ||
   !runtimeStatus ||
   !tileList ||
-  !doorList ||
   !boardStat ||
   !occluderStat ||
   !doorStat ||
@@ -226,11 +224,6 @@ const doorOccluders = (): DoorOccluder[] =>
 const isDoorOpen = (door: DoorOccluder): boolean =>
   doorStates[door.id]?.open ?? door.open
 
-const shortDoorName = (door: DoorOccluder, index: number): string => {
-  const id = door.id.includes(':') ? door.id.split(':').at(-1) : door.id
-  return id && id.length <= 18 ? id : `door-${index + 1}`
-}
-
 const setDoorOpen = (doorId: string, open: boolean): void => {
   const door = doorOccluders().find((candidate) => candidate.id === doorId)
   if (!door) return
@@ -242,44 +235,6 @@ const setDoorOpen = (doorId: string, open: boolean): void => {
 const renderWallToggle = (): void => {
   showWallsButton.textContent = showWalls ? 'Hide walls' : 'Show walls'
   showWallsButton.setAttribute('aria-pressed', String(showWalls))
-}
-
-const renderDoorList = (): void => {
-  const doors = doorOccluders()
-
-  if (doors.length === 0) {
-    const empty = document.createElement('p')
-    empty.className = 'empty-state'
-    empty.textContent = 'No doors detected'
-    doorList.replaceChildren(empty)
-    return
-  }
-
-  doorList.replaceChildren(
-    ...doors.map((door, index) => {
-      const open = isDoorOpen(door)
-      const item = document.createElement('div')
-      item.className = `door-item ${open ? 'door-item-open' : 'door-item-closed'}`
-
-      const name = document.createElement('span')
-      name.className = 'door-name'
-      name.textContent = shortDoorName(door, index)
-      name.title = door.id
-
-      const state = document.createElement('span')
-      state.className = 'door-state'
-      state.textContent = open ? 'OPEN' : 'CLOSED'
-
-      const toggle = document.createElement('button')
-      toggle.className = 'door-toggle'
-      toggle.type = 'button'
-      toggle.textContent = open ? 'Close' : 'Open'
-      toggle.addEventListener('click', () => setDoorOpen(door.id, !isDoorOpen(door)))
-
-      item.append(name, state, toggle)
-      return item
-    })
-  )
 }
 
 const analyzeTiles = async (): Promise<void> => {
@@ -380,7 +335,6 @@ const render = (): void => {
 
   if (!hasMap()) {
     renderStats()
-    renderDoorList()
     return
   }
 
@@ -394,7 +348,6 @@ const render = (): void => {
   drawPreview()
   drawViewer()
   renderStats()
-  renderDoorList()
 }
 
 const drawGrid = (): void => {
