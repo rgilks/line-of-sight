@@ -131,6 +131,7 @@ if (!exploredCtx) throw new Error('Offscreen canvas is required.')
 const gridScale = (): number => Math.max(10, Number(gridInput.value) || 50)
 const sightRadius = (): number => Math.max(50, Number(radiusInput.value) || 700)
 const columns = (): number => Math.max(1, Number(columnsInput.value) || 1)
+const hasMap = (): boolean => placements.length > 0
 
 const nextId = (prefix: string): string =>
   `${prefix}-${crypto.randomUUID().slice(0, 8)}`
@@ -362,6 +363,8 @@ const getVisiblePolygon = (): Point[] =>
   ) as Point[]
 
 const markExplored = (): void => {
+  if (!hasMap()) return
+
   const polygon = getVisiblePolygon()
   exploredCtx.save()
   exploredCtx.fillStyle = '#fff'
@@ -372,8 +375,14 @@ const markExplored = (): void => {
 
 const render = (): void => {
   ctx.clearRect(0, 0, boardWidth, boardHeight)
-  ctx.fillStyle = '#151719'
+  ctx.fillStyle = hasMap() ? '#151719' : '#050505'
   ctx.fillRect(0, 0, boardWidth, boardHeight)
+
+  if (!hasMap()) {
+    renderStats()
+    renderDoorList()
+    return
+  }
 
   for (const placement of placements) {
     ctx.drawImage(placement.tile.image, placement.x, placement.y)
@@ -590,6 +599,8 @@ const nearestOccluder = (
 }
 
 const handlePointerDown = (event: PointerEvent): void => {
+  if (!hasMap()) return
+
   const rawPoint = positionFromEvent(event)
   const point = snapPoint(rawPoint, event)
 
