@@ -1,0 +1,22 @@
+{
+  "name": "line-of-sight",
+  "version": "0.1.0",
+  "private": false,
+  "description": "A Rust/WASM and WebGPU-ready lab for map line-of-sight extraction and review.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "npm run build:wasm && npm run build:web",
+    "build:wasm": "wasm-pack build crates/los-core --target web --out-dir pkg",
+    "build:web": "vite build",
+    "check": "npm run build && npm run test",
+    "deploy": "npm run build && wrangler deploy",
+    "dev": "npm run build:wasm && vite --host 127.0.0.1",
+    "test": "npm run build:wasm && cargo test --workspace && tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vite": "^7.2.7",
+    "wrangler": "^4.92.0"
+  }
+}

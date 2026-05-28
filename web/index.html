@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Line of Sight</title>
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div>
+          <h1>Line of Sight</h1>
+          <p id="runtimeStatus">Loading Rust/WASM core...</p>
+        </div>
+        <div class="toolbar">
+          <label class="file-button">
+            <input id="fileInput" type="file" accept="image/*" multiple />
+            Select maps
+          </label>
+          <label>
+            Columns
+            <input id="columnsInput" type="number" min="1" max="12" value="2" />
+          </label>
+          <label>
+            Grid
+            <input id="gridInput" type="number" min="10" max="200" value="50" />
+          </label>
+          <label>
+            Sight
+            <input id="radiusInput" type="number" min="50" max="5000" value="700" />
+          </label>
+          <button id="analyzeButton" type="button">Analyze</button>
+          <button id="resetFogButton" type="button">Reset fog</button>
+          <button id="exportButton" type="button">Export JSON</button>
+        </div>
+      </header>
+
+      <section class="workspace">
+        <aside class="sidebar">
+          <div class="panel">
+            <h2>Tools</h2>
+            <div class="tool-grid" role="group" aria-label="Map editing tools">
+              <button class="tool-button active" type="button" data-tool="viewer">Viewer</button>
+              <button class="tool-button" type="button" data-tool="wall">Wall</button>
+              <button class="tool-button" type="button" data-tool="door">Door</button>
+              <button class="tool-button" type="button" data-tool="erase">Erase</button>
+            </div>
+          </div>
+
+          <div class="panel">
+            <h2>Tiles</h2>
+            <div id="tileList" class="tile-list"></div>
+          </div>
+
+          <div class="panel">
+            <h2>State</h2>
+            <dl class="stats">
+              <div>
+                <dt>Board</dt>
+                <dd id="boardStat">0 x 0</dd>
+              </div>
+              <div>
+                <dt>Occluders</dt>
+                <dd id="occluderStat">0</dd>
+              </div>
+              <div>
+                <dt>Doors</dt>
+                <dd id="doorStat">0</dd>
+              </div>
+              <div>
+                <dt>GPU</dt>
+                <dd id="gpuStat">Checking...</dd>
+              </div>
+            </dl>
+          </div>
+        </aside>
+
+        <section class="board-panel">
+          <canvas id="boardCanvas" width="1000" height="1000"></canvas>
+          <textarea
+            id="exportOutput"
+            spellcheck="false"
+            placeholder="Exported LOS sidecar JSON appears here."
+          ></textarea>
+        </section>
+      </section>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
+
