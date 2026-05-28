@@ -3,15 +3,56 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#000000" />
     <title>Line of Sight</title>
+    <meta
+      name="description"
+      content="A Total Reality Engineering tool for extracting and reviewing tactical map line-of-sight data."
+    />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap"
+      rel="stylesheet"
+    />
   </head>
   <body>
     <main class="app-shell">
       <header class="topbar">
-        <div>
-          <h1>Line of Sight</h1>
-          <p id="runtimeStatus">Loading Rust/WASM core...</p>
-        </div>
+        <a class="brand" href="https://tre.systems/" aria-label="Total Reality Engineering">
+          <svg
+            class="brand-logo"
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 512 512"
+            aria-hidden="true"
+          >
+            <g>
+              <rect
+                x="214"
+                y="288"
+                width="80"
+                height="206"
+                fill="#19C15E"
+                transform="rotate(22, 262, 295)"
+              />
+              <path
+                d="M256 36 L72 476 L440 476 Z"
+                fill="none"
+                stroke="#F5F5F5"
+                stroke-width="30"
+                stroke-linejoin="round"
+                stroke-linecap="round"
+              />
+              <circle cx="256" cy="288" r="40" fill="#F5F5F5" />
+            </g>
+          </svg>
+          <div class="brand-copy">
+            <span>Total Reality Engineering</span>
+            <h1>Line of Sight</h1>
+            <p id="runtimeStatus">Loading Rust/WASM core...</p>
+          </div>
+        </a>
         <div class="toolbar">
           <label class="file-button">
             <input id="fileInput" type="file" accept="image/*" multiple />
@@ -88,4 +129,3 @@
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
-
