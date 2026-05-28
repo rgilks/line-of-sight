@@ -70,6 +70,7 @@
             Sight
             <input id="radiusInput" type="number" min="50" max="5000" value="700" />
           </label>
+          <button id="showWallsButton" type="button" aria-pressed="false">Show walls</button>
           <button id="analyzeButton" type="button">Analyze</button>
           <button id="resetFogButton" type="button">Reset fog</button>
           <button id="exportButton" type="button">Export JSON</button>
@@ -122,7 +123,9 @@
         </aside>
 
         <section class="board-panel">
-          <canvas id="boardCanvas" width="1000" height="1000"></canvas>
+          <div id="boardViewport" class="board-viewport">
+            <canvas id="boardCanvas" width="1000" height="1000"></canvas>
+          </div>
           <textarea
             id="exportOutput"
             spellcheck="false"

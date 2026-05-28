@@ -62,10 +62,12 @@ type AnalysisResult = {
 }
 
 const canvas = document.querySelector<HTMLCanvasElement>('#boardCanvas')
+const boardViewport = document.querySelector<HTMLElement>('#boardViewport')
 const fileInput = document.querySelector<HTMLInputElement>('#fileInput')
 const columnsInput = document.querySelector<HTMLInputElement>('#columnsInput')
 const gridInput = document.querySelector<HTMLInputElement>('#gridInput')
 const radiusInput = document.querySelector<HTMLInputElement>('#radiusInput')
+const showWallsButton = document.querySelector<HTMLButtonElement>('#showWallsButton')
 const analyzeButton = document.querySelector<HTMLButtonElement>('#analyzeButton')
 const resetFogButton = document.querySelector<HTMLButtonElement>('#resetFogButton')
 const exportButton = document.querySelector<HTMLButtonElement>('#exportButton')
@@ -81,10 +83,12 @@ const toolButtons = document.querySelectorAll<HTMLButtonElement>('.tool-button')
 
 if (
   !canvas ||
+  !boardViewport ||
   !fileInput ||
   !columnsInput ||
   !gridInput ||
   !radiusInput ||
+  !showWallsButton ||
   !analyzeButton ||
   !resetFogButton ||
   !exportButton ||
@@ -111,9 +115,14 @@ let doorStates: Record<string, {open: boolean}> = {}
 let viewer: Point = {x: 250, y: 250}
 let boardWidth = 1000
 let boardHeight = 1000
+let zoom = 1
+let showWalls = false
 let dragStart: Point | null = null
 let previewPoint: Point | null = null
 let isMovingViewer = false
+
+const minZoom = 0.35
+const maxZoom = 4
 
 const exploredCanvas = document.createElement('canvas')
 const exploredCtx = exploredCanvas.getContext('2d')
@@ -186,6 +195,12 @@ const resizeBoard = (): void => {
   exploredCanvas.width = boardWidth
   exploredCanvas.height = boardHeight
   exploredCtx.clearRect(0, 0, boardWidth, boardHeight)
+  updateCanvasDisplaySize()
+}
+
+const updateCanvasDisplaySize = (): void => {
+  canvas.style.width = `${boardWidth * zoom}px`
+  canvas.style.height = `${boardHeight * zoom}px`
 }
 
 const renderTileList = (): void => {
@@ -221,6 +236,11 @@ const setDoorOpen = (doorId: string, open: boolean): void => {
   doorStates[door.id] = {open}
   markExplored()
   render()
+}
+
+const renderWallToggle = (): void => {
+  showWallsButton.textContent = showWalls ? 'Hide walls' : 'Show walls'
+  showWallsButton.setAttribute('aria-pressed', String(showWalls))
 }
 
 const renderDoorList = (): void => {
@@ -371,7 +391,8 @@ const render = (): void => {
 const drawGrid = (): void => {
   const scale = gridScale()
   ctx.save()
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.18)'
+  ctx.strokeStyle =
+    placements.length === 0 ? 'rgba(255, 255, 255, 0.14)' : 'rgba(255, 255, 255, 0.055)'
   ctx.lineWidth = 1
   for (let x = 0; x <= boardWidth; x += scale) {
     ctx.beginPath()
@@ -391,10 +412,10 @@ const drawGrid = (): void => {
 const drawFog = (): void => {
   const polygon = getVisiblePolygon()
   ctx.save()
-  ctx.fillStyle = 'rgba(7, 11, 16, 0.82)'
+  ctx.fillStyle = 'rgba(152, 152, 152, 0.58)'
   ctx.fillRect(0, 0, boardWidth, boardHeight)
   ctx.globalCompositeOperation = 'destination-out'
-  ctx.globalAlpha = 0.55
+  ctx.globalAlpha = 0.32
   ctx.drawImage(exploredCanvas, 0, 0)
   ctx.globalAlpha = 1
   ctx.fillStyle = '#fff'
@@ -408,6 +429,8 @@ const drawOccluders = (): void => {
   ctx.lineCap = 'round'
   for (const occluder of occluders) {
     const isDoor = occluder.type === 'door'
+    if (!isDoor && !showWalls) continue
+
     const open = isDoor ? isDoorOpen(occluder) : false
     ctx.strokeStyle = isDoor
       ? open
@@ -494,6 +517,35 @@ const positionFromEvent = (event: PointerEvent): Point => {
   }
 }
 
+const setZoom = (
+  nextZoom: number,
+  anchor?: {boardX: number; boardY: number; viewportX: number; viewportY: number}
+): void => {
+  zoom = Math.min(maxZoom, Math.max(minZoom, nextZoom))
+  updateCanvasDisplaySize()
+
+  if (anchor) {
+    boardViewport.scrollLeft = anchor.boardX * zoom - anchor.viewportX
+    boardViewport.scrollTop = anchor.boardY * zoom - anchor.viewportY
+  }
+}
+
+const handleWheel = (event: WheelEvent): void => {
+  event.preventDefault()
+  const rect = canvas.getBoundingClientRect()
+  const viewportRect = boardViewport.getBoundingClientRect()
+  const boardX = ((event.clientX - rect.left) / rect.width) * boardWidth
+  const boardY = ((event.clientY - rect.top) / rect.height) * boardHeight
+  const factor = event.deltaY < 0 ? 1.12 : 1 / 1.12
+
+  setZoom(zoom * factor, {
+    boardX,
+    boardY,
+    viewportX: event.clientX - viewportRect.left,
+    viewportY: event.clientY - viewportRect.top
+  })
+}
+
 const snapPoint = (point: Point, event: PointerEvent): Point => {
   if (event.shiftKey) return point
   const scale = gridScale() / 4
@@ -519,9 +571,13 @@ const distanceToSegment = (point: Point, segment: Occluder): number => {
   return Math.hypot(point.x - (ax + t * dx), point.y - (ay + t * dy))
 }
 
-const nearestOccluder = (point: Point, filter?: (occluder: Occluder) => boolean): Occluder | null => {
+const nearestOccluder = (
+  point: Point,
+  filter?: (occluder: Occluder) => boolean,
+  screenRadius = 14
+): Occluder | null => {
   let nearest: Occluder | null = null
-  let nearestDistance = 14
+  let nearestDistance = screenRadius / zoom
   for (const occluder of occluders) {
     if (filter && !filter(occluder)) continue
     const distance = distanceToSegment(point, occluder)
@@ -534,13 +590,18 @@ const nearestOccluder = (point: Point, filter?: (occluder: Occluder) => boolean)
 }
 
 const handlePointerDown = (event: PointerEvent): void => {
-  const point = snapPoint(positionFromEvent(event), event)
-  if (tool === 'viewer') {
-    const door = nearestOccluder(point, (occluder) => occluder.type === 'door')
+  const rawPoint = positionFromEvent(event)
+  const point = snapPoint(rawPoint, event)
+
+  if (tool !== 'erase') {
+    const door = nearestOccluder(rawPoint, (occluder) => occluder.type === 'door', 18)
     if (door && door.type === 'door') {
       setDoorOpen(door.id, !isDoorOpen(door))
       return
     }
+  }
+
+  if (tool === 'viewer') {
     viewer = point
     isMovingViewer = true
     canvas.setPointerCapture(event.pointerId)
@@ -550,7 +611,7 @@ const handlePointerDown = (event: PointerEvent): void => {
   }
 
   if (tool === 'erase') {
-    const target = nearestOccluder(point)
+    const target = nearestOccluder(rawPoint)
     if (target) {
       occluders = occluders.filter((occluder) => occluder.id !== target.id)
       delete doorStates[target.id]
@@ -673,6 +734,11 @@ radiusInput.addEventListener('change', () => {
   markExplored()
   render()
 })
+showWallsButton.addEventListener('click', () => {
+  showWalls = !showWalls
+  renderWallToggle()
+  render()
+})
 analyzeButton.addEventListener('click', () => void analyzeTiles())
 resetFogButton.addEventListener('click', () => {
   exploredCtx.clearRect(0, 0, boardWidth, boardHeight)
@@ -683,6 +749,7 @@ exportButton.addEventListener('click', () => void exportSidecar())
 canvas.addEventListener('pointerdown', handlePointerDown)
 canvas.addEventListener('pointermove', handlePointerMove)
 canvas.addEventListener('pointerup', handlePointerUp)
+boardViewport.addEventListener('wheel', handleWheel, {passive: false})
 canvas.addEventListener('pointercancel', () => {
   dragStart = null
   previewPoint = null
@@ -700,5 +767,6 @@ for (const button of toolButtons) {
 await initWasm()
 gpuStat.textContent = await detectWebGpu()
 setStatus('Ready. Select local map images to start.')
+renderWallToggle()
 markExplored()
 render()
