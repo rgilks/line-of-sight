@@ -138,7 +138,15 @@ pub fn analyze_image_rgba(
 
     let horizontal_count = horizontal.len();
     let vertical_count = vertical.len();
-    let door_candidates = detect_door_candidates(&horizontal, &vertical, effective_grid, snap);
+    let door_candidates = detect_door_candidates(
+        &horizontal,
+        &vertical,
+        width,
+        height,
+        &mask,
+        effective_grid,
+        snap,
+    );
     let door_count = door_candidates.len();
 
     let mut candidates = horizontal;
@@ -414,15 +422,21 @@ fn collapse_candidates(candidates: &mut Vec<Candidate>, snap: f64) {
 fn detect_door_candidates(
     horizontal: &[Candidate],
     vertical: &[Candidate],
+    width: u32,
+    height: u32,
+    mask: &[bool],
     grid_scale: f64,
     snap: f64,
 ) -> Vec<Candidate> {
     let mut doors = Vec::new();
-    doors.extend(detect_axis_door_candidates(
-        horizontal, true, grid_scale, snap,
+    doors.extend(detect_axis_gap_door_candidates(
+        horizontal, true, width, height, mask, grid_scale, snap,
     ));
-    doors.extend(detect_axis_door_candidates(
-        vertical, false, grid_scale, snap,
+    doors.extend(detect_axis_gap_door_candidates(
+        vertical, false, width, height, mask, grid_scale, snap,
+    ));
+    doors.extend(detect_sliding_door_candidates(
+        width, height, mask, horizontal, vertical, grid_scale, snap,
     ));
     collapse_candidates(&mut doors, snap);
     doors.sort_by(|a, b| b.length.total_cmp(&a.length));
@@ -430,15 +444,19 @@ fn detect_door_candidates(
     doors
 }
 
-fn detect_axis_door_candidates(
+fn detect_axis_gap_door_candidates(
     candidates: &[Candidate],
     horizontal: bool,
+    width: u32,
+    height: u32,
+    mask: &[bool],
     grid_scale: f64,
     snap: f64,
 ) -> Vec<Candidate> {
-    let min_gap = (grid_scale * 0.12).max(4.0);
-    let max_gap = (grid_scale * 1.45).max(min_gap + 1.0);
-    let min_support = (grid_scale * 0.28).max(12.0);
+    let min_gap = (grid_scale * 0.3).max(14.0);
+    let max_gap = (grid_scale * 1.15).max(min_gap + 1.0);
+    let min_support = (grid_scale * 0.7).max(32.0);
+    let grid_tolerance = (grid_scale * 0.18).max(snap);
     let mut by_line: BTreeMap<i64, Vec<&Candidate>> = BTreeMap::new();
 
     for candidate in candidates {
@@ -451,6 +469,10 @@ fn detect_axis_door_candidates(
         } else {
             candidate.x1
         };
+        if !near_grid_line(line_coord, grid_scale, grid_tolerance) {
+            continue;
+        }
+
         by_line
             .entry(quantize(line_coord, snap))
             .or_default()
@@ -498,6 +520,19 @@ fn detect_axis_door_candidates(
                 average(left.x1, right.x1)
             };
 
+            if gap_has_dark_marks(
+                width,
+                height,
+                mask,
+                horizontal,
+                left_end,
+                right_start,
+                line_coord,
+                grid_scale,
+            ) {
+                continue;
+            }
+
             doors.push(if horizontal {
                 Candidate {
                     horizontal: true,
@@ -521,6 +556,425 @@ fn detect_axis_door_candidates(
     }
 
     doors
+}
+
+fn detect_sliding_door_candidates(
+    width: u32,
+    height: u32,
+    mask: &[bool],
+    horizontal_walls: &[Candidate],
+    vertical_walls: &[Candidate],
+    grid_scale: f64,
+    snap: f64,
+) -> Vec<Candidate> {
+    let min_length = (grid_scale * 0.28).max(12.0);
+    let max_length = (grid_scale * 1.25).max(min_length + 1.0);
+    let horizontal_runs = scan_short_horizontal(width, height, mask, min_length, max_length);
+    let vertical_runs = scan_short_vertical(width, height, mask, min_length, max_length);
+    let mut doors = Vec::new();
+
+    doors.extend(detect_horizontal_sliding_doors(
+        &horizontal_runs,
+        width,
+        height,
+        mask,
+        horizontal_walls,
+        grid_scale,
+        snap,
+    ));
+    doors.extend(detect_vertical_sliding_doors(
+        &vertical_runs,
+        width,
+        height,
+        mask,
+        vertical_walls,
+        grid_scale,
+        snap,
+    ));
+    collapse_candidates(&mut doors, snap);
+    doors
+}
+
+fn detect_horizontal_sliding_doors(
+    runs: &[Candidate],
+    width: u32,
+    height: u32,
+    mask: &[bool],
+    walls: &[Candidate],
+    grid_scale: f64,
+    snap: f64,
+) -> Vec<Candidate> {
+    let min_thickness = 3.0;
+    let max_thickness = (grid_scale * 0.18).max(8.0);
+    let span_tolerance = (grid_scale * 0.12).max(5.0);
+    let grid_tolerance = (grid_scale * 0.2).max(snap);
+    let min_snapped_length = (grid_scale * 0.35).max(18.0);
+    let mut doors = Vec::new();
+
+    for (index, top) in runs.iter().enumerate() {
+        for bottom in runs.iter().skip(index + 1) {
+            let thickness = bottom.y1 - top.y1;
+            if thickness < min_thickness {
+                continue;
+            }
+            if thickness > max_thickness {
+                break;
+            }
+            if (top.x1 - bottom.x1).abs() > span_tolerance
+                || (top.x2 - bottom.x2).abs() > span_tolerance
+            {
+                continue;
+            }
+
+            let x1 = average(top.x1, bottom.x1);
+            let x2 = average(top.x2, bottom.x2);
+            let y = average(top.y1, bottom.y1);
+            let length = (x2 - x1).abs();
+
+            if !near_grid_line(y, grid_scale, grid_tolerance)
+                || !has_sliding_end_caps(width, height, mask, true, x1, top.y1, x2, bottom.y1)
+                || !sliding_interior_clear(width, height, mask, true, x1, top.y1, x2, bottom.y1)
+                || !has_collinear_wall_support(walls, true, x1, x2, y, grid_scale)
+            {
+                continue;
+            }
+
+            let snapped_x1 = snap_value(x1, snap);
+            let snapped_x2 = snap_value(x2, snap);
+            let snapped_y = snap_value(y, snap);
+            if (snapped_x2 - snapped_x1).abs() < min_snapped_length {
+                continue;
+            }
+            doors.push(Candidate {
+                horizontal: true,
+                x1: snapped_x1,
+                y1: snapped_y,
+                x2: snapped_x2,
+                y2: snapped_y,
+                length,
+            });
+        }
+    }
+
+    doors
+}
+
+fn detect_vertical_sliding_doors(
+    runs: &[Candidate],
+    width: u32,
+    height: u32,
+    mask: &[bool],
+    walls: &[Candidate],
+    grid_scale: f64,
+    snap: f64,
+) -> Vec<Candidate> {
+    let min_thickness = 3.0;
+    let max_thickness = (grid_scale * 0.18).max(8.0);
+    let span_tolerance = (grid_scale * 0.12).max(5.0);
+    let grid_tolerance = (grid_scale * 0.2).max(snap);
+    let min_snapped_length = (grid_scale * 0.35).max(18.0);
+    let mut doors = Vec::new();
+
+    for (index, left) in runs.iter().enumerate() {
+        for right in runs.iter().skip(index + 1) {
+            let thickness = right.x1 - left.x1;
+            if thickness < min_thickness {
+                continue;
+            }
+            if thickness > max_thickness {
+                break;
+            }
+            if (left.y1 - right.y1).abs() > span_tolerance
+                || (left.y2 - right.y2).abs() > span_tolerance
+            {
+                continue;
+            }
+
+            let x = average(left.x1, right.x1);
+            let y1 = average(left.y1, right.y1);
+            let y2 = average(left.y2, right.y2);
+            let length = (y2 - y1).abs();
+
+            if !near_grid_line(x, grid_scale, grid_tolerance)
+                || !has_sliding_end_caps(width, height, mask, false, left.x1, y1, right.x1, y2)
+                || !sliding_interior_clear(width, height, mask, false, left.x1, y1, right.x1, y2)
+                || !has_collinear_wall_support(walls, false, y1, y2, x, grid_scale)
+            {
+                continue;
+            }
+
+            let snapped_x = snap_value(x, snap);
+            let snapped_y1 = snap_value(y1, snap);
+            let snapped_y2 = snap_value(y2, snap);
+            if (snapped_y2 - snapped_y1).abs() < min_snapped_length {
+                continue;
+            }
+            doors.push(Candidate {
+                horizontal: false,
+                x1: snapped_x,
+                y1: snapped_y1,
+                x2: snapped_x,
+                y2: snapped_y2,
+                length,
+            });
+        }
+    }
+
+    doors
+}
+
+fn scan_short_horizontal(
+    width: u32,
+    height: u32,
+    mask: &[bool],
+    min_length: f64,
+    max_length: f64,
+) -> Vec<Candidate> {
+    let mut candidates = Vec::new();
+    for y in 0..height {
+        let mut x = 0;
+        while x < width {
+            while x < width && !mask[(y * width + x) as usize] {
+                x += 1;
+            }
+            let start = x;
+            while x < width && mask[(y * width + x) as usize] {
+                x += 1;
+            }
+            let end = x;
+            let length = (end - start) as f64;
+            if length >= min_length && length <= max_length {
+                candidates.push(Candidate {
+                    horizontal: true,
+                    x1: start as f64,
+                    y1: y as f64,
+                    x2: end as f64,
+                    y2: y as f64,
+                    length,
+                });
+            }
+        }
+    }
+    candidates
+}
+
+fn scan_short_vertical(
+    width: u32,
+    height: u32,
+    mask: &[bool],
+    min_length: f64,
+    max_length: f64,
+) -> Vec<Candidate> {
+    let mut candidates = Vec::new();
+    for x in 0..width {
+        let mut y = 0;
+        while y < height {
+            while y < height && !mask[(y * width + x) as usize] {
+                y += 1;
+            }
+            let start = y;
+            while y < height && mask[(y * width + x) as usize] {
+                y += 1;
+            }
+            let end = y;
+            let length = (end - start) as f64;
+            if length >= min_length && length <= max_length {
+                candidates.push(Candidate {
+                    horizontal: false,
+                    x1: x as f64,
+                    y1: start as f64,
+                    x2: x as f64,
+                    y2: end as f64,
+                    length,
+                });
+            }
+        }
+    }
+    candidates
+}
+
+fn gap_has_dark_marks(
+    width: u32,
+    height: u32,
+    mask: &[bool],
+    horizontal: bool,
+    start: f64,
+    end: f64,
+    line_coord: f64,
+    grid_scale: f64,
+) -> bool {
+    let inset = (grid_scale * 0.04).max(2.0);
+    let band = (grid_scale * 0.08).max(3.0);
+    let min_axis = start.min(end) + inset;
+    let max_axis = start.max(end) - inset;
+    if max_axis <= min_axis {
+        return false;
+    }
+
+    let mut dark = 0usize;
+    let mut samples = 0usize;
+    if horizontal {
+        for y in bounded_range(line_coord - band, line_coord + band, height) {
+            for x in bounded_range(min_axis, max_axis, width) {
+                samples += 1;
+                if mask[(y * width + x) as usize] {
+                    dark += 1;
+                }
+            }
+        }
+    } else {
+        for y in bounded_range(min_axis, max_axis, height) {
+            for x in bounded_range(line_coord - band, line_coord + band, width) {
+                samples += 1;
+                if mask[(y * width + x) as usize] {
+                    dark += 1;
+                }
+            }
+        }
+    }
+
+    let allowance = ((samples as f64) * 0.02).ceil() as usize + 2;
+    dark > allowance
+}
+
+fn has_sliding_end_caps(
+    width: u32,
+    height: u32,
+    mask: &[bool],
+    horizontal: bool,
+    x1: f64,
+    y1: f64,
+    x2: f64,
+    y2: f64,
+) -> bool {
+    if horizontal {
+        has_dark_span(width, height, mask, false, x1, y1, y2)
+            && has_dark_span(width, height, mask, false, x2, y1, y2)
+    } else {
+        has_dark_span(width, height, mask, true, y1, x1, x2)
+            && has_dark_span(width, height, mask, true, y2, x1, x2)
+    }
+}
+
+fn has_dark_span(
+    width: u32,
+    height: u32,
+    mask: &[bool],
+    horizontal: bool,
+    line_coord: f64,
+    start: f64,
+    end: f64,
+) -> bool {
+    let radius = 2.0;
+    let mut dark = 0usize;
+    if horizontal {
+        for y in bounded_range(line_coord - radius, line_coord + radius, height) {
+            for x in bounded_range(start, end, width) {
+                if mask[(y * width + x) as usize] {
+                    dark += 1;
+                }
+            }
+        }
+    } else {
+        for y in bounded_range(start, end, height) {
+            for x in bounded_range(line_coord - radius, line_coord + radius, width) {
+                if mask[(y * width + x) as usize] {
+                    dark += 1;
+                }
+            }
+        }
+    }
+
+    dark >= 2
+}
+
+fn sliding_interior_clear(
+    width: u32,
+    height: u32,
+    mask: &[bool],
+    horizontal: bool,
+    x1: f64,
+    y1: f64,
+    x2: f64,
+    y2: f64,
+) -> bool {
+    let inset = 2.0;
+    let mut dark = 0usize;
+    let mut samples = 0usize;
+    if horizontal {
+        for y in bounded_range(y1 + inset, y2 - inset, height) {
+            for x in bounded_range(x1 + inset, x2 - inset, width) {
+                samples += 1;
+                if mask[(y * width + x) as usize] {
+                    dark += 1;
+                }
+            }
+        }
+    } else {
+        for y in bounded_range(y1 + inset, y2 - inset, height) {
+            for x in bounded_range(x1 + inset, x2 - inset, width) {
+                samples += 1;
+                if mask[(y * width + x) as usize] {
+                    dark += 1;
+                }
+            }
+        }
+    }
+
+    samples == 0 || dark as f64 / samples as f64 <= 0.12
+}
+
+fn has_collinear_wall_support(
+    walls: &[Candidate],
+    horizontal: bool,
+    start: f64,
+    end: f64,
+    line_coord: f64,
+    grid_scale: f64,
+) -> bool {
+    let line_tolerance = (grid_scale * 0.18).max(8.0);
+    let endpoint_tolerance = (grid_scale * 0.45).max(16.0);
+    let min_support = (grid_scale * 0.7).max(32.0);
+
+    walls.iter().any(|wall| {
+        if wall.horizontal != horizontal || wall.length < min_support {
+            return false;
+        }
+
+        let wall_line = if horizontal { wall.y1 } else { wall.x1 };
+        if (wall_line - line_coord).abs() > line_tolerance {
+            return false;
+        }
+
+        let wall_start = if horizontal {
+            wall.x1.min(wall.x2)
+        } else {
+            wall.y1.min(wall.y2)
+        };
+        let wall_end = if horizontal {
+            wall.x1.max(wall.x2)
+        } else {
+            wall.y1.max(wall.y2)
+        };
+
+        (wall_end - start).abs() <= endpoint_tolerance
+            || (wall_start - end).abs() <= endpoint_tolerance
+    })
+}
+
+fn bounded_range(start: f64, end: f64, limit: u32) -> std::ops::Range<u32> {
+    let bounded_start = start.floor().max(0.0).min(limit as f64) as u32;
+    let bounded_end = end.ceil().max(0.0).min(limit as f64) as u32;
+    bounded_start..bounded_end
+}
+
+fn near_grid_line(value: f64, grid_scale: f64, tolerance: f64) -> bool {
+    if !value.is_finite() || !grid_scale.is_finite() || grid_scale <= 0.0 {
+        return true;
+    }
+
+    let offset = value.rem_euclid(grid_scale);
+    offset.min(grid_scale - offset) <= tolerance
 }
 
 fn average(first: f64, second: f64) -> f64 {
@@ -728,6 +1182,36 @@ fn dedupe_polygon(points: Vec<Point>) -> Vec<Point> {
 mod tests {
     use super::*;
 
+    fn empty_mask(width: u32, height: u32) -> Vec<bool> {
+        vec![false; (width * height) as usize]
+    }
+
+    fn draw_horizontal(mask: &mut [bool], width: u32, y: u32, x1: u32, x2: u32) {
+        for x in x1..=x2 {
+            mask[(y * width + x) as usize] = true;
+        }
+    }
+
+    fn draw_vertical(mask: &mut [bool], width: u32, x: u32, y1: u32, y2: u32) {
+        for y in y1..=y2 {
+            mask[(y * width + x) as usize] = true;
+        }
+    }
+
+    fn draw_horizontal_sliding_door(
+        mask: &mut [bool],
+        width: u32,
+        x1: u32,
+        y1: u32,
+        x2: u32,
+        y2: u32,
+    ) {
+        draw_horizontal(mask, width, y1, x1, x2);
+        draw_horizontal(mask, width, y2, x1, x2);
+        draw_vertical(mask, width, x1, y1, y2);
+        draw_vertical(mask, width, x2, y1, y2);
+    }
+
     fn door_states(open: bool) -> HashMap<String, DoorState> {
         HashMap::from([("door-1".to_string(), DoorState::Boolean(open))])
     }
@@ -812,12 +1296,16 @@ mod tests {
 
     #[test]
     fn detects_horizontal_door_gap_between_wall_runs() {
+        let mask = empty_mask(400, 300);
         let doors = detect_door_candidates(
             &[
                 horizontal_candidate(0.0, 125.0, 100.0),
                 horizontal_candidate(150.0, 300.0, 100.0),
             ],
             &[],
+            400,
+            300,
+            &mask,
             50.0,
             12.5,
         );
@@ -832,12 +1320,16 @@ mod tests {
 
     #[test]
     fn detects_vertical_door_gap_between_wall_runs() {
+        let mask = empty_mask(400, 400);
         let doors = detect_door_candidates(
             &[],
             &[
                 vertical_candidate(0.0, 125.0, 200.0),
                 vertical_candidate(175.0, 300.0, 200.0),
             ],
+            400,
+            400,
+            &mask,
             50.0,
             12.5,
         );
@@ -851,13 +1343,17 @@ mod tests {
     }
 
     #[test]
-    fn detects_off_grid_door_gap_between_wall_runs() {
+    fn detects_slightly_off_grid_door_gap_between_wall_runs() {
+        let mask = empty_mask(400, 300);
         let doors = detect_door_candidates(
             &[
-                horizontal_candidate(0.0, 96.0, 123.0),
-                horizontal_candidate(118.0, 240.0, 123.0),
+                horizontal_candidate(0.0, 96.0, 112.5),
+                horizontal_candidate(118.0, 240.0, 112.5),
             ],
             &[],
+            400,
+            300,
+            &mask,
             50.0,
             12.5,
         );
@@ -867,35 +1363,88 @@ mod tests {
         assert!(door.horizontal);
         assert_eq!(door.x1, 96.0);
         assert_eq!(door.x2, 118.0);
-        assert_eq!(door.y1, 123.0);
+        assert_eq!(door.y1, 112.5);
     }
 
     #[test]
-    fn detects_door_gap_with_short_wall_supports() {
+    fn ignores_short_symbol_gaps_as_doors() {
+        let mask = empty_mask(200, 200);
         let doors = detect_door_candidates(
             &[
                 horizontal_candidate(40.0, 58.0, 100.0),
                 horizontal_candidate(70.0, 92.0, 100.0),
             ],
             &[],
+            200,
+            200,
+            &mask,
+            50.0,
+            12.5,
+        );
+
+        assert!(doors.is_empty());
+    }
+
+    #[test]
+    fn ignores_iris_symbol_side_gaps_as_doors() {
+        let mut mask = empty_mask(320, 220);
+        draw_horizontal(&mut mask, 320, 100, 112, 136);
+
+        let doors = detect_door_candidates(
+            &[
+                horizontal_candidate(0.0, 100.0, 100.0),
+                horizontal_candidate(112.0, 136.0, 100.0),
+                horizontal_candidate(152.0, 260.0, 100.0),
+            ],
+            &[],
+            320,
+            220,
+            &mask,
+            50.0,
+            12.5,
+        );
+
+        assert!(doors.is_empty());
+    }
+
+    #[test]
+    fn detects_sliding_door_wall_symbol() {
+        let mut mask = empty_mask(220, 140);
+        draw_horizontal_sliding_door(&mut mask, 220, 60, 48, 100, 52);
+
+        let doors = detect_door_candidates(
+            &[
+                horizontal_candidate(20.0, 55.0, 50.0),
+                horizontal_candidate(105.0, 150.0, 50.0),
+            ],
+            &[],
+            220,
+            140,
+            &mask,
             50.0,
             12.5,
         );
 
         assert_eq!(doors.len(), 1);
         let door = &doors[0];
-        assert_eq!(door.x1, 58.0);
-        assert_eq!(door.x2, 70.0);
+        assert!(door.horizontal);
+        assert!((door.x1 - 62.5).abs() < 0.1);
+        assert_eq!(door.x2, 100.0);
+        assert_eq!(door.y1, 50.0);
     }
 
     #[test]
     fn ignores_large_corridor_gaps_as_doors() {
+        let mask = empty_mask(400, 300);
         let doors = detect_door_candidates(
             &[
                 horizontal_candidate(0.0, 100.0, 100.0),
                 horizontal_candidate(220.0, 320.0, 100.0),
             ],
             &[],
+            400,
+            300,
+            &mask,
             50.0,
             12.5,
         );
