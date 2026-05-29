@@ -106,7 +106,8 @@ button:hover,
   color: var(--tre-green);
 }
 
-#showWallsButton[aria-pressed="true"] {
+#showWallsButton[aria-pressed="true"],
+#fogModeButton[aria-pressed="true"] {
   border-color: var(--tre-green);
   background: rgba(var(--tre-green-rgb), 0.12);
   box-shadow:

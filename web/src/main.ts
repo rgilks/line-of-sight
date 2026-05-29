@@ -37,6 +37,7 @@ const radiusValue = document.querySelector<HTMLOutputElement>('#radiusValue')
 const showWallsButton = document.querySelector<HTMLButtonElement>('#showWallsButton')
 const analyzeButton = document.querySelector<HTMLButtonElement>('#analyzeButton')
 const resetFogButton = document.querySelector<HTMLButtonElement>('#resetFogButton')
+const fogModeButton = document.querySelector<HTMLButtonElement>('#fogModeButton')
 const exportButton = document.querySelector<HTMLButtonElement>('#exportButton')
 const runtimeStatus = document.querySelector<HTMLElement>('#runtimeStatus')
 const tileList = document.querySelector<HTMLElement>('#tileList')
@@ -57,6 +58,7 @@ if (
   !showWallsButton ||
   !analyzeButton ||
   !resetFogButton ||
+  !fogModeButton ||
   !exportButton ||
   !runtimeStatus ||
   !tileList ||
@@ -81,6 +83,7 @@ let boardWidth = 1000
 let boardHeight = 1000
 let zoom = 1
 let showWalls = false
+let hideUnseen = false
 let dragStart: Point | null = null
 let previewPoint: Point | null = null
 let isMovingViewer = false
@@ -105,6 +108,15 @@ const nextId = (prefix: string): string =>
 
 const setStatus = (message: string): void => {
   runtimeStatus.textContent = message
+}
+
+const setButtonLabel = (button: HTMLButtonElement, label: string): void => {
+  const labelElement = button.querySelector('span')
+  if (labelElement) {
+    labelElement.textContent = label
+    return
+  }
+  button.textContent = label
 }
 
 const renderSightValue = (): void => {
@@ -244,8 +256,12 @@ const setDoorOpen = (doorId: string, open: boolean): void => {
 }
 
 const renderWallToggle = (): void => {
-  showWallsButton.textContent = showWalls ? 'Hide walls' : 'Show walls'
+  setButtonLabel(showWallsButton, showWalls ? 'Hide walls' : 'Show walls')
   showWallsButton.setAttribute('aria-pressed', String(showWalls))
+}
+
+const renderFogToggle = (): void => {
+  fogModeButton.setAttribute('aria-pressed', String(hideUnseen))
 }
 
 const analyzeTiles = async (): Promise<void> => {
@@ -490,7 +506,7 @@ const drawGrid = (): void => {
 const drawFog = (): void => {
   const polygon = getVisiblePolygon()
   ctx.save()
-  ctx.fillStyle = '#eeeeee'
+  ctx.fillStyle = hideUnseen ? '#eeeeee' : 'rgba(238, 238, 238, 0.64)'
   ctx.beginPath()
   ctx.rect(0, 0, boardWidth, boardHeight)
   if (polygon.length > 2) {
@@ -879,6 +895,11 @@ resetFogButton.addEventListener('click', () => {
   markExplored()
   render()
 })
+fogModeButton.addEventListener('click', () => {
+  hideUnseen = !hideUnseen
+  renderFogToggle()
+  render()
+})
 exportButton.addEventListener('click', () => void exportSidecar())
 canvas.addEventListener('pointerdown', handlePointerDown)
 canvas.addEventListener('pointermove', handlePointerMove)
@@ -924,6 +945,7 @@ for (const button of toolButtons) {
 gpuStat.textContent = await detectWebGpu()
 setStatus('Ready. Select local map images to start.')
 renderWallToggle()
+renderFogToggle()
 renderSightValue()
 markExplored()
 render()
