@@ -6,6 +6,8 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable", "WebWorker"],
     "skipLibCheck": true,
     "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "jsxImportSource": "preact",
     "allowImportingTsExtensions": true,
     "isolatedModules": true,
     "moduleDetection": "force",
@@ -14,4 +16,3 @@
   },
   "include": ["src", "web/src", "vite.config.ts"]
 }
-
