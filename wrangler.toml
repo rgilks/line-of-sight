@@ -16,6 +16,14 @@ directory = "./dist/client"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
 
+[[durable_objects.bindings]]
+name = "TABLES"
+class_name = "GameTable"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["GameTable"]
+
 [[routes]]
 pattern = "los.tre.systems"
 custom_domain = true

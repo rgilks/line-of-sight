@@ -189,13 +189,17 @@ GET  /auth/discord/callback   OAuth2 callback         (Phase 3)
 All `/api/tables/:id/*` requests route to that table's DO. On (re)connect the
 stream sends a full per-player snapshot first, then deltas.
 
-## Auth (Discord — Phase 3)
+## Auth
 
-Discord OAuth2 authorization-code flow on the Worker. We only need identity
-(Discord user id + display name) → map to a player; we do not store Discord
-tokens we don't need. Session via a signed cookie. Sequenced late on purpose:
-auth is well-trodden, the multiplayer-POV loop is the novel risk, so we de-risk
-the novel part first with stub identity (join with a name).
+**To start: no auth at all.** A player is just a connection — the server assigns
+an ephemeral player id when they open the stream (optionally with a typed display
+name). Nothing is gated, no accounts, no login. This keeps the whole first build
+focused on the novel risk (the multiplayer-POV loop) instead of auth plumbing.
+
+**Later (Phase 3): Discord OAuth2** authorization-code flow on the Worker — we
+only need identity (Discord user id + display name) → map to a player; we don't
+store tokens we don't need; session via a signed cookie. Added once the core loop
+works, because auth is well-trodden and not where the risk is.
 
 ## Assets
 
@@ -224,7 +228,8 @@ shared module), keeping the layered-separation rule intact. No logic changes.
   ordering.
 - **SSE + single POST**, transport-agnostic; WS+hibernation is the later upgrade
   if idle cost matters.
-- **Discord OAuth**, added after the core loop works.
+- **No auth to start** — ephemeral server-assigned player ids. Discord OAuth is
+  added only after the core loop works.
 - **Assets stay client-local**, synced by `assetRef`.
 
 ## Open questions
@@ -250,7 +255,8 @@ Status keys: `[ ]` not started · `[~]` in progress · `[x]` done.
 - [ ] `POST /api/tables/:id/commands` → DO applies `MoveToken`.
 - [ ] `GET /api/tables/:id/stream` SSE with per-player snapshot + deltas.
 - [ ] Per-player token gating via `hasLineOfSight`.
-- [ ] Stub identity (name); each player owns one token.
+- [ ] No auth: server assigns an ephemeral player id on connect; each player
+      owns one token.
 - [ ] Demo: two browsers, two POVs, each sees the other's token only when in
       view.
 
