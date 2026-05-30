@@ -31,6 +31,17 @@ four things:
    currently re-import sidecars"). The correction loop needs a **sidecar
    importer** so corrected/agent-edited labels can round-trip into the editor.
    This is now a prerequisite, not an afterthought.
+5. **Train on Modal, infer in the browser.** Modal (serverless GPUs) removes the
+   training-infra cost and even makes a foundation-model fine-tune affordable, but
+   model *size* is not the bottleneck here — labels and domain fit are. Keep
+   inference in-browser (ONNX Runtime Web) to preserve the local-first model;
+   hosting inference on Modal would mean uploading user maps and is a product
+   decision. See [Training and hosting (Modal)](#training-and-hosting-modal).
+
+> **Bottom line:** worth a one-day triage first — measure how much correction the
+> current classical output actually needs across a stratified sample. That number,
+> not model architecture or where we train, decides whether the NN is worth
+> building.
 
 ## Goal
 
@@ -200,6 +211,44 @@ thin structures:
 - **Tiling option:** train on grid-aligned crops (e.g. 256×256) to increase
   sample count and keep input sizes static for WebGPU.
 
+#### Training and hosting (Modal)
+
+Train on [Modal](https://modal.com) (serverless GPUs, pay-per-use). It removes the
+biggest infra cost in this plan and fits the iterate loop: correct labels → kick a
+Modal job → pull weights. Even a foundation-model fine-tune (see below) is
+affordable there.
+
+**Model size is not the bottleneck — labels and domain fit are.** With ~400
+domain-specific maps, a larger from-scratch model mostly overfits faster; the
+small-dataset literature consistently favours *small* models + transfer learning
++ augmentation. "Bigger" only helps in one specific form:
+
+- **Foundation-model fine-tune** (e.g. SAM for masks, or a large pretrained
+  segmentation backbone): inherit general structure-vs-clutter priors, then
+  fine-tune on geomorphs. This is the version where Modal's bigger GPUs earn their
+  keep — not training a large U-Net from scratch.
+
+**Train on Modal, infer in the browser (preferred).** Keep the architecture
+local-first:
+
+1. Train (and optionally fine-tune a foundation model) on Modal.
+2. Export to **ONNX**.
+3. Ship weights; run inference **in-browser** via ONNX Runtime Web + WebGPU
+   (WASM fallback).
+
+Modal does the heavy lifting once; the deployed app stays serverless and never
+uploads user maps.
+
+**Hosting inference on Modal is a product decision, not just a deploy detail.**
+It would mean **uploading the user's map image to a server** for inference, which
+breaks the local-first / no-upload model (`AGENTS.md`: users select their own map
+images in the browser; the Worker is a thin static shell). It also adds latency,
+a network dependency, and a warm-GPU cost. Only consider server-side inference if
+a model is genuinely too large for the browser — and per the point above, it
+should not need to be. If it is ever required, route it through the Cloudflare
+Worker to a Modal endpoint behind an explicit, opt-in flag, and document the
+privacy change.
+
 ### Phase 5 — Integration
 
 Keep the public API:
@@ -318,6 +367,7 @@ boundaries prove too noisy for the current snapping logic.
 |----------|------|----------|
 | **ONNX Runtime Web — WebGPU** | [Docs](https://onnxruntime.ai/docs/tutorials/web/ep-webgpu.html) | WebGPU EP + WASM fallback; static shapes + graph capture; IO binding to avoid CPU↔GPU copies. |
 | **PyTorch in the browser (2026)** | [Guide](https://techbytes.app/posts/pytorch-browser-wasm-webgpu-tutorial-2026/) | Author in PyTorch, export ONNX, run with ORT Web; keep inputs small and fixed-size; FP16. |
+| **Modal** (serverless GPU training) | [modal.com](https://modal.com) | Pay-per-use GPUs for training / foundation-model fine-tune; export ONNX and infer in-browser to stay local-first. |
 
 ### Small-dataset segmentation and mask→vector
 
