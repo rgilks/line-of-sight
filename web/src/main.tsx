@@ -85,6 +85,7 @@ type EditorSnapshot = {
   tokens: Token[]
   selectedOccluderId: string | null
   selectedTokenId: string | null
+  povTokenId: string | null
 }
 
 const tool = signal<Tool>('viewer')
@@ -92,7 +93,6 @@ const tiles = signal<Tile[]>([])
 const placements = signal<Placement[]>([])
 const occluders = signal<Occluder[]>([])
 const doorStates = signal<Record<string, {open: boolean}>>({})
-const viewer = signal<Point>({x: 250, y: 250})
 const boardSize = signal<BoardSize>({width: 1000, height: 1000})
 const zoom = signal(1)
 const showWalls = signal(false)
@@ -104,7 +104,6 @@ const runtimeStatus = signal('Loading line-of-sight tools...')
 const gpuStatus = signal('Checking...')
 const dragStart = signal<Point | null>(null)
 const previewPoint = signal<Point | null>(null)
-const isMovingViewer = signal(false)
 const editDrag = signal<EditDrag | null>(null)
 const selectedOccluderId = signal<string | null>(null)
 const hoveredOccluderId = signal<string | null>(null)
@@ -114,6 +113,7 @@ const activeCounterGroup = signal<CounterGroupId>('A')
 const tokenDrag = signal<TokenDrag | null>(null)
 const selectedTokenId = signal<string | null>(null)
 const hoveredTokenId = signal<string | null>(null)
+const povTokenId = signal<string | null>(null)
 const undoStack = signal<EditorSnapshot[]>([])
 const redoStack = signal<EditorSnapshot[]>([])
 const dropDepth = signal(0)
@@ -199,7 +199,8 @@ const editorSnapshot = (): EditorSnapshot => ({
   doorStates: cloneDoorStates(doorStates.value),
   tokens: cloneTokens(tokens.value),
   selectedOccluderId: selectedOccluderId.value,
-  selectedTokenId: selectedTokenId.value
+  selectedTokenId: selectedTokenId.value,
+  povTokenId: povTokenId.value
 })
 
 const pushUndoHistory = (): void => {
@@ -224,6 +225,9 @@ const restoreEditorSnapshot = (snapshot: EditorSnapshot): void => {
   selectedTokenId.value = tokens.value.some((token) => token.id === snapshot.selectedTokenId)
     ? snapshot.selectedTokenId
     : null
+  povTokenId.value = tokens.value.some((token) => token.id === snapshot.povTokenId)
+    ? snapshot.povTokenId
+    : (tokens.value[0]?.id ?? null)
   hoveredOccluderId.value = null
   hoveredTokenId.value = null
   editDrag.value = null
@@ -309,6 +313,7 @@ const loadMapFiles = async (files: Iterable<File>): Promise<void> => {
   hoveredOccluderId.value = null
   selectedTokenId.value = null
   hoveredTokenId.value = null
+  povTokenId.value = null
   resetHistory()
   arrangeTiles()
   markExplored()
@@ -334,10 +339,6 @@ const arrangeTiles = (): void => {
     y: Math.floor(index / colCount) * cellHeight
   }))
   resizeBoard(usedColumns * cellWidth, Math.ceil(tiles.value.length / colCount) * cellHeight)
-  viewer.value = {
-    x: Math.min(viewer.value.x, boardSize.value.width),
-    y: Math.min(viewer.value.y, boardSize.value.height)
-  }
   requestCanvasRender()
 }
 
@@ -566,21 +567,45 @@ const drawPolygonPath = (
   target.closePath()
 }
 
-const getVisiblePolygon = (): Point[] =>
-  visibilityPolygon(
-    viewer.value.x,
-    viewer.value.y,
+const getPovToken = (): Token | null => {
+  const explicit = povTokenId.value
+    ? (tokens.value.find((token) => token.id === povTokenId.value) ?? null)
+    : null
+  return explicit ?? tokens.value[0] ?? null
+}
+
+const isPovToken = (id: string): boolean => getPovToken()?.id === id
+
+const setPovToken = (id: string): void => {
+  const token = tokens.value.find((item) => item.id === id)
+  if (!token) return
+  povTokenId.value = token.id
+  selectedTokenId.value = token.id
+  selectedOccluderId.value = null
+  markExplored()
+  setStatus(`Line of sight now follows ${token.label}.`)
+  requestCanvasRender()
+}
+
+const getVisiblePolygon = (): Point[] => {
+  const pov = getPovToken()
+  if (!pov) return []
+  return visibilityPolygon(
+    pov.x,
+    pov.y,
     boardSize.value.width,
     boardSize.value.height,
     sightRadius(),
     occluders.value,
     doorStates.value
   )
+}
 
 const markExplored = (): void => {
   if (!hasMap()) return
 
   const polygon = getVisiblePolygon()
+  if (polygon.length < 3) return
   exploredCtx.save()
   exploredCtx.fillStyle = '#fff'
   drawPolygonPath(exploredCtx, polygon)
@@ -607,11 +632,11 @@ const renderBoard = (): void => {
   drawGrid()
   drawDoorMarkers()
   drawFog()
+  drawPovRange()
   drawTokens()
   drawDebugWalls()
   drawEditOverlay()
   drawPreview()
-  drawViewer()
 }
 
 const syncCanvasCursor = (): void => {
@@ -622,12 +647,12 @@ const syncCanvasCursor = (): void => {
     canvas.style.cursor = 'grabbing'
   } else if (tokenDrag.value) {
     canvas.style.cursor = 'grabbing'
-  } else if (hoveredTokenId.value && tool.value === 'token') {
-    canvas.style.cursor = 'grab'
+  } else if (hoveredTokenId.value && (tool.value === 'token' || tool.value === 'viewer')) {
+    canvas.style.cursor = tool.value === 'viewer' ? 'pointer' : 'grab'
   } else if (hoveredOccluderId.value) {
     canvas.style.cursor = tool.value === 'erase' ? 'not-allowed' : 'grab'
   } else {
-    canvas.style.cursor = tool.value === 'viewer' ? 'crosshair' : 'cell'
+    canvas.style.cursor = tool.value === 'viewer' ? 'pointer' : 'cell'
   }
 }
 
@@ -662,6 +687,7 @@ const drawGrid = (): void => {
 }
 
 const drawFog = (): void => {
+  if (!getPovToken()) return
   const polygon = getVisiblePolygon()
   if (hideUnseen.value) {
     drawNeverExploredFog()
@@ -702,10 +728,12 @@ const drawNeverExploredFog = (): void => {
 
 const drawTokens = (): void => {
   const polygon = getVisiblePolygon()
+  const pov = getPovToken()
   for (const token of tokens.value) {
-    const visible = polygon.length > 2 && pointInPolygon(token, polygon)
+    const isPov = pov?.id === token.id
+    const visible = isPov || (polygon.length > 2 && pointInPolygon(token, polygon))
     if (!visible && !showWalls.value) continue
-    drawCounterToken(token, visible)
+    drawCounterToken(token, visible, isPov)
   }
 }
 
@@ -730,7 +758,7 @@ const tokenSize = (): number => Math.min(64, Math.max(38, gridScale() * 0.84))
 const counterDefinitionFor = (kind: CounterKind): CounterDefinition =>
   counterDefinitions.find((definition) => definition.kind === kind) ?? counterDefinitions[0]
 
-const drawCounterToken = (token: Token, visible: boolean): void => {
+const drawCounterToken = (token: Token, visible: boolean, isPov: boolean): void => {
   const size = tokenSize()
   const half = size / 2
   const selected = selectedTokenId.value === token.id
@@ -789,8 +817,8 @@ const drawCounterToken = (token: Token, visible: boolean): void => {
   const labelMetrics = ctx.measureText(token.label)
   const labelWidth = Math.max(size * 0.36, labelMetrics.width + size * 0.16)
   const labelHeight = Math.max(14, size * 0.3)
-  const labelX = half - inset - labelWidth
-  const labelY = -half + inset
+  const labelX = -half + inset
+  const labelY = half - inset - labelHeight
   roundedRect(labelX, labelY, labelWidth, labelHeight, size * 0.045)
   ctx.fillStyle = '#050505'
   ctx.fill()
@@ -812,6 +840,20 @@ const drawCounterToken = (token: Token, visible: boolean): void => {
       size + outlineInset * 2,
       size + outlineInset * 2,
       size * 0.13
+    )
+    ctx.stroke()
+  }
+
+  if (isPov) {
+    ctx.strokeStyle = 'rgba(74, 163, 255, 0.96)'
+    ctx.lineWidth = screenPixels(2.25)
+    const povInset = screenPixels(5)
+    roundedRect(
+      -half - povInset,
+      -half - povInset,
+      size + povInset * 2,
+      size + povInset * 2,
+      size * 0.16
     )
     ctx.stroke()
   }
@@ -1053,20 +1095,14 @@ const drawPreview = (): void => {
   ctx.restore()
 }
 
-const drawViewer = (): void => {
-  const viewerRadius = screenPixels(11)
+const drawPovRange = (): void => {
+  const pov = getPovToken()
+  if (!pov) return
   ctx.save()
-  ctx.fillStyle = '#2f80ed'
-  ctx.strokeStyle = '#ffffff'
-  ctx.lineWidth = screenPixels(3)
-  ctx.beginPath()
-  ctx.arc(viewer.value.x, viewer.value.y, viewerRadius, 0, Math.PI * 2)
-  ctx.fill()
-  ctx.stroke()
-  ctx.strokeStyle = 'rgba(47, 128, 237, 0.35)'
+  ctx.strokeStyle = 'rgba(74, 163, 255, 0.42)'
   ctx.lineWidth = screenPixels(2)
   ctx.beginPath()
-  ctx.arc(viewer.value.x, viewer.value.y, sightRadius(), 0, Math.PI * 2)
+  ctx.arc(pov.x, pov.y, sightRadius(), 0, Math.PI * 2)
   ctx.stroke()
   ctx.restore()
 }
@@ -1206,9 +1242,13 @@ const updateToken = (id: string, next: Token): void => {
 const removeToken = (id: string, recordHistory = true): void => {
   if (!tokens.value.some((token) => token.id === id)) return
   if (recordHistory) pushUndoHistory()
-  tokens.value = tokens.value.filter((token) => token.id !== id)
+  const wasPov = isPovToken(id)
+  const nextTokens = tokens.value.filter((token) => token.id !== id)
+  tokens.value = nextTokens
   if (selectedTokenId.value === id) selectedTokenId.value = null
   if (hoveredTokenId.value === id) hoveredTokenId.value = null
+  if (povTokenId.value === id) povTokenId.value = nextTokens[0]?.id ?? null
+  if (wasPov) markExplored()
 }
 
 const editableFilterForTool = (): ((occluder: Occluder) => boolean) | null => {
@@ -1363,8 +1403,14 @@ const handlePointerDown = (event: JSX.TargetedPointerEvent<HTMLCanvasElement>): 
     }
 
     pushUndoHistory()
+    const shouldUseAsPov = !getPovToken()
     const nextToken = makeToken(point)
     tokens.value = [...tokens.value, nextToken]
+    if (shouldUseAsPov) {
+      povTokenId.value = nextToken.id
+      setStatus(`Line of sight now follows ${nextToken.label}.`)
+      markExplored()
+    }
     selectedTokenId.value = nextToken.id
     hoveredTokenId.value = nextToken.id
     requestCanvasRender()
@@ -1372,17 +1418,20 @@ const handlePointerDown = (event: JSX.TargetedPointerEvent<HTMLCanvasElement>): 
   }
 
   if (tool.value === 'viewer') {
+    const token = nearestToken(rawPoint)
+    if (token) {
+      setPovToken(token.id)
+      return
+    }
+
     const door = nearestOccluder(rawPoint, (occluder) => occluder.type === 'door', 18)
     if (door && door.type === 'door') {
       setDoorOpen(door.id, !isDoorOpen(door))
       return
     }
-    viewer.value = point
-    isMovingViewer.value = true
     selectedOccluderId.value = null
     selectedTokenId.value = null
-    event.currentTarget.setPointerCapture(event.pointerId)
-    markExplored()
+    setStatus('Select a counter to use as the point of view.')
     requestCanvasRender()
     return
   }
@@ -1446,6 +1495,7 @@ const handlePointerMove = (event: JSX.TargetedPointerEvent<HTMLCanvasElement>): 
       x: tokenMove.original.x + dx,
       y: tokenMove.original.y + dy
     })
+    if (isPovToken(tokenMove.id)) markExplored()
     requestCanvasRender()
     return
   }
@@ -1458,15 +1508,8 @@ const handlePointerMove = (event: JSX.TargetedPointerEvent<HTMLCanvasElement>): 
     return
   }
 
-  if (isMovingViewer.value) {
-    viewer.value = point
-    markExplored()
-    requestCanvasRender()
-    return
-  }
-
   if (!dragStart.value) {
-    if (tool.value === 'token') {
+    if (tool.value === 'token' || tool.value === 'viewer') {
       hoveredTokenId.value = nearestToken(rawPoint)?.id ?? null
       hoveredOccluderId.value = null
       requestCanvasRender()
@@ -1496,6 +1539,7 @@ const handlePointerUp = (event: JSX.TargetedPointerEvent<HTMLCanvasElement>): vo
       x: drag.original.x + dx,
       y: drag.original.y + dy
     })
+    if (isPovToken(drag.id)) markExplored()
     tokenDrag.value = null
     event.currentTarget.releasePointerCapture(event.pointerId)
     requestCanvasRender()
@@ -1513,12 +1557,6 @@ const handlePointerUp = (event: JSX.TargetedPointerEvent<HTMLCanvasElement>): vo
     event.currentTarget.releasePointerCapture(event.pointerId)
     markExplored()
     requestCanvasRender()
-    return
-  }
-
-  if (isMovingViewer.value) {
-    isMovingViewer.value = false
-    event.currentTarget.releasePointerCapture(event.pointerId)
     return
   }
 
@@ -1566,7 +1604,6 @@ const handlePointerUp = (event: JSX.TargetedPointerEvent<HTMLCanvasElement>): vo
 const handlePointerCancel = (): void => {
   dragStart.value = null
   previewPoint.value = null
-  isMovingViewer.value = false
   editDrag.value = null
   tokenDrag.value = null
   requestCanvasRender()
@@ -1638,6 +1675,8 @@ const getDoorStat = (): string => {
   const openCount = doors.filter(isDoorOpen).length
   return doors.length === 0 ? '0' : `${doors.length} (${openCount} open)`
 }
+
+const getPovStat = (): string => getPovToken()?.label ?? 'None'
 
 const getSelectedOccluder = (): Occluder | null => {
   const id = selectedOccluderId.value
@@ -1756,6 +1795,7 @@ const App = (): JSX.Element => {
   const activeTileCount = tiles.value.length
   const selectedOccluder = getSelectedOccluder()
   const selectedToken = getSelectedToken()
+  const povToken = getPovToken()
   const nextCounterLabel = nextTokenLabel(activeCounterGroup.value)
 
   return (
@@ -1974,7 +2014,7 @@ const App = (): JSX.Element => {
                   </>
                 }
               >
-                Viewer
+                POV
               </ToolButton>
               <ToolButton
                 value="wall"
@@ -2130,9 +2170,21 @@ const App = (): JSX.Element => {
             {selectedToken ? (
               <div className="selection-actions" aria-label="Selected counter actions">
                 <span>
-                  {`${counterDefinitionFor(selectedToken.kind).name} ${selectedToken.label}`}
+                  {`${counterDefinitionFor(selectedToken.kind).name} ${selectedToken.label}${
+                    povToken?.id === selectedToken.id ? ' POV' : ''
+                  }`}
                 </span>
-                <div className="selection-action-row single">
+                <div className="selection-action-row">
+                  <button
+                    type="button"
+                    aria-pressed={povToken?.id === selectedToken.id}
+                    disabled={povToken?.id === selectedToken.id}
+                    onClick={() => {
+                      setPovToken(selectedToken.id)
+                    }}
+                  >
+                    {povToken?.id === selectedToken.id ? 'Current POV' : 'Use as POV'}
+                  </button>
                   <button
                     type="button"
                     onClick={() => {
@@ -2173,6 +2225,10 @@ const App = (): JSX.Element => {
               <div>
                 <dt>Doors</dt>
                 <dd id="doorStat">{getDoorStat()}</dd>
+              </div>
+              <div>
+                <dt>POV</dt>
+                <dd id="povStat">{getPovStat()}</dd>
               </div>
               <div>
                 <dt>GPU</dt>
