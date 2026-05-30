@@ -87,9 +87,9 @@ export const loadMapFiles = async (files: Iterable<File>): Promise<void> => {
   povTokenId.value = null
   resetHistory()
   arrangeTiles()
-  markExplored()
-  setStatus(`Loaded ${tiles.value.length} image(s). Run analysis, then review walls and doors.`)
-  requestCanvasRender()
+  setStatus(`Loaded ${tiles.value.length} image(s). Analyzing walls and doors…`)
+  // Auto-analyze on load; analyzeTiles sets the final status, fog, and render.
+  await analyzeTiles()
 }
 
 export const arrangeTiles = (): void => {
