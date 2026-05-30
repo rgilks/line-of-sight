@@ -43,6 +43,12 @@ type EditDrag = {
   original: Occluder
 }
 
+type EditorSnapshot = {
+  occluders: Occluder[]
+  doorStates: Record<string, {open: boolean}>
+  selectedOccluderId: string | null
+}
+
 const tool = signal<Tool>('viewer')
 const tiles = signal<Tile[]>([])
 const placements = signal<Placement[]>([])
@@ -64,6 +70,8 @@ const isMovingViewer = signal(false)
 const editDrag = signal<EditDrag | null>(null)
 const selectedOccluderId = signal<string | null>(null)
 const hoveredOccluderId = signal<string | null>(null)
+const undoStack = signal<EditorSnapshot[]>([])
+const redoStack = signal<EditorSnapshot[]>([])
 const dropDepth = signal(0)
 const renderTick = signal(0)
 
@@ -75,6 +83,7 @@ const minZoom = 0.35
 const maxZoom = 4
 const doorCarveTolerance = 8
 const minCarvedWallLength = 8
+const historyLimit = 60
 
 const exploredCanvas = document.createElement('canvas')
 const exploredCtx = exploredCanvas.getContext('2d')
@@ -99,6 +108,65 @@ const setStatus = (message: string): void => {
 
 const requestCanvasRender = (): void => {
   renderTick.value += 1
+}
+
+const cloneOccluders = (items: Occluder[]): Occluder[] =>
+  items.map((occluder) => ({...occluder}))
+
+const cloneDoorStates = (
+  states: Record<string, {open: boolean}>
+): Record<string, {open: boolean}> =>
+  Object.fromEntries(Object.entries(states).map(([id, state]) => [id, {...state}]))
+
+const editorSnapshot = (): EditorSnapshot => ({
+  occluders: cloneOccluders(occluders.value),
+  doorStates: cloneDoorStates(doorStates.value),
+  selectedOccluderId: selectedOccluderId.value
+})
+
+const pushUndoHistory = (): void => {
+  undoStack.value = [...undoStack.value.slice(1 - historyLimit), editorSnapshot()]
+  redoStack.value = []
+}
+
+const resetHistory = (): void => {
+  undoStack.value = []
+  redoStack.value = []
+}
+
+const restoreEditorSnapshot = (snapshot: EditorSnapshot): void => {
+  occluders.value = cloneOccluders(snapshot.occluders)
+  doorStates.value = cloneDoorStates(snapshot.doorStates)
+  selectedOccluderId.value = occluders.value.some(
+    (occluder) => occluder.id === snapshot.selectedOccluderId
+  )
+    ? snapshot.selectedOccluderId
+    : null
+  hoveredOccluderId.value = null
+  editDrag.value = null
+  dragStart.value = null
+  previewPoint.value = null
+  exploredCtx.clearRect(0, 0, boardSize.value.width, boardSize.value.height)
+  markExplored()
+  requestCanvasRender()
+}
+
+const undoEditorChange = (): void => {
+  const previous = undoStack.value.at(-1)
+  if (!previous) return
+  undoStack.value = undoStack.value.slice(0, -1)
+  redoStack.value = [...redoStack.value.slice(1 - historyLimit), editorSnapshot()]
+  restoreEditorSnapshot(previous)
+  setStatus('Undid map correction.')
+}
+
+const redoEditorChange = (): void => {
+  const next = redoStack.value.at(-1)
+  if (!next) return
+  redoStack.value = redoStack.value.slice(0, -1)
+  undoStack.value = [...undoStack.value.slice(1 - historyLimit), editorSnapshot()]
+  restoreEditorSnapshot(next)
+  setStatus('Redid map correction.')
 }
 
 const imageFilesFrom = (files: Iterable<File>): File[] =>
@@ -154,6 +222,7 @@ const loadMapFiles = async (files: Iterable<File>): Promise<void> => {
   doorStates.value = {}
   selectedOccluderId.value = null
   hoveredOccluderId.value = null
+  resetHistory()
   arrangeTiles()
   markExplored()
   setStatus(`Loaded ${tiles.value.length} image(s). Run analysis, then review walls and doors.`)
@@ -225,6 +294,8 @@ const isDoorOpen = (door: DoorOccluder): boolean =>
 const setDoorOpen = (doorId: string, open: boolean): void => {
   const door = doorOccluders().find((candidate) => candidate.id === doorId)
   if (!door) return
+  if (isDoorOpen(door) === open) return
+  pushUndoHistory()
   doorStates.value = {...doorStates.value, [door.id]: {open}}
   markExplored()
   requestCanvasRender()
@@ -261,6 +332,7 @@ const analyzeTiles = async (): Promise<void> => {
     }
   }
 
+  pushUndoHistory()
   occluders.value = carveDoorGaps([...generated, ...manual])
   doorStates.value = Object.fromEntries(
     Object.entries(doorStates.value).filter(([doorId]) =>
@@ -872,7 +944,9 @@ const applyEditDrag = (drag: EditDrag, point: Point): void => {
   updateOccluder(drag.id, next)
 }
 
-const removeOccluder = (id: string): void => {
+const removeOccluder = (id: string, recordHistory = true): void => {
+  if (!occluders.value.some((occluder) => occluder.id === id)) return
+  if (recordHistory) pushUndoHistory()
   occluders.value = occluders.value.filter((occluder) => occluder.id !== id)
   const nextDoorStates = {...doorStates.value}
   delete nextDoorStates[id]
@@ -888,6 +962,23 @@ const targetAcceptsMapShortcuts = (target: EventTarget | null): boolean =>
 
 const handleMapKeyDown = (event: KeyboardEvent): void => {
   if (targetAcceptsMapShortcuts(event.target)) return
+
+  const shortcutKey = event.key.toLowerCase()
+  if ((event.metaKey || event.ctrlKey) && shortcutKey === 'z') {
+    event.preventDefault()
+    if (event.shiftKey) {
+      redoEditorChange()
+    } else {
+      undoEditorChange()
+    }
+    return
+  }
+
+  if ((event.metaKey || event.ctrlKey) && shortcutKey === 'y') {
+    event.preventDefault()
+    redoEditorChange()
+    return
+  }
 
   if (event.key === 'Escape') {
     selectedOccluderId.value = null
@@ -942,6 +1033,7 @@ const handlePointerDown = (event: JSX.TargetedPointerEvent<HTMLCanvasElement>): 
   if (editableFilter) {
     const editTarget = nearestEditTarget(rawPoint, editableFilter)
     if (editTarget) {
+      pushUndoHistory()
       selectedOccluderId.value = editTarget.occluder.id
       hoveredOccluderId.value = editTarget.occluder.id
       editDrag.value = {
@@ -1021,6 +1113,7 @@ const handlePointerUp = (event: JSX.TargetedPointerEvent<HTMLCanvasElement>): vo
 
   const length = Math.hypot(point.x - start.x, point.y - start.y)
   if (length > 6) {
+    pushUndoHistory()
     const id = nextId(tool.value === 'door' ? 'manual-door' : 'manual-wall')
     const nextOccluders: Occluder[] = [...occluders.value]
     if (tool.value === 'door') {
@@ -1045,6 +1138,8 @@ const handlePointerUp = (event: JSX.TargetedPointerEvent<HTMLCanvasElement>): vo
       })
     }
     occluders.value = carveDoorGaps(nextOccluders)
+    selectedOccluderId.value = id
+    hoveredOccluderId.value = id
   }
 
   dragStart.value = null
@@ -1128,6 +1223,51 @@ const getDoorStat = (): string => {
   return doors.length === 0 ? '0' : `${doors.length} (${openCount} open)`
 }
 
+const getSelectedOccluder = (): Occluder | null => {
+  const id = selectedOccluderId.value
+  return id ? (occluders.value.find((occluder) => occluder.id === id) ?? null) : null
+}
+
+const convertSelectedOccluder = (targetType: 'wall' | 'door'): void => {
+  const selected = getSelectedOccluder()
+  if (!selected || selected.type === targetType) return
+
+  pushUndoHistory()
+  const converted: Occluder =
+    targetType === 'door'
+      ? {
+          type: 'door',
+          id: selected.id,
+          x1: selected.x1,
+          y1: selected.y1,
+          x2: selected.x2,
+          y2: selected.y2,
+          open: false
+        }
+      : {
+          type: 'wall',
+          id: selected.id,
+          x1: selected.x1,
+          y1: selected.y1,
+          x2: selected.x2,
+          y2: selected.y2
+        }
+
+  occluders.value = carveDoorGaps(
+    occluders.value.map((occluder) => (occluder.id === selected.id ? converted : occluder))
+  )
+  const nextDoorStates = {...doorStates.value}
+  if (converted.type === 'door') {
+    nextDoorStates[converted.id] = {open: false}
+  } else {
+    delete nextDoorStates[converted.id]
+  }
+  doorStates.value = nextDoorStates
+  selectedOccluderId.value = converted.id
+  markExplored()
+  requestCanvasRender()
+}
+
 const Icon = ({children}: {children: ComponentChildren}): JSX.Element => (
   <svg className="button-icon" viewBox="0 0 24 24" aria-hidden="true">
     {children}
@@ -1193,6 +1333,7 @@ const App = (): JSX.Element => {
   }, [])
 
   const activeTileCount = tiles.value.length
+  const selectedOccluder = getSelectedOccluder()
 
   return (
     <main className="app-shell">
@@ -1249,6 +1390,32 @@ const App = (): JSX.Element => {
             </Icon>
             <span>Select maps</span>
           </label>
+          <button
+            id="undoButton"
+            type="button"
+            disabled={undoStack.value.length === 0}
+            title="Undo map correction"
+            onClick={undoEditorChange}
+          >
+            <Icon>
+              <path d="M9 14 4 9l5-5" />
+              <path d="M4 9h10a6 6 0 0 1 0 12h-1" />
+            </Icon>
+            <span>Undo</span>
+          </button>
+          <button
+            id="redoButton"
+            type="button"
+            disabled={redoStack.value.length === 0}
+            title="Redo map correction"
+            onClick={redoEditorChange}
+          >
+            <Icon>
+              <path d="m15 14 5-5-5-5" />
+              <path d="M20 9H10a6 6 0 0 0 0 12h1" />
+            </Icon>
+            <span>Redo</span>
+          </button>
           <label className="number-control">
             <span>Columns</span>
             <input
@@ -1423,6 +1590,53 @@ const App = (): JSX.Element => {
                 Erase
               </ToolButton>
             </div>
+            {selectedOccluder ? (
+              <div className="selection-actions" aria-label="Selected map line actions">
+                <span>{selectedOccluder.type === 'door' ? 'Door selected' : 'Wall selected'}</span>
+                <div className="selection-action-row">
+                  <button
+                    type="button"
+                    aria-pressed={selectedOccluder.type === 'wall'}
+                    onClick={() => {
+                      convertSelectedOccluder('wall')
+                    }}
+                  >
+                    Wall
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={selectedOccluder.type === 'door'}
+                    onClick={() => {
+                      convertSelectedOccluder('door')
+                    }}
+                  >
+                    Door
+                  </button>
+                </div>
+                <div className="selection-action-row">
+                  {selectedOccluder.type === 'door' ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDoorOpen(selectedOccluder.id, !isDoorOpen(selectedOccluder))
+                      }}
+                    >
+                      {isDoorOpen(selectedOccluder) ? 'Close' : 'Open'}
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      removeOccluder(selectedOccluder.id)
+                      markExplored()
+                      requestCanvasRender()
+                    }}
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </div>
 
           <div className="panel">
