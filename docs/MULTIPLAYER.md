@@ -201,14 +201,36 @@ only need identity (Discord user id + display name) → map to a player; we don'
 store tokens we don't need; session via a signed cookie. Added once the core loop
 works, because auth is well-trodden and not where the risk is.
 
-## Assets
+## Assets (GM-uploaded maps)
 
-The server never hosts map art (licensed; kept out of git per
-[`AGENTS.md`](../AGENTS.md)). The table syncs only occluders / tokens / board
-metadata keyed by `assetRef`; each client loads its own local copy of the
-matching art. The sidecar's `assetRef` field is exactly this join key. If a
-client lacks the asset, it can still play on a blank board with the occluder
-overlay.
+The **GM uploads the map**, and it must be loadable by **all** clients in the
+game — so the server *does* store map art, in a **private R2 bucket**, served
+only through the Worker. It is never a public/crawlable URL and never a public
+bucket.
+
+Flow:
+1. GM `POST`s the image to `/api/tables/:id/map` → Worker stores it in R2 under
+   an unguessable key `:id/<uuid>` → returns `{assetRef}`.
+2. GM publishes a board carrying that `assetRef` (the existing sidecar field).
+3. Every client `GET`s `/api/tables/:id/map/<assetRef>`; the Worker streams the
+   bytes from the private bucket (`Cache-Control: private`). A client without the
+   asset can still play on a blank board with the occluder overlay.
+
+Privacy, honestly stated for a prototype: the bucket is private and bytes are
+only reachable through the Worker route, so maps are not "just shared on the
+internet." With **no auth yet**, anyone who knows `tableId` + the `uuid` assetRef
+can fetch — i.e. link-private (unguessable), not access-controlled. When Discord
+auth lands, the serve route gets gated on game membership at that single point.
+
+Responsibility: maps are user-generated content the GM chooses to upload; we
+store them privately but are not the arbiter of what a group uses for its game.
+A light guard caps uploads to `image/*` under 25 MB so the bucket stays a map
+store, not a general file host.
+
+Relation to the repo's Local Asset Policy: unchanged. That policy
+([`AGENTS.md`](../AGENTS.md)) governs *dev* assets in git (`Geomorphs/`,
+`Counters/` — never committed or deployed). GM uploads live in R2 at runtime,
+never in git or the deployed bundle, so the two don't conflict.
 
 ## Reusing the deterministic core
 
@@ -230,7 +252,8 @@ shared module), keeping the layered-separation rule intact. No logic changes.
   if idle cost matters.
 - **No auth to start** — ephemeral server-assigned player ids. Discord OAuth is
   added only after the core loop works.
-- **Assets stay client-local**, synced by `assetRef`.
+- **GM-uploaded maps stored privately in R2**, served only via the Worker
+  (private bucket, unguessable key), synced by `assetRef`. Auth-gated later.
 
 ## Open questions
 
@@ -263,7 +286,10 @@ Status keys: `[ ]` not started · `[~]` in progress · `[x]` done.
 ### Phase 2 — Real-ish play
 - [ ] `ToggleDoor` affecting visibility; doors re-gate token sight.
 - [ ] Token claim/ownership; GM role sees all tokens.
-- [ ] GM publishes a board from the existing authoring flow (`PublishBoard`).
+- [x] Private R2 map storage: `POST/GET /api/tables/:id/map[/:ref]`
+      (image-only, ≤25 MB, served through the Worker — not public).
+- [ ] GM publishes a board (`assetRef` + occluders) so the DO broadcasts it and
+      clients fetch the uploaded map.
 - [ ] Event-log persistence in DO storage + `Last-Event-ID` reconnect catch-up.
 
 ### Phase 3 — Discord auth

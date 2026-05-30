@@ -22,3 +22,24 @@ export interface DurableObjectNamespace {
 export interface DurableObjectState {
   readonly id: DurableObjectId
 }
+
+// Minimal R2 surface used for GM-uploaded maps (private bucket, served only
+// through the Worker — see docs/MULTIPLAYER.md).
+export interface R2Object {
+  writeHttpMetadata(headers: Headers): void
+  readonly size: number
+}
+
+export interface R2ObjectBody extends R2Object {
+  readonly body: ReadableStream
+}
+
+export interface R2Bucket {
+  get(key: string): Promise<R2ObjectBody | null>
+  put(
+    key: string,
+    value: ArrayBuffer | ReadableStream | string,
+    options?: {httpMetadata?: {contentType?: string}}
+  ): Promise<R2Object>
+  delete(key: string): Promise<void>
+}

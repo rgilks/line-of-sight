@@ -24,6 +24,12 @@ class_name = "GameTable"
 tag = "v1"
 new_classes = ["GameTable"]
 
+# Private bucket for GM-uploaded map images. Not public; served only through the
+# Worker's /api/tables/:id/map/:ref route. See docs/MULTIPLAYER.md.
+[[r2_buckets]]
+binding = "MAPS"
+bucket_name = "line-of-sight-maps"
+
 [[routes]]
 pattern = "los.tre.systems"
 custom_domain = true
