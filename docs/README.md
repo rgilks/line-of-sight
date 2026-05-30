@@ -9,6 +9,9 @@ formats in more depth.
   visibility geometry, the UI, and the sidecar JSON format.
 - [PATTERNS.md](PATTERNS.md) — the load-bearing design patterns. Read before
   non-trivial changes.
+- [MULTIPLAYER.md](MULTIPLAYER.md) — design + roadmap for multiplayer with
+  server-authoritative per-player fog of war (Durable Objects, CQRS-lite, SSE,
+  Discord auth). Forward-looking; not built yet.
 - [diagrams/](diagrams/README.md) — Graphviz/DOT sources + rendered PNGs.
 
 ## Project layout
