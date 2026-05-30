@@ -125,16 +125,16 @@ const doorCarveTolerance = 8
 const minCarvedWallLength = 8
 const historyLimit = 60
 const counterDefinitions: CounterDefinition[] = [
-  {kind: 'troop', name: 'Troop', color: '#ff5f5f'},
-  {kind: 'adventurer', name: 'Adventurer', color: '#f97316'},
-  {kind: 'robot', name: 'Robot', color: '#8bd3ff'},
-  {kind: 'monster', name: 'Monster', color: '#a78bfa'},
-  {kind: 'scientist', name: 'Scientist', color: '#34d399'},
-  {kind: 'police', name: 'Police', color: '#60a5fa'},
-  {kind: 'passenger', name: 'Passenger', color: '#facc15'},
-  {kind: 'aslan', name: 'Aslan', color: '#fb923c'},
-  {kind: 'vargr', name: 'Vargr', color: '#c084fc'},
-  {kind: 'kkree', name: 'Kkree', color: '#fbbf24'}
+  {kind: 'troop', name: 'Troop', color: '#d74d4d'},
+  {kind: 'adventurer', name: 'Adventurer', color: '#d66d2a'},
+  {kind: 'robot', name: 'Robot', color: '#78bde6'},
+  {kind: 'monster', name: 'Monster', color: '#8f6ed8'},
+  {kind: 'scientist', name: 'Scientist', color: '#30b985'},
+  {kind: 'police', name: 'Police', color: '#5398df'},
+  {kind: 'passenger', name: 'Passenger', color: '#d8b92d'},
+  {kind: 'aslan', name: 'Aslan', color: '#d8792d'},
+  {kind: 'vargr', name: 'Vargr', color: '#a96fd6'},
+  {kind: 'kkree', name: 'Kkree', color: '#dcae2c'}
 ]
 
 const exploredCanvas = document.createElement('canvas')
@@ -715,35 +715,70 @@ const drawCounterToken = (token: Token, visible: boolean): void => {
   const definition = counterDefinitionFor(token.kind)
   const selected = selectedTokenId.value === token.id
   const hovered = hoveredTokenId.value === token.id
+  const inset = size * 0.075
+  const labelHeight = Math.max(10, size * 0.25)
 
   ctx.save()
-  ctx.globalAlpha = visible ? 1 : 0.34
+  ctx.globalAlpha = visible ? 1 : 0.28
   ctx.translate(token.x, token.y)
 
-  roundedRect(-half, -half, size, size, screenPixels(5))
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.5)'
+  ctx.shadowBlur = screenPixels(7)
+  ctx.shadowOffsetY = screenPixels(2)
+  roundedRect(-half, -half, size, size, size * 0.11)
+  ctx.fillStyle = '#050505'
+  ctx.fill()
+
+  ctx.shadowColor = 'transparent'
+  roundedRect(
+    -half + inset,
+    -half + inset,
+    size - inset * 2,
+    size - inset * 2,
+    size * 0.075
+  )
   ctx.fillStyle = definition.color
   ctx.fill()
-  ctx.strokeStyle = '#050505'
-  ctx.lineWidth = screenPixels(2.5)
+
+  const highlight = ctx.createLinearGradient(0, -half + inset, 0, half - inset)
+  highlight.addColorStop(0, 'rgba(255, 255, 255, 0.22)')
+  highlight.addColorStop(0.46, 'rgba(255, 255, 255, 0.03)')
+  highlight.addColorStop(1, 'rgba(0, 0, 0, 0.18)')
+  ctx.fillStyle = highlight
+  ctx.fill()
+
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.28)'
+  ctx.lineWidth = screenPixels(1)
   ctx.stroke()
 
-  drawCounterIcon(token.kind, 0, -size * 0.06, size * 0.42)
+  drawCounterIcon(token.kind, 0, -size * 0.1, size * 0.58)
 
-  const labelWidth = Math.max(size * 0.34, token.label.length * size * 0.14)
-  const labelHeight = size * 0.24
-  roundedRect(half - labelWidth - size * 0.04, half - labelHeight - size * 0.04, labelWidth, labelHeight, screenPixels(3))
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.82)'
+  roundedRect(
+    -half + inset,
+    half - inset - labelHeight,
+    size - inset * 2,
+    labelHeight,
+    size * 0.045
+  )
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.88)'
   ctx.fill()
   ctx.fillStyle = '#ffffff'
-  ctx.font = `700 ${Math.max(10, size * 0.18)}px "JetBrains Mono", monospace`
+  ctx.font = `800 ${Math.max(10, size * 0.19)}px "JetBrains Mono", monospace`
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
-  ctx.fillText(token.label, half - labelWidth / 2 - size * 0.04, half - labelHeight / 2 - size * 0.04)
+  ctx.fillText(token.label, 0, half - inset - labelHeight / 2 + screenPixels(0.4))
 
   if (selected || hovered) {
     ctx.strokeStyle = selected ? '#39ff14' : 'rgba(57, 255, 20, 0.55)'
-    ctx.lineWidth = selected ? screenPixels(3) : screenPixels(2)
-    roundedRect(-half - screenPixels(3), -half - screenPixels(3), size + screenPixels(6), size + screenPixels(6), screenPixels(7))
+    ctx.lineWidth = selected ? screenPixels(2.25) : screenPixels(1.5)
+    const outlineInset = screenPixels(2.5)
+    roundedRect(
+      -half - outlineInset,
+      -half - outlineInset,
+      size + outlineInset * 2,
+      size + outlineInset * 2,
+      size * 0.13
+    )
     ctx.stroke()
   }
 
@@ -776,11 +811,19 @@ const drawCounterIcon = (kind: CounterKind, x: number, y: number, size: number):
   ctx.translate(x, y)
   ctx.fillStyle = '#050505'
   ctx.strokeStyle = '#050505'
-  ctx.lineWidth = Math.max(1, size * 0.08)
+  ctx.lineWidth = Math.max(1.3, size * 0.07)
   ctx.lineCap = 'round'
   ctx.lineJoin = 'round'
 
-  if (kind === 'robot') {
+  if (
+    kind === 'troop' ||
+    kind === 'adventurer' ||
+    kind === 'scientist' ||
+    kind === 'police' ||
+    kind === 'passenger'
+  ) {
+    drawHumanCounterIcon(kind, size)
+  } else if (kind === 'robot') {
     ctx.fillRect(-size * 0.28, -size * 0.22, size * 0.56, size * 0.48)
     ctx.fillRect(-size * 0.16, -size * 0.42, size * 0.32, size * 0.18)
     ctx.beginPath()
@@ -797,24 +840,6 @@ const drawCounterIcon = (kind: CounterKind, x: number, y: number, size: number):
       ctx.quadraticCurveTo(Math.cos(angle) * size * 0.45, Math.sin(angle) * size * 0.42, Math.cos(angle) * size * 0.62, Math.sin(angle) * size * 0.2)
       ctx.stroke()
     }
-  } else if (kind === 'scientist') {
-    drawPersonIcon(size)
-    ctx.beginPath()
-    ctx.moveTo(size * 0.18, size * 0.08)
-    ctx.lineTo(size * 0.36, size * 0.35)
-    ctx.lineTo(size * 0.02, size * 0.35)
-    ctx.closePath()
-    ctx.fill()
-  } else if (kind === 'police') {
-    ctx.beginPath()
-    ctx.moveTo(0, -size * 0.45)
-    ctx.lineTo(size * 0.32, -size * 0.28)
-    ctx.lineTo(size * 0.24, size * 0.28)
-    ctx.lineTo(0, size * 0.48)
-    ctx.lineTo(-size * 0.24, size * 0.28)
-    ctx.lineTo(-size * 0.32, -size * 0.28)
-    ctx.closePath()
-    ctx.fill()
   } else if (kind === 'aslan') {
     drawHeadIcon(size, 0.46, 0.2)
     ctx.beginPath()
@@ -842,42 +867,92 @@ const drawCounterIcon = (kind: CounterKind, x: number, y: number, size: number):
     ctx.arc(size * 0.2, -size * 0.34, size * 0.13, 0, Math.PI * 2)
     ctx.fill()
     for (const leg of [-0.26, -0.08, 0.1, 0.28]) ctx.fillRect(leg * size, size * 0.18, size * 0.06, size * 0.28)
-  } else {
-    drawPersonIcon(size)
-    if (kind === 'troop') {
-      ctx.beginPath()
-      ctx.moveTo(size * 0.08, -size * 0.06)
-      ctx.lineTo(size * 0.52, -size * 0.16)
-      ctx.stroke()
-    } else if (kind === 'adventurer') {
-      ctx.beginPath()
-      ctx.moveTo(size * 0.18, -size * 0.08)
-      ctx.lineTo(size * 0.5, -size * 0.42)
-      ctx.stroke()
-    } else if (kind === 'passenger') {
-      ctx.beginPath()
-      ctx.arc(size * 0.24, size * 0.1, size * 0.12, 0, Math.PI * 2)
-      ctx.fill()
-    }
   }
   ctx.restore()
 }
 
+const drawHumanCounterIcon = (kind: CounterKind, size: number): void => {
+  drawPersonIcon(size)
+
+  if (kind === 'troop') {
+    drawHelmet(size)
+    ctx.lineWidth = Math.max(1.2, size * 0.08)
+    ctx.beginPath()
+    ctx.moveTo(size * 0.08, -size * 0.04)
+    ctx.lineTo(size * 0.46, -size * 0.19)
+    ctx.stroke()
+    ctx.fillRect(size * 0.37, -size * 0.24, size * 0.12, size * 0.05)
+  } else if (kind === 'adventurer') {
+    ctx.fillRect(-size * 0.31, -size * 0.18, size * 0.16, size * 0.34)
+    ctx.lineWidth = Math.max(1.1, size * 0.065)
+    ctx.beginPath()
+    ctx.moveTo(size * 0.18, -size * 0.02)
+    ctx.lineTo(size * 0.46, -size * 0.34)
+    ctx.stroke()
+    ctx.beginPath()
+    ctx.moveTo(size * 0.38, -size * 0.35)
+    ctx.lineTo(size * 0.51, -size * 0.35)
+    ctx.stroke()
+  } else if (kind === 'scientist') {
+    ctx.beginPath()
+    ctx.moveTo(size * 0.12, size * 0.03)
+    ctx.lineTo(size * 0.33, size * 0.35)
+    ctx.lineTo(size * 0.02, size * 0.35)
+    ctx.closePath()
+    ctx.fill()
+  } else if (kind === 'police') {
+    drawHelmet(size)
+    ctx.beginPath()
+    ctx.moveTo(size * 0.22, -size * 0.02)
+    ctx.lineTo(size * 0.44, size * 0.06)
+    ctx.lineTo(size * 0.39, size * 0.32)
+    ctx.lineTo(size * 0.23, size * 0.43)
+    ctx.lineTo(size * 0.09, size * 0.29)
+    ctx.lineTo(size * 0.12, size * 0.07)
+    ctx.closePath()
+    ctx.fill()
+  } else if (kind === 'passenger') {
+    ctx.fillRect(size * 0.22, size * 0.03, size * 0.22, size * 0.25)
+    ctx.lineWidth = Math.max(1, size * 0.055)
+    ctx.beginPath()
+    ctx.moveTo(size * 0.27, size * 0.03)
+    ctx.quadraticCurveTo(size * 0.33, -size * 0.08, size * 0.39, size * 0.03)
+    ctx.stroke()
+  }
+}
+
 const drawPersonIcon = (size: number): void => {
   ctx.beginPath()
-  ctx.arc(0, -size * 0.35, size * 0.13, 0, Math.PI * 2)
+  ctx.arc(0, -size * 0.36, size * 0.13, 0, Math.PI * 2)
   ctx.fill()
-  ctx.fillRect(-size * 0.11, -size * 0.22, size * 0.22, size * 0.36)
+
   ctx.beginPath()
-  ctx.moveTo(-size * 0.12, -size * 0.02)
-  ctx.lineTo(-size * 0.38, size * 0.14)
-  ctx.moveTo(size * 0.12, -size * 0.02)
-  ctx.lineTo(size * 0.38, size * 0.12)
-  ctx.moveTo(-size * 0.08, size * 0.14)
-  ctx.lineTo(-size * 0.22, size * 0.48)
-  ctx.moveTo(size * 0.08, size * 0.14)
-  ctx.lineTo(size * 0.24, size * 0.48)
+  ctx.moveTo(-size * 0.19, -size * 0.21)
+  ctx.lineTo(size * 0.19, -size * 0.21)
+  ctx.lineTo(size * 0.13, size * 0.14)
+  ctx.lineTo(size * 0.05, size * 0.14)
+  ctx.lineTo(size * 0.05, size * 0.46)
+  ctx.lineTo(-size * 0.07, size * 0.46)
+  ctx.lineTo(-size * 0.07, size * 0.14)
+  ctx.lineTo(-size * 0.13, size * 0.14)
+  ctx.closePath()
+  ctx.fill()
+
+  ctx.beginPath()
+  ctx.moveTo(-size * 0.17, -size * 0.09)
+  ctx.lineTo(-size * 0.37, size * 0.12)
+  ctx.moveTo(size * 0.17, -size * 0.09)
+  ctx.lineTo(size * 0.38, size * 0.1)
   ctx.stroke()
+}
+
+const drawHelmet = (size: number): void => {
+  ctx.beginPath()
+  ctx.arc(0, -size * 0.39, size * 0.16, Math.PI, 0)
+  ctx.lineTo(size * 0.18, -size * 0.34)
+  ctx.lineTo(-size * 0.18, -size * 0.34)
+  ctx.closePath()
+  ctx.fill()
 }
 
 const drawHeadIcon = (size: number, radiusScale: number, rotation: number): void => {
