@@ -722,8 +722,7 @@ const drawCounterToken = (token: Token, visible: boolean): void => {
   const group = counterGroupFor(token.group)
   const selected = selectedTokenId.value === token.id
   const hovered = hoveredTokenId.value === token.id
-  const inset = size * 0.075
-  const labelHeight = Math.max(10, size * 0.25)
+  const inset = size * 0.035
 
   ctx.save()
   ctx.globalAlpha = visible ? 1 : 0.28
@@ -732,7 +731,7 @@ const drawCounterToken = (token: Token, visible: boolean): void => {
   ctx.shadowColor = 'rgba(0, 0, 0, 0.5)'
   ctx.shadowBlur = screenPixels(7)
   ctx.shadowOffsetY = screenPixels(2)
-  roundedRect(-half, -half, size, size, size * 0.11)
+  roundedRect(-half, -half, size, size, size * 0.04)
   ctx.fillStyle = '#050505'
   ctx.fill()
 
@@ -742,7 +741,7 @@ const drawCounterToken = (token: Token, visible: boolean): void => {
     -half + inset,
     size - inset * 2,
     size - inset * 2,
-    size * 0.075
+    size * 0.025
   )
   ctx.fillStyle = group.color
   ctx.fill()
@@ -758,22 +757,16 @@ const drawCounterToken = (token: Token, visible: boolean): void => {
   ctx.lineWidth = screenPixels(1)
   ctx.stroke()
 
-  drawCounterIcon(token.kind, 0, -size * 0.1, size * 0.64)
+  drawCounterIcon(token.kind, 0, size * 0.04, size * 0.72)
 
-  roundedRect(
-    -half + inset,
-    half - inset - labelHeight,
-    size - inset * 2,
-    labelHeight,
-    size * 0.045
-  )
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.88)'
-  ctx.fill()
-  ctx.fillStyle = '#ffffff'
-  ctx.font = `800 ${Math.max(10, size * 0.19)}px "JetBrains Mono", monospace`
-  ctx.textAlign = 'center'
-  ctx.textBaseline = 'middle'
-  ctx.fillText(token.label, 0, half - inset - labelHeight / 2 + screenPixels(0.4))
+  ctx.font = `900 ${Math.max(12, size * 0.27)}px "JetBrains Mono", monospace`
+  ctx.textAlign = 'right'
+  ctx.textBaseline = 'top'
+  ctx.lineWidth = screenPixels(2.5)
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.34)'
+  ctx.strokeText(token.label, half - inset - size * 0.08, -half + inset + size * 0.015)
+  ctx.fillStyle = '#050505'
+  ctx.fillText(token.label, half - inset - size * 0.08, -half + inset + size * 0.015)
 
   if (selected || hovered) {
     ctx.strokeStyle = selected ? '#39ff14' : 'rgba(57, 255, 20, 0.55)'
@@ -818,7 +811,7 @@ const drawCounterIcon = (kind: CounterKind, x: number, y: number, size: number):
   ctx.translate(x, y)
   ctx.fillStyle = '#050505'
   ctx.strokeStyle = '#050505'
-  ctx.lineWidth = Math.max(1.3, size * 0.07)
+  ctx.lineWidth = Math.max(1.4, size * 0.08)
   ctx.lineCap = 'round'
   ctx.lineJoin = 'round'
   drawHumanCounterIcon(kind, size)
@@ -840,141 +833,174 @@ const drawHumanCounterIcon = (kind: CounterKind, size: number): void => {
 }
 
 const drawTroopSilhouette = (size: number): void => {
-  ctx.lineWidth = Math.max(1.5, size * 0.1)
+  ctx.lineWidth = Math.max(1.8, size * 0.12)
+
   ctx.beginPath()
-  ctx.arc(-size * 0.16, -size * 0.33, size * 0.12, 0, Math.PI * 2)
+  ctx.ellipse(-size * 0.16, -size * 0.11, size * 0.28, size * 0.16, -0.22, 0, Math.PI * 2)
   ctx.fill()
 
   ctx.beginPath()
-  ctx.ellipse(-size * 0.08, -size * 0.08, size * 0.18, size * 0.26, -0.42, 0, Math.PI * 2)
+  ctx.arc(size * 0.07, -size * 0.24, size * 0.12, 0, Math.PI * 2)
   ctx.fill()
 
   ctx.beginPath()
-  ctx.moveTo(-size * 0.15, size * 0.1)
-  ctx.lineTo(-size * 0.32, size * 0.42)
-  ctx.moveTo(size * 0.01, size * 0.08)
-  ctx.lineTo(size * 0.27, size * 0.34)
-  ctx.moveTo(-size * 0.02, -size * 0.18)
-  ctx.lineTo(size * 0.28, -size * 0.23)
-  ctx.stroke()
-
-  ctx.lineWidth = Math.max(1.2, size * 0.08)
-  ctx.beginPath()
-  ctx.moveTo(size * 0.08, -size * 0.19)
-  ctx.lineTo(size * 0.5, -size * 0.31)
-  ctx.stroke()
-  ctx.fillRect(size * 0.4, -size * 0.35, size * 0.12, size * 0.06)
-}
-
-const drawAdventurerSilhouette = (size: number): void => {
-  ctx.lineWidth = Math.max(1.4, size * 0.09)
-  ctx.beginPath()
-  ctx.arc(-size * 0.08, -size * 0.36, size * 0.11, 0, Math.PI * 2)
-  ctx.fill()
-  ctx.beginPath()
-  ctx.ellipse(-size * 0.03, -size * 0.12, size * 0.17, size * 0.28, -0.22, 0, Math.PI * 2)
-  ctx.fill()
-  ctx.fillRect(-size * 0.26, -size * 0.19, size * 0.15, size * 0.28)
-
-  ctx.beginPath()
-  ctx.moveTo(size * 0.03, -size * 0.23)
-  ctx.lineTo(size * 0.28, -size * 0.39)
-  ctx.moveTo(size * 0.19, -size * 0.39)
-  ctx.lineTo(size * 0.39, -size * 0.39)
-  ctx.moveTo(-size * 0.1, size * 0.1)
-  ctx.lineTo(-size * 0.27, size * 0.43)
-  ctx.moveTo(size * 0.04, size * 0.08)
-  ctx.lineTo(size * 0.29, size * 0.37)
-  ctx.stroke()
-}
-
-const drawScientistSilhouette = (size: number): void => {
-  drawStandingSilhouette(size)
-  ctx.beginPath()
-  ctx.moveTo(-size * 0.15, -size * 0.16)
-  ctx.lineTo(size * 0.15, -size * 0.16)
-  ctx.lineTo(size * 0.28, size * 0.38)
-  ctx.lineTo(-size * 0.28, size * 0.38)
+  ctx.moveTo(-size * 0.38, size * 0.02)
+  ctx.lineTo(-size * 0.12, size * 0.1)
+  ctx.lineTo(size * 0.18, size * 0.05)
+  ctx.lineTo(size * 0.31, -size * 0.02)
+  ctx.lineTo(size * 0.14, -size * 0.13)
+  ctx.lineTo(-size * 0.23, -size * 0.08)
   ctx.closePath()
   ctx.fill()
 
-  ctx.lineWidth = Math.max(1, size * 0.055)
   ctx.beginPath()
-  ctx.moveTo(size * 0.15, -size * 0.03)
-  ctx.lineTo(size * 0.36, size * 0.24)
-  ctx.lineTo(size * 0.09, size * 0.24)
+  ctx.moveTo(-size * 0.36, size * 0.06)
+  ctx.lineTo(-size * 0.5, size * 0.24)
+  ctx.moveTo(-size * 0.08, size * 0.08)
+  ctx.lineTo(size * 0.2, size * 0.25)
+  ctx.moveTo(size * 0.13, -size * 0.11)
+  ctx.lineTo(size * 0.38, -size * 0.18)
+  ctx.stroke()
+
+  ctx.lineWidth = Math.max(1.5, size * 0.1)
+  ctx.beginPath()
+  ctx.moveTo(size * 0.19, -size * 0.17)
+  ctx.lineTo(size * 0.52, -size * 0.17)
+  ctx.stroke()
+  ctx.fillRect(size * 0.47, -size * 0.21, size * 0.12, size * 0.06)
+  ctx.fillRect(size * 0.18, -size * 0.12, size * 0.1, size * 0.05)
+}
+
+const drawAdventurerSilhouette = (size: number): void => {
+  ctx.lineWidth = Math.max(1.7, size * 0.105)
+  ctx.beginPath()
+  ctx.arc(size * 0.03, -size * 0.36, size * 0.11, 0, Math.PI * 2)
+  ctx.fill()
+
+  ctx.beginPath()
+  ctx.ellipse(0, -size * 0.09, size * 0.17, size * 0.29, -0.32, 0, Math.PI * 2)
+  ctx.fill()
+
+  ctx.beginPath()
+  ctx.moveTo(-size * 0.1, -size * 0.21)
+  ctx.lineTo(-size * 0.31, -size * 0.38)
+  ctx.moveTo(-size * 0.28, -size * 0.38)
+  ctx.lineTo(-size * 0.43, -size * 0.33)
+  ctx.moveTo(size * 0.1, -size * 0.18)
+  ctx.lineTo(size * 0.34, -size * 0.03)
+  ctx.moveTo(-size * 0.06, size * 0.11)
+  ctx.lineTo(-size * 0.27, size * 0.43)
+  ctx.moveTo(size * 0.08, size * 0.08)
+  ctx.lineTo(size * 0.34, size * 0.37)
+  ctx.stroke()
+
+  ctx.lineWidth = Math.max(1.2, size * 0.075)
+  ctx.beginPath()
+  ctx.moveTo(-size * 0.36, -size * 0.37)
+  ctx.lineTo(-size * 0.36, -size * 0.55)
+  ctx.stroke()
+  ctx.fillRect(-size * 0.43, -size * 0.57, size * 0.13, size * 0.06)
+}
+
+const drawScientistSilhouette = (size: number): void => {
+  ctx.beginPath()
+  ctx.arc(-size * 0.02, -size * 0.42, size * 0.12, 0, Math.PI * 2)
+  ctx.fill()
+
+  ctx.beginPath()
+  ctx.moveTo(-size * 0.16, -size * 0.26)
+  ctx.lineTo(size * 0.15, -size * 0.26)
+  ctx.lineTo(size * 0.27, size * 0.39)
+  ctx.lineTo(size * 0.05, size * 0.47)
+  ctx.lineTo(-size * 0.19, size * 0.42)
+  ctx.lineTo(-size * 0.27, size * 0.05)
+  ctx.closePath()
+  ctx.fill()
+
+  ctx.lineWidth = Math.max(1.3, size * 0.08)
+  ctx.beginPath()
+  ctx.moveTo(-size * 0.17, -size * 0.12)
+  ctx.lineTo(-size * 0.39, size * 0.04)
+  ctx.moveTo(size * 0.14, -size * 0.1)
+  ctx.lineTo(size * 0.34, size * 0.06)
+  ctx.moveTo(-size * 0.06, size * 0.39)
+  ctx.lineTo(-size * 0.1, size * 0.55)
+  ctx.moveTo(size * 0.12, size * 0.37)
+  ctx.lineTo(size * 0.18, size * 0.53)
+  ctx.stroke()
+
+  ctx.beginPath()
+  ctx.moveTo(size * 0.21, -size * 0.05)
+  ctx.lineTo(size * 0.4, size * 0.26)
+  ctx.lineTo(size * 0.13, size * 0.26)
   ctx.closePath()
   ctx.fill()
 }
 
 const drawPoliceSilhouette = (size: number): void => {
-  drawStandingSilhouette(size)
+  ctx.lineWidth = Math.max(1.7, size * 0.11)
+
   ctx.beginPath()
-  ctx.moveTo(size * 0.16, -size * 0.1)
-  ctx.lineTo(size * 0.43, -size * 0.01)
-  ctx.lineTo(size * 0.38, size * 0.31)
-  ctx.lineTo(size * 0.2, size * 0.46)
-  ctx.lineTo(size * 0.03, size * 0.3)
-  ctx.lineTo(size * 0.06, size * 0.02)
+  ctx.arc(size * 0.06, -size * 0.34, size * 0.11, 0, Math.PI * 2)
+  ctx.fill()
+
+  ctx.beginPath()
+  ctx.ellipse(-size * 0.04, -size * 0.1, size * 0.17, size * 0.27, 0.52, 0, Math.PI * 2)
+  ctx.fill()
+
+  ctx.beginPath()
+  ctx.moveTo(-size * 0.16, size * 0.02)
+  ctx.lineTo(-size * 0.35, size * 0.3)
+  ctx.moveTo(size * 0.02, size * 0.07)
+  ctx.lineTo(size * 0.24, size * 0.31)
+  ctx.moveTo(size * 0.01, -size * 0.2)
+  ctx.lineTo(size * 0.3, -size * 0.09)
+  ctx.stroke()
+
+  ctx.lineWidth = Math.max(1.2, size * 0.08)
+  ctx.beginPath()
+  ctx.moveTo(size * 0.21, -size * 0.08)
+  ctx.lineTo(size * 0.45, size * 0.02)
+  ctx.stroke()
+  ctx.beginPath()
+  ctx.moveTo(size * 0.42, -size * 0.01)
+  ctx.lineTo(size * 0.53, size * 0.08)
+  ctx.lineTo(size * 0.4, size * 0.09)
   ctx.closePath()
   ctx.fill()
 
   ctx.beginPath()
-  ctx.arc(0, -size * 0.42, size * 0.15, Math.PI, 0)
-  ctx.lineTo(size * 0.18, -size * 0.36)
-  ctx.lineTo(-size * 0.18, -size * 0.36)
+  ctx.moveTo(-size * 0.02, -size * 0.47)
+  ctx.lineTo(size * 0.17, -size * 0.41)
+  ctx.lineTo(size * 0.03, -size * 0.34)
+  ctx.lineTo(-size * 0.08, -size * 0.38)
   ctx.closePath()
   ctx.fill()
 }
 
 const drawPassengerSilhouette = (size: number): void => {
-  ctx.lineWidth = Math.max(1.3, size * 0.085)
+  ctx.lineWidth = Math.max(1.6, size * 0.1)
   ctx.beginPath()
-  ctx.arc(-size * 0.14, -size * 0.37, size * 0.1, 0, Math.PI * 2)
+  ctx.arc(-size * 0.1, -size * 0.4, size * 0.11, 0, Math.PI * 2)
   ctx.fill()
 
   ctx.beginPath()
-  ctx.ellipse(-size * 0.08, -size * 0.1, size * 0.16, size * 0.28, -0.18, 0, Math.PI * 2)
+  ctx.ellipse(-size * 0.06, -size * 0.11, size * 0.15, size * 0.29, -0.22, 0, Math.PI * 2)
   ctx.fill()
 
   ctx.beginPath()
-  ctx.moveTo(-size * 0.15, size * 0.11)
-  ctx.lineTo(-size * 0.32, size * 0.43)
-  ctx.moveTo(size * 0.01, size * 0.1)
-  ctx.lineTo(size * 0.18, size * 0.42)
-  ctx.moveTo(size * 0.04, -size * 0.13)
+  ctx.moveTo(-size * 0.13, size * 0.12)
+  ctx.lineTo(-size * 0.33, size * 0.45)
+  ctx.moveTo(size * 0.01, size * 0.11)
+  ctx.lineTo(size * 0.2, size * 0.42)
+  ctx.moveTo(size * 0.03, -size * 0.12)
   ctx.lineTo(size * 0.25, size * 0.04)
-  ctx.lineTo(size * 0.35, size * 0.29)
+  ctx.lineTo(size * 0.33, size * 0.22)
   ctx.stroke()
 
-  roundedRect(size * 0.23, size * 0.13, size * 0.2, size * 0.3, size * 0.04)
+  roundedRect(size * 0.2, size * 0.08, size * 0.22, size * 0.32, size * 0.035)
   ctx.fill()
-}
-
-const drawStandingSilhouette = (size: number): void => {
-  ctx.lineWidth = Math.max(1.3, size * 0.085)
-  ctx.beginPath()
-  ctx.arc(0, -size * 0.36, size * 0.13, 0, Math.PI * 2)
-  ctx.fill()
-
-  ctx.beginPath()
-  ctx.moveTo(-size * 0.19, -size * 0.21)
-  ctx.lineTo(size * 0.19, -size * 0.21)
-  ctx.lineTo(size * 0.13, size * 0.14)
-  ctx.lineTo(size * 0.05, size * 0.14)
-  ctx.lineTo(size * 0.05, size * 0.46)
-  ctx.lineTo(-size * 0.07, size * 0.46)
-  ctx.lineTo(-size * 0.07, size * 0.14)
-  ctx.lineTo(-size * 0.13, size * 0.14)
-  ctx.closePath()
-  ctx.fill()
-
-  ctx.beginPath()
-  ctx.moveTo(-size * 0.17, -size * 0.09)
-  ctx.lineTo(-size * 0.37, size * 0.12)
-  ctx.moveTo(size * 0.17, -size * 0.09)
-  ctx.lineTo(size * 0.38, size * 0.1)
-  ctx.stroke()
+  ctx.fillRect(size * 0.24, size * 0.4, size * 0.14, size * 0.04)
 }
 
 const drawDoorMarkers = (): void => {
