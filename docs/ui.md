@@ -2,19 +2,19 @@
 
 The interactive app lives in `web/src/main.tsx`: a Preact + `@preact/signals` UI
 that renders the board to a 2D `<canvas>` and calls the
-[core](../architecture/los-core.md) for all geometry. State is held in
+[core](los-core.md) for all geometry. State is held in
 module-level signals and is **in-memory only** — reload starts fresh, so the
-[sidecar export](../reference/sidecar-format.md) is the thing to keep.
+[sidecar export](sidecar-format.md) is the thing to keep.
 
 The two patterns behind this UI are
-[signals and rendering](../patterns/signals-and-rendering.md) (how state drives
-the canvas) and [snapshot undo/redo](../patterns/snapshot-undo-redo.md).
+[signals and rendering](patterns/signals-and-rendering.md) (how state drives
+the canvas) and [snapshot undo/redo](patterns/snapshot-undo-redo.md).
 
 ## Layout
 
 A full-bleed canvas with a collapsible **control drawer**. The drawer has four
 tabs (`activeDrawerTab`): **Tools**, **Counters**, **Maps**, **State**. The
-visual language follows the TRE direction in [`AGENTS.md`](../../AGENTS.md):
+visual language follows the TRE direction in [`AGENTS.md`](../AGENTS.md):
 black background, terminal-green accent (`#39ff14`), JetBrains Mono labels.
 
 ## Tools
@@ -67,7 +67,7 @@ Any token can be elected the **point of view** (`povTokenId`). The POV token's
 
 ## Fog and "explored" tracking
 
-![Visibility and fog rendering](../diagrams/visibility-and-fog.png)
+![Visibility and fog rendering](diagrams/visibility-and-fog.png)
 
 Two offscreen canvases back the fog:
 
@@ -110,4 +110,4 @@ constant on-screen size.
 The **Export** action (`exportSidecar`) builds the sidecar object and tries to
 copy it to the clipboard; if the clipboard is unavailable it falls back to a
 `line-of-sight-sidecar.json` download. See
-[sidecar-format.md](../reference/sidecar-format.md) for the exact shape.
+[sidecar-format.md](sidecar-format.md) for the exact shape.

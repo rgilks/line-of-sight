@@ -4,7 +4,7 @@
 responsibilities: **detect** candidate occluders from raster map art, and
 **answer visibility queries** against a set of occluders. It is pure TypeScript
 with no DOM, Cloudflare, or Preact dependencies, so it must stay free of those
-concerns (see Coding Rules in [`AGENTS.md`](../../AGENTS.md)).
+concerns (see Coding Rules in [`AGENTS.md`](../AGENTS.md)).
 
 All coordinates are in board pixels with the origin at the top-left.
 
@@ -32,7 +32,7 @@ both the boolean and `{open}` shapes are accepted, falling back to the door's ow
 Input is a raw RGBA buffer plus a `gridScale` hint. The buffer length must equal
 `width * height * 4` and dimensions must be positive, or it throws.
 
-![Wall and door analysis pipeline](../diagrams/analysis-pipeline.png)
+![Wall and door analysis pipeline](diagrams/analysis-pipeline.png)
 
 1. **Dark mask** (`buildDarkMask`). Each pixel is marked `1` when its alpha is
    above 32 and its Rec. 709 luminance (`0.2126r + 0.7152g + 0.0722b`) is below

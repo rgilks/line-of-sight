@@ -6,7 +6,7 @@ produced by `exportSidecar` in `web/src/main.tsx` (copied to the clipboard, or
 downloaded as `line-of-sight-sidecar.json` when the clipboard is unavailable).
 
 State in the app is otherwise in-memory only, so **the sidecar is the artifact to
-keep** — see the [UI guide](../guides/ui.md).
+keep** — see the [UI guide](ui.md).
 
 ## Shape
 
@@ -21,7 +21,7 @@ keep** — see the [UI guide](../guides/ui.md).
 }
 ```
 
-[`AGENTS.md`](../../AGENTS.md) names the core contract fields as
+[`AGENTS.md`](../AGENTS.md) names the core contract fields as
 `{ assetRef, width, height, gridScale, occluders }` — preserve those. The current
 exporter additionally serialises `tokens` so a session's counter layout
 round-trips; keep that in mind when changing the shape.
@@ -68,7 +68,7 @@ identity.
 ## Notes
 
 - All coordinates are board pixels with the origin at the top-left, matching the
-  [core](../architecture/los-core.md).
+  [core](los-core.md).
 - Walls are capped at 500 and doors at 200 per analysis; hand-added occluders are
   not subject to those caps.
 - The format is consumed by reimport into other tooling; the app itself does not

@@ -37,11 +37,11 @@ Determinism is what makes the tool reviewable and testable:
   hard-coded — keep new thresholds relative to the grid so behaviour scales with
   map resolution.
 - The caps (≤500 walls, ≤200 doors) are part of the contract; if you change them
-  update [`reference/sidecar-format.md`](../reference/sidecar-format.md) and the
+  update [`reference/sidecar-format.md`](../sidecar-format.md) and the
   [analysis pipeline diagram](../diagrams/analysis-pipeline.dot).
 - Keep floating-point tolerances centralized (the `0.000001` epsilons in the
   segment tests) rather than sprinkling new ones.
 
 See the full pipeline in
-[architecture/los-core.md](../architecture/los-core.md) and the
+[architecture/los-core.md](../los-core.md) and the
 [analysis pipeline diagram](../diagrams/analysis-pipeline.png).

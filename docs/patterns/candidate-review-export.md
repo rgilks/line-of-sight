@@ -20,7 +20,7 @@ flowchart LR
 - Review tools and re-analysis: `analyzeTiles`, the editing tools, and
   `carveDoorGaps` in `web/src/main.tsx`.
 - Export: `exportSidecar` in `web/src/main.tsx`; shape in
-  [reference/sidecar-format.md](../reference/sidecar-format.md).
+  [reference/sidecar-format.md](../sidecar-format.md).
 
 ## Why this shape
 
