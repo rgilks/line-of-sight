@@ -42,6 +42,21 @@ body {
   color: rgba(245, 245, 245, 0.55);
 }
 
+.play-hud #copyLink {
+  font: inherit;
+  font-size: 0.8rem;
+  color: var(--green);
+  background: transparent;
+  border: 1px solid rgba(57, 255, 20, 0.4);
+  border-radius: 5px;
+  padding: 0.25rem 0.7rem;
+  cursor: pointer;
+}
+
+.play-hud #copyLink:hover {
+  background: rgba(57, 255, 20, 0.1);
+}
+
 .play-hud #status,
 .play-hud #who {
   font-family: 'JetBrains Mono', monospace;

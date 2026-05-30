@@ -231,6 +231,7 @@ const mount = (): void => {
       <strong>Line of Sight — Multiplayer</strong>
       <span id="status"></span>
       <span id="who"></span>
+      <button id="copyLink" type="button">Copy invite link</button>
       <span class="hint">${hint}</span>
     </header>
     <main class="play-board"><canvas id="board"></canvas></main>`
@@ -241,7 +242,28 @@ const mount = (): void => {
   canvas = element
   ctx = context
   canvas.addEventListener('pointerdown', onPointerDown)
+  wireCopyLink()
   connect()
+}
+
+// Copy the clean player-join URL for this table (no gm flag) to the clipboard so
+// the GM can paste it to players.
+const wireCopyLink = (): void => {
+  const button = document.querySelector<HTMLButtonElement>('#copyLink')
+  if (!button) return
+  const inviteUrl = `${location.origin}/play?table=${encodeURIComponent(tableId)}`
+  button.addEventListener('click', () => {
+    void navigator.clipboard.writeText(inviteUrl).then(
+      () => {
+        button.textContent = 'Copied!'
+        window.setTimeout(() => (button.textContent = 'Copy invite link'), 1500)
+      },
+      () => {
+        // Clipboard blocked (e.g. insecure context) — show the URL to copy by hand.
+        button.textContent = inviteUrl
+      }
+    )
+  })
 }
 
 mount()
