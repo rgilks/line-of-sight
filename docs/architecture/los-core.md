@@ -18,10 +18,9 @@ type DoorOccluder = { type: 'door'; id: string; x1; y1; x2; y2; open: boolean }
 type Occluder    = WallOccluder | DoorOccluder
 ```
 
-`analyzeImageRgba` returns an `AnalysisResult` carrying `width`, `height`,
-`grid_scale`, the `occluders` array, and a `stats` block
-(`dark_pixels`, `horizontal_candidates`, `vertical_candidates`, `door_candidates`)
-useful for tuning and diagnostics.
+`analyzeImageRgba` returns a flat `Occluder[]` — the detected walls followed by
+the detected doors. The board's width, height, and grid scale are inputs the
+caller already holds, so they are not echoed back in the result.
 
 A `DoorStateLookup` (`Record<string, boolean | {open: boolean} | undefined>`)
 lets callers override door open/closed state without mutating the occluders;
@@ -32,6 +31,8 @@ both the boolean and `{open}` shapes are accepted, falling back to the door's ow
 
 Input is a raw RGBA buffer plus a `gridScale` hint. The buffer length must equal
 `width * height * 4` and dimensions must be positive, or it throws.
+
+![Wall and door analysis pipeline](../diagrams/analysis-pipeline.png)
 
 1. **Dark mask** (`buildDarkMask`). Each pixel is marked `1` when its alpha is
    above 32 and its Rec. 709 luminance (`0.2126r + 0.7152g + 0.0722b`) is below

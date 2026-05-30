@@ -4,6 +4,13 @@ Line of Sight is a browser-first tool for extracting and reviewing visibility
 metadata from geomorphic tactical maps. It is built from three layers with a
 strict separation of concerns (see the Coding Rules in [`AGENTS.md`](../../AGENTS.md)).
 
+![System overview](../diagrams/system-overview.png)
+
+The load-bearing design patterns are written up in [`docs/patterns/`](../patterns/README.md);
+this document is the map of *what exists and where*, and the patterns explain
+*why each piece has its shape*. Diagram sources live in
+[`docs/diagrams/`](../diagrams/README.md).
+
 ## Layers
 
 ### 1. Deterministic core — `web/src/los-core.ts`
@@ -84,6 +91,26 @@ starts fresh, and the **sidecar export is the durable artifact**. Two offscreen
 canvases back the fog — `exploredCanvas` (cumulative seen area) and `fogCanvas`
 (scratch compositing) — and undo/redo is a bounded stack of `EditorSnapshot`s
 covering occluders, door states, tokens, and selection.
+
+This reactive-state-driving-an-imperative-canvas arrangement is the
+[signals and rendering](../patterns/signals-and-rendering.md) pattern; the
+history mechanism is [snapshot undo/redo](../patterns/snapshot-undo-redo.md).
+
+## Patterns
+
+The design patterns that hold this codebase together are documented one-per-file
+in [`docs/patterns/`](../patterns/README.md):
+
+- [Layered separation](../patterns/layered-separation.md) — the three layers and
+  their one-directional dependency rule.
+- [Deterministic core](../patterns/deterministic-core.md) — pure, side-effect-free
+  geometry and analysis; the basis for the unit tests.
+- [Signals and rendering](../patterns/signals-and-rendering.md) — module-level
+  signals + a single `effect(renderBoard)` driven by a `renderTick`.
+- [Snapshot undo/redo](../patterns/snapshot-undo-redo.md) — a bounded stack of
+  whole-state snapshots.
+- [Candidate → review → export](../patterns/candidate-review-export.md) —
+  detection proposes candidates; the human corrects; the sidecar is the artifact.
 
 ## Build and runtime shape
 

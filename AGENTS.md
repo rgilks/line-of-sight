@@ -20,9 +20,11 @@ separate reminder. Unless the user says not to:
 2. Run the narrowest useful check.
 3. Commit the change with a clear message.
 4. Push `main` to GitHub.
-5. Deploy to Cloudflare when the served app, Worker, build output, or deployment
+5. For code changes (not docs-only): confirm CI is green, then smoke-test the
+   live site in a browser — not just `curl`.
+6. Deploy to Cloudflare when the served app, Worker, build output, or deployment
    config changed.
-6. Verify the live site at `https://los.tre.systems` after pushing/deploying.
+7. Verify the live site at `https://los.tre.systems` after pushing/deploying.
 
 For documentation-only or agent-instruction changes that are not served by the
 Cloudflare app, a deploy is usually unnecessary; still push the commit and verify
@@ -37,32 +39,47 @@ Live verification should include:
 ## Project Shape
 
 - `web/src/los-core.ts` contains the deterministic TypeScript geometry and
-  image-analysis core.
+  image-analysis core; `web/src/los-core.test.ts` is its Vitest suite.
 - `web/` contains the browser UI built by Vite.
 - `src/worker.ts` is the Cloudflare Worker shell that serves static assets and
   `/healthz`.
 - `wrangler.toml` owns Cloudflare deployment config for `los.tre.systems`.
+- `scripts/` holds the diagram render/check tooling.
 - `dist/` is generated output.
 - The previous Rust/WASM implementation is preserved on the
   `rust-wasm-version` branch.
 
+Architecture, design patterns, and diagrams are documented in [`docs/`](docs/README.md).
+Read [`docs/patterns/`](docs/patterns/README.md) before non-trivial changes — this
+codebase is organised around a small set of named patterns (deterministic core,
+layered separation, signals + single render effect, snapshot undo/redo, and
+candidate → review → export).
+
 ## Common Commands
 
 ```bash
-npm run build
-npm run build:web
-npm run test
-npm run check
-npm run deploy
+npm run typecheck      # tsc --noEmit
+npm run test           # vitest run (unit tests for web/src/los-core.ts)
+npm run build          # vite build -> dist/client
+npm run check          # typecheck + test + build + check:diagrams
+npm run diagrams       # render docs/diagrams/*.dot to PNG
+npm run check:diagrams # verify each .dot renders and its PNG exists
+npm run deploy         # build, then wrangler deploy
 ```
 
 Use the narrowest check that proves the change:
 
 - CSS or HTML only: `npm run build:web` is usually enough.
-- TypeScript core or UI changes: `npm run check`.
+- Core geometry/analysis (`web/src/los-core.ts`): `npm run test` (add/adjust
+  cases in `web/src/los-core.test.ts`), then `npm run check`.
+- TypeScript UI changes: `npm run check`.
 - Worker or deployment config changes: `npm run check`, then `npm run deploy`.
+- Diagram (`.dot`) changes: `npm run diagrams` to re-render, then commit the PNGs.
 - Documentation-only changes: no build is required unless the docs affect a
   generated or served artifact.
+
+CI (`.github/workflows/ci.yml`) runs typecheck, tests, build, and the diagram
+check on every push to `main` and on PRs.
 
 ## Local Asset Policy
 

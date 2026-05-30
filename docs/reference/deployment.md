@@ -67,9 +67,21 @@ Worker shell is exercised at deploy time and via the live `/healthz` check.
 ## Checks
 
 ```bash
-npm run test        # tsc --noEmit (type check — there is no unit-test runner)
-npm run check       # build + test
+npm run typecheck      # tsc --noEmit
+npm run test           # vitest run (unit tests for the core)
+npm run check          # typecheck + test + build + check:diagrams
+npm run check:diagrams # verify Graphviz .dot sources render and PNGs exist
 ```
 
 Use the narrowest check that proves the change (see Common Commands in
 [`AGENTS.md`](../../AGENTS.md)).
+
+## Continuous integration
+
+`.github/workflows/ci.yml` runs on every push to `main` and on pull requests. It
+installs dependencies and Graphviz, then runs `typecheck`, `test`, `build`, and
+`check:diagrams`. CI does not deploy — deploys are run manually with
+`npm run deploy` once CI is green and the change is verified.
+
+For code changes, confirm CI is green and smoke-test the live site in a browser
+(not just `curl`) before considering the work done.

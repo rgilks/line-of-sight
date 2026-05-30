@@ -6,6 +6,10 @@ that renders the board to a 2D `<canvas>` and calls the
 module-level signals and is **in-memory only** — reload starts fresh, so the
 [sidecar export](../reference/sidecar-format.md) is the thing to keep.
 
+The two patterns behind this UI are
+[signals and rendering](../patterns/signals-and-rendering.md) (how state drives
+the canvas) and [snapshot undo/redo](../patterns/snapshot-undo-redo.md).
+
 ## Layout
 
 A full-bleed canvas with a collapsible **control drawer**. The drawer has four
@@ -62,6 +66,8 @@ Any token can be elected the **point of view** (`povTokenId`). The POV token's
 - **Undo / Redo** walk the editor history.
 
 ## Fog and "explored" tracking
+
+![Visibility and fog rendering](../diagrams/visibility-and-fog.png)
 
 Two offscreen canvases back the fog:
 

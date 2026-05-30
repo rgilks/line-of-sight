@@ -5,7 +5,6 @@ import {detectWebGpu} from './gpu'
 import {
   analyzeImageRgba,
   visibilityPolygon,
-  type AnalysisResult,
   type DoorOccluder,
   type Occluder,
   type Point
@@ -411,14 +410,14 @@ const analyzeTiles = async (): Promise<void> => {
     scratchCtx.clearRect(0, 0, scratch.width, scratch.height)
     scratchCtx.drawImage(placement.tile.image, 0, 0)
     const imageData = scratchCtx.getImageData(0, 0, scratch.width, scratch.height)
-    const result = analyzeImageRgba(
+    const detected = analyzeImageRgba(
       scratch.width,
       scratch.height,
       imageData.data,
       gridScale()
-    ) satisfies AnalysisResult
+    )
 
-    for (const occluder of result.occluders) {
+    for (const occluder of detected) {
       generated.push(transformOccluder(occluder, placement))
     }
   }

@@ -1,0 +1,134 @@
+digraph VisibilityAndFog {
+  graph [
+    rankdir=TB,
+    bgcolor="#ffffff",
+    pad="0.55",
+    nodesep="0.48",
+    ranksep="0.74",
+    splines=polyline,
+    outputorder=edgesfirst,
+    compound=true,
+    newrank=true,
+    forcelabels=true,
+    fontname="Avenir",
+    label=<
+      <TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0">
+        <TR><TD><FONT POINT-SIZE="34"><B>Visibility and Fog Rendering</B></FONT></TD></TR>
+      </TABLE>
+    >,
+    labelloc=t,
+    labeljust=c
+  ];
+
+  node [
+    shape=box,
+    style="rounded,filled",
+    margin="0.21,0.13",
+    width=2.85,
+    height=0.72,
+    fixedsize=false,
+    fontname="Avenir",
+    fontsize=18,
+    penwidth=2.4,
+    fontcolor="#14213d",
+    color="#2264c7",
+    fillcolor="#eaf3ff:#ffffff",
+    gradientangle=270
+  ];
+
+  edge [
+    color="#263a59",
+    fontname="Avenir",
+    fontsize=13,
+    fontcolor="#3d4a5c",
+    penwidth=2.2,
+    arrowsize=0.78
+  ];
+
+  // Reactive trigger (blue client surface)
+  T [label=<<B>State change</B><BR/><FONT POINT-SIZE="15">move POV, edit occluder, toggle door</FONT>>, fillcolor="#edf7ff:#ffffff", color="#2f80ed"];
+  RC [label=<<B>requestCanvasRender</B><BR/><FONT POINT-SIZE="15">bump renderTick signal</FONT>>, fillcolor="#edf7ff:#ffffff", color="#2f80ed"];
+
+  // Decision
+  POV [
+    label=<<B>POV token set?</B>>,
+    shape=diamond,
+    style=filled,
+    width=2.9,
+    height=1.05,
+    fillcolor="#ffffff",
+    color="#1f2f46",
+    penwidth=2.4
+  ];
+
+  // Pure core (purple)
+  VP [
+    label=<<B>visibilityPolygon</B><BR/><FONT POINT-SIZE="15">128 base rays + 3 per segment endpoint</FONT><BR/><FONT POINT-SIZE="13">nearest hit, dedupe</FONT>>,
+    fillcolor="#f5f3ff:#ffffff",
+    color="#7c3aed",
+    width=3.4
+  ];
+
+  // Persistence-ish offscreen canvases (teal)
+  subgraph cluster_canvases {
+    graph [
+      label=<
+        <TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="2">
+          <TR><TD ALIGN="LEFT"><FONT POINT-SIZE="17" COLOR="#0f766e"><B>OFFSCREEN CANVASES</B></FONT></TD></TR>
+          <TR><TD ALIGN="LEFT"><FONT POINT-SIZE="12" COLOR="#357a74">In-memory state; cleared on re-analysis and resize.</FONT></TD></TR>
+        </TABLE>
+      >,
+      labelloc=t,
+      labeljust=l,
+      color="#99d5cf",
+      fillcolor="#f0fdfa",
+      style="rounded,filled",
+      penwidth=1.8,
+      margin=20
+    ];
+
+    EX [label=<<B>exploredCanvas</B><BR/><FONT POINT-SIZE="15">cumulative seen area</FONT>>, fillcolor="#e6fffb:#ffffff", color="#0f766e"];
+    FOG [label=<<B>fogCanvas</B><BR/><FONT POINT-SIZE="15">scratch compositing</FONT>>, fillcolor="#e6fffb:#ffffff", color="#0f766e"];
+  }
+
+  // Draw order (green: imperative render code)
+  subgraph cluster_render {
+    graph [
+      label=<
+        <TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="2">
+          <TR><TD ALIGN="LEFT"><FONT POINT-SIZE="17" COLOR="#1e6b43"><B>renderBoard DRAW ORDER</B></FONT></TD></TR>
+          <TR><TD ALIGN="LEFT"><FONT POINT-SIZE="12" COLOR="#4e7a61">One effect(renderBoard) subscribes to renderTick.</FONT></TD></TR>
+        </TABLE>
+      >,
+      labelloc=t,
+      labeljust=l,
+      color="#b8e5c8",
+      fillcolor="#f4fbf6",
+      style="rounded,filled",
+      penwidth=1.8,
+      margin=20
+    ];
+
+    R1 [label=<<B>map + grid + doors</B>>, fillcolor="#eaf8ef:#ffffff", color="#22865a"];
+    R2 [label=<<B>drawFog</B><BR/><FONT POINT-SIZE="15">dim outside visible; hide unexplored</FONT>>, fillcolor="#eaf8ef:#ffffff", color="#22865a"];
+    R3 [label=<<B>range + tokens + overlays</B>>, fillcolor="#eaf8ef:#ffffff", color="#22865a"];
+
+    R1 -> R2 -> R3;
+  }
+
+  OUT [
+    label=<<B>Visible canvas</B>>,
+    fillcolor="#d8f5de:#effcf2",
+    color="#15803d",
+    penwidth=3.2
+  ];
+
+  T -> RC -> POV;
+  POV -> VP [label="Yes"];
+  POV -> R1 [label="No: no fog", lhead=cluster_render];
+  VP -> EX [label="markExplored fills polygon", lhead=cluster_canvases];
+  VP -> R2 [label="current visible polygon", lhead=cluster_render];
+  EX -> R2 [label="seen mask", ltail=cluster_canvases, lhead=cluster_render];
+  FOG -> R2 [label="composite", ltail=cluster_canvases, lhead=cluster_render, style=dashed, color="#6b7280", fontcolor="#6b7280"];
+  R3 -> OUT [ltail=cluster_render];
+}

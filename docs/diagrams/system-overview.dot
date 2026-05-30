@@ -1,0 +1,110 @@
+digraph SystemOverview {
+  graph [
+    rankdir=TB,
+    bgcolor="#ffffff",
+    pad="0.55",
+    nodesep="0.55",
+    ranksep="0.85",
+    splines=polyline,
+    outputorder=edgesfirst,
+    compound=true,
+    newrank=true,
+    forcelabels=true,
+    fontname="Avenir",
+    label=<
+      <TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0">
+        <TR><TD><FONT POINT-SIZE="34"><B>System Overview</B></FONT></TD></TR>
+      </TABLE>
+    >,
+    labelloc=t,
+    labeljust=c
+  ];
+
+  node [
+    shape=box,
+    style="rounded,filled",
+    margin="0.21,0.13",
+    width=3.05,
+    height=0.74,
+    fixedsize=false,
+    fontname="Avenir",
+    fontsize=18,
+    penwidth=2.4,
+    fontcolor="#14213d",
+    color="#2264c7",
+    fillcolor="#eaf3ff:#ffffff",
+    gradientangle=270
+  ];
+
+  edge [
+    color="#263a59",
+    fontname="Avenir",
+    fontsize=13,
+    fontcolor="#3d4a5c",
+    penwidth=2.2,
+    arrowsize=0.78
+  ];
+
+  // ---- Client surface (blue) ----
+  U1 [label=<<B>Browser</B><BR/><FONT POINT-SIZE="15">Preact + signals SPA</FONT>>];
+  IN [label=<<B>Local map images</B><BR/><FONT POINT-SIZE="15">user-selected, never uploaded</FONT>>, fillcolor="#edf7ff:#ffffff", color="#2f80ed"];
+
+  // ---- Deterministic core (purple: pure, no side effects) ----
+  subgraph cluster_core {
+    graph [
+      label=<
+        <TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="2">
+          <TR><TD ALIGN="LEFT"><FONT POINT-SIZE="17" COLOR="#5f3b8a"><B>DETERMINISTIC CORE</B></FONT></TD></TR>
+          <TR><TD ALIGN="LEFT"><FONT POINT-SIZE="12" COLOR="#6d4d8d">Pure TypeScript. No DOM, no Cloudflare. Same inputs produce same outputs.</FONT></TD></TR>
+        </TABLE>
+      >,
+      labelloc=t,
+      labeljust=l,
+      color="#d6c6ee",
+      fillcolor="#fbf8ff",
+      style="rounded,filled",
+      penwidth=1.8,
+      margin=20
+    ];
+
+    C1 [label=<<B>analyzeImageRgba</B><BR/><FONT POINT-SIZE="15">RGBA pixels to wall/door candidates</FONT>>, fillcolor="#f5f3ff:#ffffff", color="#7c3aed"];
+    C2 [label=<<B>visibilityPolygon / hasLineOfSight</B><BR/><FONT POINT-SIZE="15">occluders + viewpoint to visibility</FONT>>, fillcolor="#f5f3ff:#ffffff", color="#7c3aed"];
+  }
+
+  // ---- Cloudflare Worker (green: server code) ----
+  subgraph cluster_worker {
+    graph [
+      label=<
+        <TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="2">
+          <TR><TD ALIGN="LEFT"><FONT POINT-SIZE="17" COLOR="#1e6b43"><B>CLOUDFLARE WORKER</B></FONT></TD></TR>
+          <TR><TD ALIGN="LEFT"><FONT POINT-SIZE="12" COLOR="#4e7a61">Thin shell: serves static assets and a health check at los.tre.systems.</FONT></TD></TR>
+        </TABLE>
+      >,
+      labelloc=t,
+      labeljust=l,
+      color="#b8e5c8",
+      fillcolor="#f4fbf6",
+      style="rounded,filled",
+      penwidth=1.8,
+      margin=20
+    ];
+
+    W1 [label=<<B>Static assets</B><BR/><FONT POINT-SIZE="15">dist/client (SPA fallback)</FONT>>, fillcolor="#eaf8ef:#ffffff", color="#22865a"];
+    W2 [label=<<B>GET /healthz</B><BR/><FONT POINT-SIZE="15">ok + service name</FONT>>, fillcolor="#eaf8ef:#ffffff", color="#22865a"];
+  }
+
+  // ---- Build (yellow: tooling step) ----
+  B1 [label=<<B>Vite build</B><BR/><FONT POINT-SIZE="15">web/ to dist/client</FONT>>, fillcolor="#fff4d1:#fffaf0", color="#d39a00"];
+
+  // ---- Output (teal persistence) / terminal success (bold green) ----
+  OUT [label=<<B>LOS sidecar JSON</B><BR/><FONT POINT-SIZE="15">clipboard or download</FONT>>, fillcolor="#d8f5de:#effcf2", color="#15803d", penwidth=3.2];
+
+  // ---- Edges ----
+  B1 -> W1 [label="deploy"];
+  U1 -> W1 [label="loads SPA"];
+  U1 -> W2 [label="health check", style=dashed, color="#6b7280", fontcolor="#6b7280"];
+  IN -> U1 [label="drag/drop or picker"];
+  U1 -> C1 [label="analyze tiles", lhead=cluster_core];
+  U1 -> C2 [label="render + queries", lhead=cluster_core];
+  C1 -> OUT [label="reviewed occluders", ltail=cluster_core];
+}

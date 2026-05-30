@@ -24,19 +24,6 @@ export type DoorOccluder = {
 
 export type Occluder = WallOccluder | DoorOccluder
 
-export type AnalysisResult = {
-  width: number
-  height: number
-  grid_scale: number
-  occluders: Occluder[]
-  stats: {
-    dark_pixels: number
-    horizontal_candidates: number
-    vertical_candidates: number
-    door_candidates: number
-  }
-}
-
 type Segment = {
   x1: number
   y1: number
@@ -67,7 +54,7 @@ export const analyzeImageRgba = (
   height: number,
   rgba: Uint8Array | Uint8ClampedArray,
   gridScale: number
-): AnalysisResult => {
+): Occluder[] => {
   if (width <= 0 || height <= 0) {
     throw new Error('Image dimensions must be positive.')
   }
@@ -79,7 +66,6 @@ export const analyzeImageRgba = (
 
   const effectiveGrid = Number.isFinite(gridScale) && gridScale > 0 ? gridScale : 50
   const mask = buildDarkMask(width, height, rgba)
-  const darkPixels = mask.reduce((count, dark) => count + dark, 0)
   const minRun = Math.floor(Math.max(effectiveGrid * 0.45, 18))
   const snap = Math.max(effectiveGrid / 4, 4)
 
@@ -229,26 +215,7 @@ export const analyzeImageRgba = (
     open: false
   }))
 
-  return {
-    width,
-    height,
-    grid_scale: effectiveGrid,
-    occluders: [...walls, ...doors],
-    stats: {
-      dark_pixels: darkPixels,
-      horizontal_candidates:
-        structuralHorizontal.length +
-        structuralDiagonalDown.length +
-        structuralSlopeDownShallow.length +
-        structuralSlopeDownSteep.length,
-      vertical_candidates:
-        structuralVertical.length +
-        structuralDiagonalUp.length +
-        structuralSlopeUpShallow.length +
-        structuralSlopeUpSteep.length,
-      door_candidates: doorCandidates.length
-    }
-  }
+  return [...walls, ...doors]
 }
 
 const refineWallCandidates = (
