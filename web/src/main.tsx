@@ -44,30 +44,32 @@ type EditDrag = {
 }
 
 type CounterKind =
-  | 'adventurer'
-  | 'passenger'
-  | 'police'
+  | 'amphibian'
+  | 'engineer'
+  | 'insectoid'
+  | 'marine'
+  | 'medic'
+  | 'officer'
+  | 'psion'
+  | 'reptilian'
+  | 'scout'
+  | 'security'
   | 'scientist'
-  | 'troop'
+  | 'trader'
 
 type CounterDefinition = {
   kind: CounterKind
   name: string
+  portrait: string
 }
 
-type CounterGroupId = 'blue' | 'green' | 'orange' | 'purple' | 'red'
-
-type CounterGroupDefinition = {
-  id: CounterGroupId
-  name: string
-  color: string
-}
+type CounterGroupId = 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H'
 
 type Token = Point & {
   id: string
   kind: CounterKind
   group: CounterGroupId
-  member: string
+  member: number
   label: string
 }
 
@@ -107,8 +109,8 @@ const editDrag = signal<EditDrag | null>(null)
 const selectedOccluderId = signal<string | null>(null)
 const hoveredOccluderId = signal<string | null>(null)
 const tokens = signal<Token[]>([])
-const activeCounterKind = signal<CounterKind>('troop')
-const activeCounterGroup = signal<CounterGroupId>('red')
+const activeCounterKind = signal<CounterKind>('officer')
+const activeCounterGroup = signal<CounterGroupId>('A')
 const tokenDrag = signal<TokenDrag | null>(null)
 const selectedTokenId = signal<string | null>(null)
 const hoveredTokenId = signal<string | null>(null)
@@ -127,19 +129,21 @@ const doorCarveTolerance = 8
 const minCarvedWallLength = 8
 const historyLimit = 60
 const counterDefinitions: CounterDefinition[] = [
-  {kind: 'troop', name: 'Troop'},
-  {kind: 'adventurer', name: 'Adventurer'},
-  {kind: 'scientist', name: 'Scientist'},
-  {kind: 'police', name: 'Police'},
-  {kind: 'passenger', name: 'Passenger'}
+  {kind: 'officer', name: 'Officer', portrait: '/token-portraits/officer.webp'},
+  {kind: 'marine', name: 'Marine', portrait: '/token-portraits/marine.webp'},
+  {kind: 'scout', name: 'Scout', portrait: '/token-portraits/scout.webp'},
+  {kind: 'engineer', name: 'Engineer', portrait: '/token-portraits/engineer.webp'},
+  {kind: 'medic', name: 'Medic', portrait: '/token-portraits/medic.webp'},
+  {kind: 'scientist', name: 'Scientist', portrait: '/token-portraits/scientist.webp'},
+  {kind: 'trader', name: 'Trader', portrait: '/token-portraits/trader.webp'},
+  {kind: 'security', name: 'Security', portrait: '/token-portraits/security.webp'},
+  {kind: 'reptilian', name: 'Reptilian', portrait: '/token-portraits/reptilian.webp'},
+  {kind: 'amphibian', name: 'Amphibian', portrait: '/token-portraits/amphibian.webp'},
+  {kind: 'insectoid', name: 'Insectoid', portrait: '/token-portraits/insectoid.webp'},
+  {kind: 'psion', name: 'Psion', portrait: '/token-portraits/psion.webp'}
 ]
-const counterGroups: CounterGroupDefinition[] = [
-  {id: 'red', name: 'Red', color: '#d74d4d'},
-  {id: 'orange', name: 'Orange', color: '#d66d2a'},
-  {id: 'green', name: 'Green', color: '#30b985'},
-  {id: 'blue', name: 'Blue', color: '#5398df'},
-  {id: 'purple', name: 'Purple', color: '#8f6ed8'}
-]
+const counterGroupLetters: CounterGroupId[] = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
+const counterPortraits = new Map<CounterKind, HTMLImageElement>()
 
 const exploredCanvas = document.createElement('canvas')
 const exploredCtx = exploredCanvas.getContext('2d')
@@ -165,6 +169,19 @@ const setStatus = (message: string): void => {
 const requestCanvasRender = (): void => {
   renderTick.value += 1
 }
+
+const preloadCounterPortraits = (): void => {
+  if (counterPortraits.size > 0) return
+  for (const definition of counterDefinitions) {
+    const image = new Image()
+    image.decoding = 'async'
+    image.onload = requestCanvasRender
+    image.src = definition.portrait
+    counterPortraits.set(definition.kind, image)
+  }
+}
+
+preloadCounterPortraits()
 
 const cloneOccluders = (items: Occluder[]): Occluder[] =>
   items.map((occluder) => ({...occluder}))
@@ -708,21 +725,17 @@ const pointInPolygon = (point: Point, polygon: Point[]): boolean => {
   return inside
 }
 
-const tokenSize = (): number => Math.min(58, Math.max(34, gridScale() * 0.78))
+const tokenSize = (): number => Math.min(64, Math.max(38, gridScale() * 0.84))
 
 const counterDefinitionFor = (kind: CounterKind): CounterDefinition =>
   counterDefinitions.find((definition) => definition.kind === kind) ?? counterDefinitions[0]
 
-const counterGroupFor = (id: CounterGroupId): CounterGroupDefinition =>
-  counterGroups.find((group) => group.id === id) ?? counterGroups[0]
-
 const drawCounterToken = (token: Token, visible: boolean): void => {
   const size = tokenSize()
   const half = size / 2
-  const group = counterGroupFor(token.group)
   const selected = selectedTokenId.value === token.id
   const hovered = hoveredTokenId.value === token.id
-  const inset = size * 0.035
+  const inset = Math.max(2, size * 0.045)
 
   ctx.save()
   ctx.globalAlpha = visible ? 1 : 0.28
@@ -731,42 +744,63 @@ const drawCounterToken = (token: Token, visible: boolean): void => {
   ctx.shadowColor = 'rgba(0, 0, 0, 0.5)'
   ctx.shadowBlur = screenPixels(7)
   ctx.shadowOffsetY = screenPixels(2)
-  roundedRect(-half, -half, size, size, size * 0.04)
+  roundedRect(-half, -half, size, size, size * 0.055)
   ctx.fillStyle = '#050505'
   ctx.fill()
 
   ctx.shadowColor = 'transparent'
+  ctx.save()
   roundedRect(
     -half + inset,
     -half + inset,
     size - inset * 2,
     size - inset * 2,
-    size * 0.025
+    size * 0.035
   )
-  ctx.fillStyle = group.color
-  ctx.fill()
+  ctx.clip()
+  drawCounterPortrait(
+    token.kind,
+    -half + inset,
+    -half + inset,
+    size - inset * 2,
+    size - inset * 2
+  )
+  ctx.restore()
 
   const highlight = ctx.createLinearGradient(0, -half + inset, 0, half - inset)
-  highlight.addColorStop(0, 'rgba(255, 255, 255, 0.22)')
-  highlight.addColorStop(0.46, 'rgba(255, 255, 255, 0.03)')
-  highlight.addColorStop(1, 'rgba(0, 0, 0, 0.18)')
+  highlight.addColorStop(0, 'rgba(255, 255, 255, 0.18)')
+  highlight.addColorStop(0.5, 'rgba(255, 255, 255, 0.02)')
+  highlight.addColorStop(1, 'rgba(0, 0, 0, 0.28)')
+  roundedRect(
+    -half + inset,
+    -half + inset,
+    size - inset * 2,
+    size - inset * 2,
+    size * 0.035
+  )
   ctx.fillStyle = highlight
   ctx.fill()
 
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.28)'
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)'
   ctx.lineWidth = screenPixels(1)
   ctx.stroke()
 
-  drawCounterIcon(token.kind, 0, size * 0.04, size * 0.72)
-
-  ctx.font = `900 ${Math.max(12, size * 0.27)}px "JetBrains Mono", monospace`
-  ctx.textAlign = 'right'
-  ctx.textBaseline = 'top'
-  ctx.lineWidth = screenPixels(2.5)
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.34)'
-  ctx.strokeText(token.label, half - inset - size * 0.08, -half + inset + size * 0.015)
+  ctx.font = `900 ${Math.max(11, size * 0.24)}px "JetBrains Mono", monospace`
+  const labelMetrics = ctx.measureText(token.label)
+  const labelWidth = Math.max(size * 0.36, labelMetrics.width + size * 0.16)
+  const labelHeight = Math.max(14, size * 0.3)
+  const labelX = half - inset - labelWidth
+  const labelY = -half + inset
+  roundedRect(labelX, labelY, labelWidth, labelHeight, size * 0.045)
   ctx.fillStyle = '#050505'
-  ctx.fillText(token.label, half - inset - size * 0.08, -half + inset + size * 0.015)
+  ctx.fill()
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)'
+  ctx.lineWidth = screenPixels(1)
+  ctx.stroke()
+  ctx.fillStyle = '#ffffff'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.fillText(token.label, labelX + labelWidth / 2, labelY + labelHeight / 2 + screenPixels(0.4))
 
   if (selected || hovered) {
     ctx.strokeStyle = selected ? '#39ff14' : 'rgba(57, 255, 20, 0.55)'
@@ -783,6 +817,50 @@ const drawCounterToken = (token: Token, visible: boolean): void => {
   }
 
   ctx.restore()
+}
+
+const drawCounterPortrait = (
+  kind: CounterKind,
+  x: number,
+  y: number,
+  width: number,
+  height: number
+): void => {
+  const image = counterPortraits.get(kind)
+  if (image?.complete && image.naturalWidth > 0) {
+    drawImageCover(image, x, y, width, height)
+    return
+  }
+
+  const fallback = ctx.createLinearGradient(x, y, x + width, y + height)
+  fallback.addColorStop(0, '#1f2937')
+  fallback.addColorStop(1, '#050505')
+  ctx.fillStyle = fallback
+  ctx.fillRect(x, y, width, height)
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.82)'
+  ctx.font = `900 ${Math.max(16, width * 0.38)}px "JetBrains Mono", monospace`
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.fillText(counterDefinitionFor(kind).name[0] ?? '?', x + width / 2, y + height / 2)
+}
+
+const drawImageCover = (
+  image: HTMLImageElement,
+  x: number,
+  y: number,
+  width: number,
+  height: number
+): void => {
+  const scale = Math.max(width / image.naturalWidth, height / image.naturalHeight)
+  const drawWidth = image.naturalWidth * scale
+  const drawHeight = image.naturalHeight * scale
+  ctx.drawImage(
+    image,
+    x + (width - drawWidth) / 2,
+    y + (height - drawHeight) / 2,
+    drawWidth,
+    drawHeight
+  )
 }
 
 const roundedRect = (
@@ -804,203 +882,6 @@ const roundedRect = (
   ctx.lineTo(x, y + limitedRadius)
   ctx.quadraticCurveTo(x, y, x + limitedRadius, y)
   ctx.closePath()
-}
-
-const drawCounterIcon = (kind: CounterKind, x: number, y: number, size: number): void => {
-  ctx.save()
-  ctx.translate(x, y)
-  ctx.fillStyle = '#050505'
-  ctx.strokeStyle = '#050505'
-  ctx.lineWidth = Math.max(1.4, size * 0.08)
-  ctx.lineCap = 'round'
-  ctx.lineJoin = 'round'
-  drawHumanCounterIcon(kind, size)
-  ctx.restore()
-}
-
-const drawHumanCounterIcon = (kind: CounterKind, size: number): void => {
-  if (kind === 'troop') {
-    drawTroopSilhouette(size)
-  } else if (kind === 'adventurer') {
-    drawAdventurerSilhouette(size)
-  } else if (kind === 'scientist') {
-    drawScientistSilhouette(size)
-  } else if (kind === 'police') {
-    drawPoliceSilhouette(size)
-  } else {
-    drawPassengerSilhouette(size)
-  }
-}
-
-const drawTroopSilhouette = (size: number): void => {
-  ctx.lineWidth = Math.max(1.8, size * 0.12)
-
-  ctx.beginPath()
-  ctx.ellipse(-size * 0.16, -size * 0.11, size * 0.28, size * 0.16, -0.22, 0, Math.PI * 2)
-  ctx.fill()
-
-  ctx.beginPath()
-  ctx.arc(size * 0.07, -size * 0.24, size * 0.12, 0, Math.PI * 2)
-  ctx.fill()
-
-  ctx.beginPath()
-  ctx.moveTo(-size * 0.38, size * 0.02)
-  ctx.lineTo(-size * 0.12, size * 0.1)
-  ctx.lineTo(size * 0.18, size * 0.05)
-  ctx.lineTo(size * 0.31, -size * 0.02)
-  ctx.lineTo(size * 0.14, -size * 0.13)
-  ctx.lineTo(-size * 0.23, -size * 0.08)
-  ctx.closePath()
-  ctx.fill()
-
-  ctx.beginPath()
-  ctx.moveTo(-size * 0.36, size * 0.06)
-  ctx.lineTo(-size * 0.5, size * 0.24)
-  ctx.moveTo(-size * 0.08, size * 0.08)
-  ctx.lineTo(size * 0.2, size * 0.25)
-  ctx.moveTo(size * 0.13, -size * 0.11)
-  ctx.lineTo(size * 0.38, -size * 0.18)
-  ctx.stroke()
-
-  ctx.lineWidth = Math.max(1.5, size * 0.1)
-  ctx.beginPath()
-  ctx.moveTo(size * 0.19, -size * 0.17)
-  ctx.lineTo(size * 0.52, -size * 0.17)
-  ctx.stroke()
-  ctx.fillRect(size * 0.47, -size * 0.21, size * 0.12, size * 0.06)
-  ctx.fillRect(size * 0.18, -size * 0.12, size * 0.1, size * 0.05)
-}
-
-const drawAdventurerSilhouette = (size: number): void => {
-  ctx.lineWidth = Math.max(1.7, size * 0.105)
-  ctx.beginPath()
-  ctx.arc(size * 0.03, -size * 0.36, size * 0.11, 0, Math.PI * 2)
-  ctx.fill()
-
-  ctx.beginPath()
-  ctx.ellipse(0, -size * 0.09, size * 0.17, size * 0.29, -0.32, 0, Math.PI * 2)
-  ctx.fill()
-
-  ctx.beginPath()
-  ctx.moveTo(-size * 0.1, -size * 0.21)
-  ctx.lineTo(-size * 0.31, -size * 0.38)
-  ctx.moveTo(-size * 0.28, -size * 0.38)
-  ctx.lineTo(-size * 0.43, -size * 0.33)
-  ctx.moveTo(size * 0.1, -size * 0.18)
-  ctx.lineTo(size * 0.34, -size * 0.03)
-  ctx.moveTo(-size * 0.06, size * 0.11)
-  ctx.lineTo(-size * 0.27, size * 0.43)
-  ctx.moveTo(size * 0.08, size * 0.08)
-  ctx.lineTo(size * 0.34, size * 0.37)
-  ctx.stroke()
-
-  ctx.lineWidth = Math.max(1.2, size * 0.075)
-  ctx.beginPath()
-  ctx.moveTo(-size * 0.36, -size * 0.37)
-  ctx.lineTo(-size * 0.36, -size * 0.55)
-  ctx.stroke()
-  ctx.fillRect(-size * 0.43, -size * 0.57, size * 0.13, size * 0.06)
-}
-
-const drawScientistSilhouette = (size: number): void => {
-  ctx.beginPath()
-  ctx.arc(-size * 0.02, -size * 0.42, size * 0.12, 0, Math.PI * 2)
-  ctx.fill()
-
-  ctx.beginPath()
-  ctx.moveTo(-size * 0.16, -size * 0.26)
-  ctx.lineTo(size * 0.15, -size * 0.26)
-  ctx.lineTo(size * 0.27, size * 0.39)
-  ctx.lineTo(size * 0.05, size * 0.47)
-  ctx.lineTo(-size * 0.19, size * 0.42)
-  ctx.lineTo(-size * 0.27, size * 0.05)
-  ctx.closePath()
-  ctx.fill()
-
-  ctx.lineWidth = Math.max(1.3, size * 0.08)
-  ctx.beginPath()
-  ctx.moveTo(-size * 0.17, -size * 0.12)
-  ctx.lineTo(-size * 0.39, size * 0.04)
-  ctx.moveTo(size * 0.14, -size * 0.1)
-  ctx.lineTo(size * 0.34, size * 0.06)
-  ctx.moveTo(-size * 0.06, size * 0.39)
-  ctx.lineTo(-size * 0.1, size * 0.55)
-  ctx.moveTo(size * 0.12, size * 0.37)
-  ctx.lineTo(size * 0.18, size * 0.53)
-  ctx.stroke()
-
-  ctx.beginPath()
-  ctx.moveTo(size * 0.21, -size * 0.05)
-  ctx.lineTo(size * 0.4, size * 0.26)
-  ctx.lineTo(size * 0.13, size * 0.26)
-  ctx.closePath()
-  ctx.fill()
-}
-
-const drawPoliceSilhouette = (size: number): void => {
-  ctx.lineWidth = Math.max(1.7, size * 0.11)
-
-  ctx.beginPath()
-  ctx.arc(size * 0.06, -size * 0.34, size * 0.11, 0, Math.PI * 2)
-  ctx.fill()
-
-  ctx.beginPath()
-  ctx.ellipse(-size * 0.04, -size * 0.1, size * 0.17, size * 0.27, 0.52, 0, Math.PI * 2)
-  ctx.fill()
-
-  ctx.beginPath()
-  ctx.moveTo(-size * 0.16, size * 0.02)
-  ctx.lineTo(-size * 0.35, size * 0.3)
-  ctx.moveTo(size * 0.02, size * 0.07)
-  ctx.lineTo(size * 0.24, size * 0.31)
-  ctx.moveTo(size * 0.01, -size * 0.2)
-  ctx.lineTo(size * 0.3, -size * 0.09)
-  ctx.stroke()
-
-  ctx.lineWidth = Math.max(1.2, size * 0.08)
-  ctx.beginPath()
-  ctx.moveTo(size * 0.21, -size * 0.08)
-  ctx.lineTo(size * 0.45, size * 0.02)
-  ctx.stroke()
-  ctx.beginPath()
-  ctx.moveTo(size * 0.42, -size * 0.01)
-  ctx.lineTo(size * 0.53, size * 0.08)
-  ctx.lineTo(size * 0.4, size * 0.09)
-  ctx.closePath()
-  ctx.fill()
-
-  ctx.beginPath()
-  ctx.moveTo(-size * 0.02, -size * 0.47)
-  ctx.lineTo(size * 0.17, -size * 0.41)
-  ctx.lineTo(size * 0.03, -size * 0.34)
-  ctx.lineTo(-size * 0.08, -size * 0.38)
-  ctx.closePath()
-  ctx.fill()
-}
-
-const drawPassengerSilhouette = (size: number): void => {
-  ctx.lineWidth = Math.max(1.6, size * 0.1)
-  ctx.beginPath()
-  ctx.arc(-size * 0.1, -size * 0.4, size * 0.11, 0, Math.PI * 2)
-  ctx.fill()
-
-  ctx.beginPath()
-  ctx.ellipse(-size * 0.06, -size * 0.11, size * 0.15, size * 0.29, -0.22, 0, Math.PI * 2)
-  ctx.fill()
-
-  ctx.beginPath()
-  ctx.moveTo(-size * 0.13, size * 0.12)
-  ctx.lineTo(-size * 0.33, size * 0.45)
-  ctx.moveTo(size * 0.01, size * 0.11)
-  ctx.lineTo(size * 0.2, size * 0.42)
-  ctx.moveTo(size * 0.03, -size * 0.12)
-  ctx.lineTo(size * 0.25, size * 0.04)
-  ctx.lineTo(size * 0.33, size * 0.22)
-  ctx.stroke()
-
-  roundedRect(size * 0.2, size * 0.08, size * 0.22, size * 0.32, size * 0.035)
-  ctx.fill()
-  ctx.fillRect(size * 0.24, size * 0.4, size * 0.14, size * 0.04)
 }
 
 const drawDoorMarkers = (): void => {
@@ -1277,13 +1158,18 @@ const nearestOccluder = (
   return nearest
 }
 
-const memberLetters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('')
-
-const nextTokenMember = (group: CounterGroupId): string => {
+const nextTokenMember = (group: CounterGroupId): number => {
   const used = new Set(
     tokens.value.filter((token) => token.group === group).map((token) => token.member)
   )
-  return memberLetters.find((letter) => !used.has(letter)) ?? memberLetters[0]
+  for (let member = 1; member <= 99; member += 1) {
+    if (!used.has(member)) return member
+  }
+  return 1
+}
+
+const nextTokenLabel = (group: CounterGroupId): string => {
+  return `${group}${nextTokenMember(group)}`
 }
 
 const makeToken = (point: Point): Token => {
@@ -1294,7 +1180,7 @@ const makeToken = (point: Point): Token => {
     kind: activeCounterKind.value,
     group,
     member,
-    label: member,
+    label: `${group}${member}`,
     x: point.x,
     y: point.y
   }
@@ -1837,42 +1723,6 @@ const ToolButton = ({
   </button>
 )
 
-const CounterTypeIcon = ({kind}: {kind: CounterKind}): JSX.Element => {
-  if (kind === 'scientist') {
-    return (
-      <svg className="counter-option-icon" viewBox="0 0 24 24" aria-hidden="true">
-        <circle cx="9" cy="6" r="2.2" />
-        <path d="M9 8.5v7" />
-        <path d="M6.5 12h5" />
-        <path d="m14 9 4.5 9h-7L16 9" />
-        <path d="M14.2 15.5h3.6" />
-      </svg>
-    )
-  }
-
-  if (kind === 'police') {
-    return (
-      <svg className="counter-option-icon" viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M12 3 18 6v5.5c0 4-2.3 7-6 8.5-3.7-1.5-6-4.5-6-8.5V6l6-3Z" />
-        <path d="M9 11h6" />
-      </svg>
-    )
-  }
-
-  return (
-    <svg className="counter-option-icon" viewBox="0 0 24 24" aria-hidden="true">
-      <circle cx="12" cy="5" r="2.5" />
-      <path d="M12 7.8v7.4" />
-      <path d="M8.2 11.2h7.6" />
-      <path d="m10.4 15.2-2.2 5" />
-      <path d="m13.6 15.2 2.2 5" />
-      {kind === 'troop' ? <path d="m14 10.4 5.4-1.3" /> : null}
-      {kind === 'adventurer' ? <path d="m15 9.7 4.4-4.4" /> : null}
-      {kind === 'passenger' ? <circle cx="17.3" cy="13.2" r="2" /> : null}
-    </svg>
-  )
-}
-
 const App = (): JSX.Element => {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const viewportRef = useRef<HTMLDivElement>(null)
@@ -1906,8 +1756,7 @@ const App = (): JSX.Element => {
   const activeTileCount = tiles.value.length
   const selectedOccluder = getSelectedOccluder()
   const selectedToken = getSelectedToken()
-  const selectedCounterGroup = counterGroupFor(activeCounterGroup.value)
-  const nextCounterLabel = nextTokenMember(activeCounterGroup.value)
+  const nextCounterLabel = nextTokenLabel(activeCounterGroup.value)
 
   return (
     <main className="app-shell">
@@ -2228,31 +2077,27 @@ const App = (): JSX.Element => {
 
           <div className="panel">
             <h2>Counters</h2>
-            <div className="counter-toolbar" aria-label="Counter group and member">
-              <div className="counter-group-picker" role="group" aria-label="Counter group colour">
-                {counterGroups.map((group) => (
+            <div className="counter-toolbar" aria-label="Counter identifier">
+              <div className="counter-group-picker" role="group" aria-label="Counter letter group">
+                {counterGroupLetters.map((group) => (
                   <button
-                    className={`counter-group-button${
-                      activeCounterGroup.value === group.id ? ' active' : ''
+                    className={`counter-letter-button${
+                      activeCounterGroup.value === group ? ' active' : ''
                     }`}
-                    key={group.id}
+                    key={group}
                     type="button"
-                    aria-label={`${group.name} group`}
-                    aria-pressed={activeCounterGroup.value === group.id}
+                    aria-label={`Group ${group}`}
+                    aria-pressed={activeCounterGroup.value === group}
                     onClick={() => {
-                      activeCounterGroup.value = group.id
+                      activeCounterGroup.value = group
                       tool.value = 'token'
                     }}
                   >
-                    <span style={{backgroundColor: group.color}} aria-hidden="true" />
+                    {group}
                   </button>
                 ))}
               </div>
-              <span
-                className="counter-next"
-                style={{borderColor: selectedCounterGroup.color, color: selectedCounterGroup.color}}
-                aria-label={`Next ${selectedCounterGroup.name} counter ${nextCounterLabel}`}
-              >
+              <span className="counter-next" aria-label={`Next counter ${nextCounterLabel}`}>
                 {nextCounterLabel}
               </span>
             </div>
@@ -2270,12 +2115,13 @@ const App = (): JSX.Element => {
                     tool.value = 'token'
                   }}
                 >
-                  <span
-                    className="counter-swatch"
-                    style={{backgroundColor: selectedCounterGroup.color}}
-                    aria-hidden="true"
-                  >
-                    <CounterTypeIcon kind={definition.kind} />
+                  <span className="counter-swatch" aria-hidden="true">
+                    <img
+                      className="counter-portrait-thumb"
+                      src={definition.portrait}
+                      alt=""
+                      loading="lazy"
+                    />
                   </span>
                   <span>{definition.name}</span>
                 </button>
@@ -2283,9 +2129,9 @@ const App = (): JSX.Element => {
             </div>
             {selectedToken ? (
               <div className="selection-actions" aria-label="Selected counter actions">
-                <span>{`${counterDefinitionFor(selectedToken.kind).name} ${
-                  counterGroupFor(selectedToken.group).name
-                } ${selectedToken.member}`}</span>
+                <span>
+                  {`${counterDefinitionFor(selectedToken.kind).name} ${selectedToken.label}`}
+                </span>
                 <div className="selection-action-row single">
                   <button
                     type="button"
