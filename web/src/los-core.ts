@@ -192,16 +192,22 @@ export const analyzeImageRgba = (
     snap
   )
 
-  const walls = [
-    ...structuralHorizontal,
-    ...structuralVertical,
-    ...structuralDiagonalDown,
-    ...structuralDiagonalUp,
-    ...structuralSlopeDownSteep,
-    ...structuralSlopeUpSteep,
-    ...structuralSlopeDownShallow,
-    ...structuralSlopeUpShallow
-  ]
+  const wallCandidates = refineWallCandidates(
+    [
+      ...structuralHorizontal,
+      ...structuralVertical,
+      ...structuralDiagonalDown,
+      ...structuralDiagonalUp,
+      ...structuralSlopeDownSteep,
+      ...structuralSlopeUpSteep,
+      ...structuralSlopeDownShallow,
+      ...structuralSlopeUpShallow
+    ],
+    effectiveGrid,
+    snap
+  )
+
+  const walls = wallCandidates
     .sort((first, second) => second.length - first.length)
     .slice(0, 500)
     .map<WallOccluder>((candidate, index) => ({
@@ -243,6 +249,119 @@ export const analyzeImageRgba = (
       door_candidates: doorCandidates.length
     }
   }
+}
+
+const refineWallCandidates = (
+  candidates: Candidate[],
+  gridScale: number,
+  snap: number
+): Candidate[] => {
+  const mergeGap = Math.max(snap * 0.8, gridScale * 0.12, 6)
+  const axisCandidates = [
+    ...mergeAxisCandidates(
+      candidates.filter((candidate) => candidate.orientation === 'horizontal'),
+      true,
+      mergeGap,
+      snap
+    ),
+    ...mergeAxisCandidates(
+      candidates.filter((candidate) => candidate.orientation === 'vertical'),
+      false,
+      mergeGap,
+      snap
+    )
+  ]
+
+  const nonAxisCandidates = candidates.filter(
+    (candidate) => candidate.orientation !== 'horizontal' && candidate.orientation !== 'vertical'
+  )
+
+  return removeRedundantCandidates([...axisCandidates, ...nonAxisCandidates], snap)
+}
+
+const mergeAxisCandidates = (
+  candidates: Candidate[],
+  horizontal: boolean,
+  mergeGap: number,
+  snap: number
+): Candidate[] => {
+  const byLine = new Map<number, Candidate[]>()
+  for (const candidate of candidates) {
+    const line = horizontal ? candidate.y1 : candidate.x1
+    const key = quantize(line, snap)
+    byLine.set(key, [...(byLine.get(key) ?? []), candidate])
+  }
+
+  const merged: Candidate[] = []
+  for (const [lineKey, lineCandidates] of byLine.entries()) {
+    const line = lineKey * snap
+    const intervals = lineCandidates
+      .map((candidate) => candidateInterval(candidate))
+      .sort(([firstStart], [secondStart]) => firstStart - secondStart)
+
+    let current: [number, number] | null = null
+    for (const [start, end] of intervals) {
+      if (!current) {
+        current = [start, end]
+        continue
+      }
+
+      if (start <= current[1] + mergeGap) {
+        current[1] = Math.max(current[1], end)
+        continue
+      }
+
+      merged.push(axisCandidate(horizontal, line, current[0], current[1]))
+      current = [start, end]
+    }
+
+    if (current) merged.push(axisCandidate(horizontal, line, current[0], current[1]))
+  }
+
+  return merged
+}
+
+const axisCandidate = (
+  horizontal: boolean,
+  line: number,
+  start: number,
+  end: number
+): Candidate => ({
+  orientation: horizontal ? 'horizontal' : 'vertical',
+  x1: horizontal ? start : line,
+  y1: horizontal ? line : start,
+  x2: horizontal ? end : line,
+  y2: horizontal ? line : end,
+  length: Math.abs(end - start)
+})
+
+const removeRedundantCandidates = (candidates: Candidate[], snap: number): Candidate[] => {
+  const kept: Candidate[] = []
+  for (const candidate of candidates.sort((first, second) => second.length - first.length)) {
+    if (!kept.some((existing) => candidateMostlyCoveredBy(candidate, existing, snap))) {
+      kept.push(candidate)
+    }
+  }
+  return kept
+}
+
+const candidateMostlyCoveredBy = (
+  candidate: Candidate,
+  existing: Candidate,
+  snap: number
+): boolean => {
+  if (candidate.orientation !== existing.orientation) return false
+  if (candidate.orientation !== 'horizontal' && candidate.orientation !== 'vertical') return false
+
+  const candidateLine = candidate.orientation === 'horizontal' ? candidate.y1 : candidate.x1
+  const existingLine = existing.orientation === 'horizontal' ? existing.y1 : existing.x1
+  if (Math.abs(candidateLine - existingLine) > snap * 0.75) return false
+
+  const [candidateStart, candidateEnd] = candidateInterval(candidate)
+  const [existingStart, existingEnd] = candidateInterval(existing)
+  const overlap = Math.min(candidateEnd, existingEnd) - Math.max(candidateStart, existingStart)
+  const candidateLength = candidateEnd - candidateStart
+  return candidateLength > 0 && overlap >= candidateLength * 0.84
 }
 
 export const hasLineOfSight = (

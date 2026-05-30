@@ -34,6 +34,15 @@ type BoardSize = {
   height: number
 }
 
+type EditHandle = 'start' | 'end' | 'body'
+
+type EditDrag = {
+  id: string
+  handle: EditHandle
+  pointerStart: Point
+  original: Occluder
+}
+
 const tool = signal<Tool>('viewer')
 const tiles = signal<Tile[]>([])
 const placements = signal<Placement[]>([])
@@ -52,6 +61,9 @@ const gpuStatus = signal('Checking...')
 const dragStart = signal<Point | null>(null)
 const previewPoint = signal<Point | null>(null)
 const isMovingViewer = signal(false)
+const editDrag = signal<EditDrag | null>(null)
+const selectedOccluderId = signal<string | null>(null)
+const hoveredOccluderId = signal<string | null>(null)
 const dropDepth = signal(0)
 const renderTick = signal(0)
 
@@ -140,6 +152,8 @@ const loadMapFiles = async (files: Iterable<File>): Promise<void> => {
   tiles.value = loadedTiles
   occluders.value = []
   doorStates.value = {}
+  selectedOccluderId.value = null
+  hoveredOccluderId.value = null
   arrangeTiles()
   markExplored()
   setStatus(`Loaded ${tiles.value.length} image(s). Run analysis, then review walls and doors.`)
@@ -253,6 +267,8 @@ const analyzeTiles = async (): Promise<void> => {
       occluders.value.some((occluder) => occluder.type === 'door' && occluder.id === doorId)
     )
   )
+  selectedOccluderId.value = null
+  hoveredOccluderId.value = null
   exploredCtx.clearRect(0, 0, boardSize.value.width, boardSize.value.height)
   markExplored()
   setStatus(`Analyzed ${placements.value.length} tile(s); review the overlay before export.`)
@@ -417,6 +433,7 @@ const renderBoard = (): void => {
   renderTick.value
   if (!ctx || !canvas) return
   syncCanvasSize()
+  syncCanvasCursor()
 
   const {width, height} = boardSize.value
   ctx.clearRect(0, 0, width, height)
@@ -432,8 +449,22 @@ const renderBoard = (): void => {
   drawDoorMarkers()
   drawFog()
   drawDebugWalls()
+  drawEditOverlay()
   drawPreview()
   drawViewer()
+}
+
+const syncCanvasCursor = (): void => {
+  if (!canvas) return
+  if (!hasMap()) {
+    canvas.style.cursor = 'default'
+  } else if (editDrag.value) {
+    canvas.style.cursor = 'grabbing'
+  } else if (hoveredOccluderId.value) {
+    canvas.style.cursor = tool.value === 'erase' ? 'not-allowed' : 'grab'
+  } else {
+    canvas.style.cursor = tool.value === 'viewer' ? 'crosshair' : 'cell'
+  }
 }
 
 const drawMapTiles = (): void => {
@@ -537,6 +568,49 @@ const drawDebugWalls = (): void => {
     ctx.moveTo(occluder.x1, occluder.y1)
     ctx.lineTo(occluder.x2, occluder.y2)
     ctx.stroke()
+  }
+  ctx.restore()
+}
+
+const drawEditOverlay = (): void => {
+  const ids = new Set([hoveredOccluderId.value, selectedOccluderId.value].filter(Boolean))
+  if (ids.size === 0) return
+
+  ctx.save()
+  ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
+  for (const occluder of occluders.value) {
+    if (!ids.has(occluder.id)) continue
+    const selected = selectedOccluderId.value === occluder.id
+    const color = occluder.type === 'door' ? 'rgba(249, 115, 22, 0.98)' : 'rgba(215, 38, 56, 0.98)'
+    const handleRadius = selected ? screenPixels(5.5) : screenPixels(4)
+
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.72)'
+    ctx.lineWidth = selected ? screenPixels(7) : screenPixels(5)
+    ctx.beginPath()
+    ctx.moveTo(occluder.x1, occluder.y1)
+    ctx.lineTo(occluder.x2, occluder.y2)
+    ctx.stroke()
+
+    ctx.strokeStyle = color
+    ctx.lineWidth = selected ? screenPixels(3) : screenPixels(2)
+    ctx.beginPath()
+    ctx.moveTo(occluder.x1, occluder.y1)
+    ctx.lineTo(occluder.x2, occluder.y2)
+    ctx.stroke()
+
+    for (const point of [
+      {x: occluder.x1, y: occluder.y1},
+      {x: occluder.x2, y: occluder.y2}
+    ]) {
+      ctx.fillStyle = '#050505'
+      ctx.strokeStyle = color
+      ctx.lineWidth = screenPixels(2)
+      ctx.beginPath()
+      ctx.arc(point.x, point.y, handleRadius, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.stroke()
+    }
   }
   ctx.restore()
 }
@@ -736,23 +810,118 @@ const nearestOccluder = (
   return nearest
 }
 
+const editableFilterForTool = (): ((occluder: Occluder) => boolean) | null => {
+  if (tool.value === 'wall') return (occluder) => occluder.type === 'wall'
+  if (tool.value === 'door') return (occluder) => occluder.type === 'door'
+  if (tool.value === 'erase') return () => true
+  return null
+}
+
+const nearestEditTarget = (
+  point: Point,
+  filter: (occluder: Occluder) => boolean
+): {occluder: Occluder; handle: EditHandle} | null => {
+  const endpointRadius = screenPixels(13)
+  const segmentRadius = screenPixels(9)
+  let nearestEndpoint: {occluder: Occluder; handle: EditHandle; distance: number} | null = null
+  let nearestBody: {occluder: Occluder; handle: EditHandle; distance: number} | null = null
+
+  for (const occluder of occluders.value) {
+    if (!filter(occluder)) continue
+
+    const startDistance = Math.hypot(point.x - occluder.x1, point.y - occluder.y1)
+    if (startDistance <= endpointRadius && (!nearestEndpoint || startDistance < nearestEndpoint.distance)) {
+      nearestEndpoint = {occluder, handle: 'start', distance: startDistance}
+    }
+
+    const endDistance = Math.hypot(point.x - occluder.x2, point.y - occluder.y2)
+    if (endDistance <= endpointRadius && (!nearestEndpoint || endDistance < nearestEndpoint.distance)) {
+      nearestEndpoint = {occluder, handle: 'end', distance: endDistance}
+    }
+
+    const segmentDistance = distanceToSegment(point, occluder)
+    if (segmentDistance <= segmentRadius && (!nearestBody || segmentDistance < nearestBody.distance)) {
+      nearestBody = {occluder, handle: 'body', distance: segmentDistance}
+    }
+  }
+
+  return nearestEndpoint ?? nearestBody
+}
+
+const updateOccluder = (id: string, next: Occluder): void => {
+  occluders.value = occluders.value.map((occluder) => (occluder.id === id ? next : occluder))
+}
+
+const applyEditDrag = (drag: EditDrag, point: Point): void => {
+  const dx = point.x - drag.pointerStart.x
+  const dy = point.y - drag.pointerStart.y
+  const original = drag.original
+  const next =
+    drag.handle === 'body'
+      ? {
+          ...original,
+          x1: original.x1 + dx,
+          y1: original.y1 + dy,
+          x2: original.x2 + dx,
+          y2: original.y2 + dy
+        }
+      : drag.handle === 'start'
+        ? {...original, x1: point.x, y1: point.y}
+        : {...original, x2: point.x, y2: point.y}
+
+  updateOccluder(drag.id, next)
+}
+
+const removeOccluder = (id: string): void => {
+  occluders.value = occluders.value.filter((occluder) => occluder.id !== id)
+  const nextDoorStates = {...doorStates.value}
+  delete nextDoorStates[id]
+  doorStates.value = nextDoorStates
+  if (selectedOccluderId.value === id) selectedOccluderId.value = null
+  if (hoveredOccluderId.value === id) hoveredOccluderId.value = null
+}
+
+const targetAcceptsMapShortcuts = (target: EventTarget | null): boolean =>
+  target instanceof HTMLInputElement ||
+  target instanceof HTMLTextAreaElement ||
+  target instanceof HTMLSelectElement
+
+const handleMapKeyDown = (event: KeyboardEvent): void => {
+  if (targetAcceptsMapShortcuts(event.target)) return
+
+  if (event.key === 'Escape') {
+    selectedOccluderId.value = null
+    hoveredOccluderId.value = null
+    editDrag.value = null
+    dragStart.value = null
+    previewPoint.value = null
+    requestCanvasRender()
+    return
+  }
+
+  if ((event.key === 'Delete' || event.key === 'Backspace') && selectedOccluderId.value) {
+    event.preventDefault()
+    removeOccluder(selectedOccluderId.value)
+    markExplored()
+    requestCanvasRender()
+  }
+}
+
 const handlePointerDown = (event: JSX.TargetedPointerEvent<HTMLCanvasElement>): void => {
   if (!hasMap()) return
 
   const rawPoint = positionFromEvent(event)
   const point = snapPoint(rawPoint, event)
 
-  if (tool.value !== 'erase') {
+  if (tool.value === 'viewer') {
     const door = nearestOccluder(rawPoint, (occluder) => occluder.type === 'door', 18)
     if (door && door.type === 'door') {
       setDoorOpen(door.id, !isDoorOpen(door))
       return
     }
-  }
-
-  if (tool.value === 'viewer') {
     viewer.value = point
     isMovingViewer.value = true
+    selectedOccluderId.value = null
     event.currentTarget.setPointerCapture(event.pointerId)
     markExplored()
     requestCanvasRender()
@@ -760,17 +929,34 @@ const handlePointerDown = (event: JSX.TargetedPointerEvent<HTMLCanvasElement>): 
   }
 
   if (tool.value === 'erase') {
-    const target = nearestOccluder(rawPoint)
+    const target = nearestEditTarget(rawPoint, () => true)
     if (target) {
-      occluders.value = occluders.value.filter((occluder) => occluder.id !== target.id)
-      const nextDoorStates = {...doorStates.value}
-      delete nextDoorStates[target.id]
-      doorStates.value = nextDoorStates
+      removeOccluder(target.occluder.id)
       markExplored()
       requestCanvasRender()
     }
     return
   }
+
+  const editableFilter = editableFilterForTool()
+  if (editableFilter) {
+    const editTarget = nearestEditTarget(rawPoint, editableFilter)
+    if (editTarget) {
+      selectedOccluderId.value = editTarget.occluder.id
+      hoveredOccluderId.value = editTarget.occluder.id
+      editDrag.value = {
+        id: editTarget.occluder.id,
+        handle: editTarget.handle,
+        pointerStart: point,
+        original: editTarget.occluder
+      }
+      event.currentTarget.setPointerCapture(event.pointerId)
+      requestCanvasRender()
+      return
+    }
+  }
+
+  selectedOccluderId.value = null
 
   dragStart.value = point
   previewPoint.value = point
@@ -779,7 +965,16 @@ const handlePointerDown = (event: JSX.TargetedPointerEvent<HTMLCanvasElement>): 
 }
 
 const handlePointerMove = (event: JSX.TargetedPointerEvent<HTMLCanvasElement>): void => {
-  const point = snapPoint(positionFromEvent(event), event)
+  const rawPoint = positionFromEvent(event)
+  const point = snapPoint(rawPoint, event)
+  const drag = editDrag.value
+  if (drag) {
+    applyEditDrag(drag, point)
+    markExplored()
+    requestCanvasRender()
+    return
+  }
+
   if (isMovingViewer.value) {
     viewer.value = point
     markExplored()
@@ -787,13 +982,34 @@ const handlePointerMove = (event: JSX.TargetedPointerEvent<HTMLCanvasElement>): 
     return
   }
 
-  if (!dragStart.value) return
+  if (!dragStart.value) {
+    const editableFilter = editableFilterForTool()
+    hoveredOccluderId.value = editableFilter
+      ? (nearestEditTarget(rawPoint, editableFilter)?.occluder.id ?? null)
+      : null
+    requestCanvasRender()
+    return
+  }
   previewPoint.value = point
   requestCanvasRender()
 }
 
 const handlePointerUp = (event: JSX.TargetedPointerEvent<HTMLCanvasElement>): void => {
   const point = snapPoint(positionFromEvent(event), event)
+  if (editDrag.value) {
+    const drag = editDrag.value
+    applyEditDrag(drag, point)
+    editDrag.value = null
+    occluders.value = carveDoorGaps(occluders.value)
+    if (!occluders.value.some((occluder) => occluder.id === drag.id)) {
+      selectedOccluderId.value = null
+    }
+    event.currentTarget.releasePointerCapture(event.pointerId)
+    markExplored()
+    requestCanvasRender()
+    return
+  }
+
   if (isMovingViewer.value) {
     isMovingViewer.value = false
     event.currentTarget.releasePointerCapture(event.pointerId)
@@ -842,6 +1058,7 @@ const handlePointerCancel = (): void => {
   dragStart.value = null
   previewPoint.value = null
   isMovingViewer.value = false
+  editDrag.value = null
   requestCanvasRender()
 }
 
@@ -962,6 +1179,7 @@ const App = (): JSX.Element => {
     syncCanvasSize(true)
 
     const dispose = effect(renderBoard)
+    window.addEventListener('keydown', handleMapKeyDown)
     void detectWebGpu().then((status) => {
       gpuStatus.value = status
     })
@@ -969,6 +1187,7 @@ const App = (): JSX.Element => {
 
     return () => {
       dispose()
+      window.removeEventListener('keydown', handleMapKeyDown)
       for (const tile of tiles.value) URL.revokeObjectURL(tile.url)
     }
   }, [])
