@@ -116,7 +116,8 @@ button:disabled {
 
 #showWallsButton[aria-pressed="true"],
 #fogModeButton[aria-pressed="true"],
-.selection-action-row button[aria-pressed="true"] {
+.selection-action-row button[aria-pressed="true"],
+.counter-option.active {
   border-color: var(--tre-green);
   background: rgba(var(--tre-green-rgb), 0.12);
   box-shadow:
@@ -314,7 +315,8 @@ h2 {
   overflow: hidden;
 }
 
-input[type="number"] {
+input[type="number"],
+input[type="text"] {
   width: 78px;
   min-height: 36px;
   border: 1px solid var(--tre-border);
@@ -442,9 +444,94 @@ input[type="range"]::-moz-range-thumb {
   gap: 6px;
 }
 
+.selection-action-row.single {
+  grid-template-columns: 1fr;
+}
+
 .selection-action-row button {
   min-height: 32px;
   padding: 0 8px;
+}
+
+.counter-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+}
+
+.counter-group-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--tre-muted);
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+}
+
+.counter-group-control input {
+  width: 56px;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.counter-next {
+  min-width: 42px;
+  border: 1px solid rgba(var(--tre-green-rgb), 0.3);
+  border-radius: 6px;
+  background: rgba(var(--tre-green-rgb), 0.08);
+  color: var(--tre-green);
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 34px;
+  text-align: center;
+}
+
+.counter-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.counter-option {
+  min-height: 48px;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.counter-option span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.counter-swatch {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  display: inline-grid;
+  place-items: center;
+  border: 2px solid rgba(0, 0, 0, 0.82);
+  border-radius: 5px;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.16);
+  color: #050505;
+}
+
+.counter-option-icon {
+  width: 21px;
+  height: 21px;
+  fill: none;
+  stroke: currentcolor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
 }
 
 .tile-list {

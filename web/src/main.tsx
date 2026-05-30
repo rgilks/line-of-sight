@@ -12,7 +12,7 @@ import {
 } from './los-core'
 import './styles.css'
 
-type Tool = 'viewer' | 'wall' | 'door' | 'erase'
+type Tool = 'viewer' | 'wall' | 'door' | 'erase' | 'token'
 
 type Tile = {
   id: string
@@ -43,10 +43,44 @@ type EditDrag = {
   original: Occluder
 }
 
+type CounterKind =
+  | 'adventurer'
+  | 'aslan'
+  | 'kkree'
+  | 'monster'
+  | 'passenger'
+  | 'police'
+  | 'robot'
+  | 'scientist'
+  | 'troop'
+  | 'vargr'
+
+type CounterDefinition = {
+  kind: CounterKind
+  name: string
+  color: string
+}
+
+type Token = Point & {
+  id: string
+  kind: CounterKind
+  group: string
+  number: number
+  label: string
+}
+
+type TokenDrag = {
+  id: string
+  pointerStart: Point
+  original: Token
+}
+
 type EditorSnapshot = {
   occluders: Occluder[]
   doorStates: Record<string, {open: boolean}>
+  tokens: Token[]
   selectedOccluderId: string | null
+  selectedTokenId: string | null
 }
 
 const tool = signal<Tool>('viewer')
@@ -70,6 +104,12 @@ const isMovingViewer = signal(false)
 const editDrag = signal<EditDrag | null>(null)
 const selectedOccluderId = signal<string | null>(null)
 const hoveredOccluderId = signal<string | null>(null)
+const tokens = signal<Token[]>([])
+const activeCounterKind = signal<CounterKind>('troop')
+const counterGroup = signal('A')
+const tokenDrag = signal<TokenDrag | null>(null)
+const selectedTokenId = signal<string | null>(null)
+const hoveredTokenId = signal<string | null>(null)
 const undoStack = signal<EditorSnapshot[]>([])
 const redoStack = signal<EditorSnapshot[]>([])
 const dropDepth = signal(0)
@@ -84,6 +124,18 @@ const maxZoom = 4
 const doorCarveTolerance = 8
 const minCarvedWallLength = 8
 const historyLimit = 60
+const counterDefinitions: CounterDefinition[] = [
+  {kind: 'troop', name: 'Troop', color: '#ff5f5f'},
+  {kind: 'adventurer', name: 'Adventurer', color: '#f97316'},
+  {kind: 'robot', name: 'Robot', color: '#8bd3ff'},
+  {kind: 'monster', name: 'Monster', color: '#a78bfa'},
+  {kind: 'scientist', name: 'Scientist', color: '#34d399'},
+  {kind: 'police', name: 'Police', color: '#60a5fa'},
+  {kind: 'passenger', name: 'Passenger', color: '#facc15'},
+  {kind: 'aslan', name: 'Aslan', color: '#fb923c'},
+  {kind: 'vargr', name: 'Vargr', color: '#c084fc'},
+  {kind: 'kkree', name: 'Kkree', color: '#fbbf24'}
+]
 
 const exploredCanvas = document.createElement('canvas')
 const exploredCtx = exploredCanvas.getContext('2d')
@@ -113,6 +165,9 @@ const requestCanvasRender = (): void => {
 const cloneOccluders = (items: Occluder[]): Occluder[] =>
   items.map((occluder) => ({...occluder}))
 
+const cloneTokens = (items: Token[]): Token[] =>
+  items.map((token) => ({...token}))
+
 const cloneDoorStates = (
   states: Record<string, {open: boolean}>
 ): Record<string, {open: boolean}> =>
@@ -121,7 +176,9 @@ const cloneDoorStates = (
 const editorSnapshot = (): EditorSnapshot => ({
   occluders: cloneOccluders(occluders.value),
   doorStates: cloneDoorStates(doorStates.value),
-  selectedOccluderId: selectedOccluderId.value
+  tokens: cloneTokens(tokens.value),
+  selectedOccluderId: selectedOccluderId.value,
+  selectedTokenId: selectedTokenId.value
 })
 
 const pushUndoHistory = (): void => {
@@ -137,13 +194,19 @@ const resetHistory = (): void => {
 const restoreEditorSnapshot = (snapshot: EditorSnapshot): void => {
   occluders.value = cloneOccluders(snapshot.occluders)
   doorStates.value = cloneDoorStates(snapshot.doorStates)
+  tokens.value = cloneTokens(snapshot.tokens)
   selectedOccluderId.value = occluders.value.some(
     (occluder) => occluder.id === snapshot.selectedOccluderId
   )
     ? snapshot.selectedOccluderId
     : null
+  selectedTokenId.value = tokens.value.some((token) => token.id === snapshot.selectedTokenId)
+    ? snapshot.selectedTokenId
+    : null
   hoveredOccluderId.value = null
+  hoveredTokenId.value = null
   editDrag.value = null
+  tokenDrag.value = null
   dragStart.value = null
   previewPoint.value = null
   exploredCtx.clearRect(0, 0, boardSize.value.width, boardSize.value.height)
@@ -220,8 +283,11 @@ const loadMapFiles = async (files: Iterable<File>): Promise<void> => {
   tiles.value = loadedTiles
   occluders.value = []
   doorStates.value = {}
+  tokens.value = []
   selectedOccluderId.value = null
   hoveredOccluderId.value = null
+  selectedTokenId.value = null
+  hoveredTokenId.value = null
   resetHistory()
   arrangeTiles()
   markExplored()
@@ -520,6 +586,7 @@ const renderBoard = (): void => {
   drawGrid()
   drawDoorMarkers()
   drawFog()
+  drawTokens()
   drawDebugWalls()
   drawEditOverlay()
   drawPreview()
@@ -532,6 +599,10 @@ const syncCanvasCursor = (): void => {
     canvas.style.cursor = 'default'
   } else if (editDrag.value) {
     canvas.style.cursor = 'grabbing'
+  } else if (tokenDrag.value) {
+    canvas.style.cursor = 'grabbing'
+  } else if (hoveredTokenId.value && tool.value === 'token') {
+    canvas.style.cursor = 'grab'
   } else if (hoveredOccluderId.value) {
     canvas.style.cursor = tool.value === 'erase' ? 'not-allowed' : 'grab'
   } else {
@@ -606,6 +677,213 @@ const drawNeverExploredFog = (): void => {
   fogCtx.drawImage(exploredCanvas, 0, 0)
   fogCtx.restore()
   ctx.drawImage(fogCanvas, 0, 0)
+}
+
+const drawTokens = (): void => {
+  const polygon = getVisiblePolygon()
+  for (const token of tokens.value) {
+    const visible = polygon.length > 2 && pointInPolygon(token, polygon)
+    if (!visible && !showWalls.value) continue
+    drawCounterToken(token, visible)
+  }
+}
+
+const pointInPolygon = (point: Point, polygon: Point[]): boolean => {
+  let inside = false
+  for (let index = 0, previous = polygon.length - 1; index < polygon.length; previous = index++) {
+    const currentPoint = polygon[index]
+    const previousPoint = polygon[previous]
+    const crosses =
+      currentPoint.y > point.y !== previousPoint.y > point.y &&
+      point.x <
+        ((previousPoint.x - currentPoint.x) * (point.y - currentPoint.y)) /
+          (previousPoint.y - currentPoint.y) +
+          currentPoint.x
+    if (crosses) inside = !inside
+  }
+  return inside
+}
+
+const tokenSize = (): number => Math.min(58, Math.max(34, gridScale() * 0.78))
+
+const counterDefinitionFor = (kind: CounterKind): CounterDefinition =>
+  counterDefinitions.find((definition) => definition.kind === kind) ?? counterDefinitions[0]
+
+const drawCounterToken = (token: Token, visible: boolean): void => {
+  const size = tokenSize()
+  const half = size / 2
+  const definition = counterDefinitionFor(token.kind)
+  const selected = selectedTokenId.value === token.id
+  const hovered = hoveredTokenId.value === token.id
+
+  ctx.save()
+  ctx.globalAlpha = visible ? 1 : 0.34
+  ctx.translate(token.x, token.y)
+
+  roundedRect(-half, -half, size, size, screenPixels(5))
+  ctx.fillStyle = definition.color
+  ctx.fill()
+  ctx.strokeStyle = '#050505'
+  ctx.lineWidth = screenPixels(2.5)
+  ctx.stroke()
+
+  drawCounterIcon(token.kind, 0, -size * 0.06, size * 0.42)
+
+  const labelWidth = Math.max(size * 0.34, token.label.length * size * 0.14)
+  const labelHeight = size * 0.24
+  roundedRect(half - labelWidth - size * 0.04, half - labelHeight - size * 0.04, labelWidth, labelHeight, screenPixels(3))
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.82)'
+  ctx.fill()
+  ctx.fillStyle = '#ffffff'
+  ctx.font = `700 ${Math.max(10, size * 0.18)}px "JetBrains Mono", monospace`
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.fillText(token.label, half - labelWidth / 2 - size * 0.04, half - labelHeight / 2 - size * 0.04)
+
+  if (selected || hovered) {
+    ctx.strokeStyle = selected ? '#39ff14' : 'rgba(57, 255, 20, 0.55)'
+    ctx.lineWidth = selected ? screenPixels(3) : screenPixels(2)
+    roundedRect(-half - screenPixels(3), -half - screenPixels(3), size + screenPixels(6), size + screenPixels(6), screenPixels(7))
+    ctx.stroke()
+  }
+
+  ctx.restore()
+}
+
+const roundedRect = (
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius: number
+): void => {
+  const limitedRadius = Math.min(radius, width / 2, height / 2)
+  ctx.beginPath()
+  ctx.moveTo(x + limitedRadius, y)
+  ctx.lineTo(x + width - limitedRadius, y)
+  ctx.quadraticCurveTo(x + width, y, x + width, y + limitedRadius)
+  ctx.lineTo(x + width, y + height - limitedRadius)
+  ctx.quadraticCurveTo(x + width, y + height, x + width - limitedRadius, y + height)
+  ctx.lineTo(x + limitedRadius, y + height)
+  ctx.quadraticCurveTo(x, y + height, x, y + height - limitedRadius)
+  ctx.lineTo(x, y + limitedRadius)
+  ctx.quadraticCurveTo(x, y, x + limitedRadius, y)
+  ctx.closePath()
+}
+
+const drawCounterIcon = (kind: CounterKind, x: number, y: number, size: number): void => {
+  ctx.save()
+  ctx.translate(x, y)
+  ctx.fillStyle = '#050505'
+  ctx.strokeStyle = '#050505'
+  ctx.lineWidth = Math.max(1, size * 0.08)
+  ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
+
+  if (kind === 'robot') {
+    ctx.fillRect(-size * 0.28, -size * 0.22, size * 0.56, size * 0.48)
+    ctx.fillRect(-size * 0.16, -size * 0.42, size * 0.32, size * 0.18)
+    ctx.beginPath()
+    ctx.moveTo(0, -size * 0.42)
+    ctx.lineTo(0, -size * 0.58)
+    ctx.stroke()
+  } else if (kind === 'monster') {
+    ctx.beginPath()
+    ctx.ellipse(0, 0, size * 0.32, size * 0.24, -0.25, 0, Math.PI * 2)
+    ctx.fill()
+    for (const angle of [-2.5, -1.3, 0.2, 1.4, 2.6]) {
+      ctx.beginPath()
+      ctx.moveTo(Math.cos(angle) * size * 0.18, Math.sin(angle) * size * 0.16)
+      ctx.quadraticCurveTo(Math.cos(angle) * size * 0.45, Math.sin(angle) * size * 0.42, Math.cos(angle) * size * 0.62, Math.sin(angle) * size * 0.2)
+      ctx.stroke()
+    }
+  } else if (kind === 'scientist') {
+    drawPersonIcon(size)
+    ctx.beginPath()
+    ctx.moveTo(size * 0.18, size * 0.08)
+    ctx.lineTo(size * 0.36, size * 0.35)
+    ctx.lineTo(size * 0.02, size * 0.35)
+    ctx.closePath()
+    ctx.fill()
+  } else if (kind === 'police') {
+    ctx.beginPath()
+    ctx.moveTo(0, -size * 0.45)
+    ctx.lineTo(size * 0.32, -size * 0.28)
+    ctx.lineTo(size * 0.24, size * 0.28)
+    ctx.lineTo(0, size * 0.48)
+    ctx.lineTo(-size * 0.24, size * 0.28)
+    ctx.lineTo(-size * 0.32, -size * 0.28)
+    ctx.closePath()
+    ctx.fill()
+  } else if (kind === 'aslan') {
+    drawHeadIcon(size, 0.46, 0.2)
+    ctx.beginPath()
+    ctx.moveTo(-size * 0.2, -size * 0.28)
+    ctx.lineTo(-size * 0.34, -size * 0.5)
+    ctx.lineTo(-size * 0.06, -size * 0.36)
+    ctx.moveTo(size * 0.2, -size * 0.28)
+    ctx.lineTo(size * 0.34, -size * 0.5)
+    ctx.lineTo(size * 0.06, -size * 0.36)
+    ctx.fill()
+  } else if (kind === 'vargr') {
+    drawHeadIcon(size, 0.38, -0.18)
+    ctx.beginPath()
+    ctx.moveTo(size * 0.16, -size * 0.06)
+    ctx.lineTo(size * 0.5, size * 0.02)
+    ctx.lineTo(size * 0.14, size * 0.14)
+    ctx.closePath()
+    ctx.fill()
+  } else if (kind === 'kkree') {
+    ctx.beginPath()
+    ctx.ellipse(-size * 0.06, size * 0.08, size * 0.34, size * 0.18, 0, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.fillRect(size * 0.12, -size * 0.24, size * 0.16, size * 0.34)
+    ctx.beginPath()
+    ctx.arc(size * 0.2, -size * 0.34, size * 0.13, 0, Math.PI * 2)
+    ctx.fill()
+    for (const leg of [-0.26, -0.08, 0.1, 0.28]) ctx.fillRect(leg * size, size * 0.18, size * 0.06, size * 0.28)
+  } else {
+    drawPersonIcon(size)
+    if (kind === 'troop') {
+      ctx.beginPath()
+      ctx.moveTo(size * 0.08, -size * 0.06)
+      ctx.lineTo(size * 0.52, -size * 0.16)
+      ctx.stroke()
+    } else if (kind === 'adventurer') {
+      ctx.beginPath()
+      ctx.moveTo(size * 0.18, -size * 0.08)
+      ctx.lineTo(size * 0.5, -size * 0.42)
+      ctx.stroke()
+    } else if (kind === 'passenger') {
+      ctx.beginPath()
+      ctx.arc(size * 0.24, size * 0.1, size * 0.12, 0, Math.PI * 2)
+      ctx.fill()
+    }
+  }
+  ctx.restore()
+}
+
+const drawPersonIcon = (size: number): void => {
+  ctx.beginPath()
+  ctx.arc(0, -size * 0.35, size * 0.13, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.fillRect(-size * 0.11, -size * 0.22, size * 0.22, size * 0.36)
+  ctx.beginPath()
+  ctx.moveTo(-size * 0.12, -size * 0.02)
+  ctx.lineTo(-size * 0.38, size * 0.14)
+  ctx.moveTo(size * 0.12, -size * 0.02)
+  ctx.lineTo(size * 0.38, size * 0.12)
+  ctx.moveTo(-size * 0.08, size * 0.14)
+  ctx.lineTo(-size * 0.22, size * 0.48)
+  ctx.moveTo(size * 0.08, size * 0.14)
+  ctx.lineTo(size * 0.24, size * 0.48)
+  ctx.stroke()
+}
+
+const drawHeadIcon = (size: number, radiusScale: number, rotation: number): void => {
+  ctx.beginPath()
+  ctx.ellipse(0, 0, size * radiusScale, size * 0.34, rotation, 0, Math.PI * 2)
+  ctx.fill()
 }
 
 const drawDoorMarkers = (): void => {
@@ -882,6 +1160,58 @@ const nearestOccluder = (
   return nearest
 }
 
+const normalizeCounterGroup = (value: string): string => {
+  const normalized = value.trim().toUpperCase().replace(/[^A-Z0-9]/g, '')
+  return normalized.slice(0, 2) || 'A'
+}
+
+const sanitizeCounterGroupInput = (value: string): string =>
+  value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 2)
+
+const nextTokenNumber = (group: string): number =>
+  tokens.value
+    .filter((token) => token.group === group)
+    .reduce((highest, token) => Math.max(highest, token.number), 0) + 1
+
+const makeToken = (point: Point): Token => {
+  const group = normalizeCounterGroup(counterGroup.value)
+  const number = nextTokenNumber(group)
+  return {
+    id: nextId('token'),
+    kind: activeCounterKind.value,
+    group,
+    number,
+    label: `${group}${number}`,
+    x: point.x,
+    y: point.y
+  }
+}
+
+const nearestToken = (point: Point, screenRadius = 24): Token | null => {
+  let nearest: Token | null = null
+  let nearestDistance = screenRadius / zoom.value
+  for (const token of tokens.value) {
+    const distance = Math.hypot(point.x - token.x, point.y - token.y)
+    if (distance < nearestDistance) {
+      nearest = token
+      nearestDistance = distance
+    }
+  }
+  return nearest
+}
+
+const updateToken = (id: string, next: Token): void => {
+  tokens.value = tokens.value.map((token) => (token.id === id ? next : token))
+}
+
+const removeToken = (id: string, recordHistory = true): void => {
+  if (!tokens.value.some((token) => token.id === id)) return
+  if (recordHistory) pushUndoHistory()
+  tokens.value = tokens.value.filter((token) => token.id !== id)
+  if (selectedTokenId.value === id) selectedTokenId.value = null
+  if (hoveredTokenId.value === id) hoveredTokenId.value = null
+}
+
 const editableFilterForTool = (): ((occluder: Occluder) => boolean) | null => {
   if (tool.value === 'wall') return (occluder) => occluder.type === 'wall'
   if (tool.value === 'door') return (occluder) => occluder.type === 'door'
@@ -982,10 +1312,21 @@ const handleMapKeyDown = (event: KeyboardEvent): void => {
 
   if (event.key === 'Escape') {
     selectedOccluderId.value = null
+    selectedTokenId.value = null
     hoveredOccluderId.value = null
+    hoveredTokenId.value = null
     editDrag.value = null
+    tokenDrag.value = null
     dragStart.value = null
     previewPoint.value = null
+    requestCanvasRender()
+    return
+  }
+
+  if ((event.key === 'Delete' || event.key === 'Backspace') && selectedTokenId.value) {
+    event.preventDefault()
+    removeToken(selectedTokenId.value)
+    markExplored()
     requestCanvasRender()
     return
   }
@@ -1004,6 +1345,33 @@ const handlePointerDown = (event: JSX.TargetedPointerEvent<HTMLCanvasElement>): 
   const rawPoint = positionFromEvent(event)
   const point = snapPoint(rawPoint, event)
 
+  if (tool.value === 'token') {
+    const token = nearestToken(rawPoint)
+    selectedOccluderId.value = null
+    hoveredOccluderId.value = null
+    if (token) {
+      pushUndoHistory()
+      selectedTokenId.value = token.id
+      hoveredTokenId.value = token.id
+      tokenDrag.value = {
+        id: token.id,
+        pointerStart: point,
+        original: token
+      }
+      event.currentTarget.setPointerCapture(event.pointerId)
+      requestCanvasRender()
+      return
+    }
+
+    pushUndoHistory()
+    const nextToken = makeToken(point)
+    tokens.value = [...tokens.value, nextToken]
+    selectedTokenId.value = nextToken.id
+    hoveredTokenId.value = nextToken.id
+    requestCanvasRender()
+    return
+  }
+
   if (tool.value === 'viewer') {
     const door = nearestOccluder(rawPoint, (occluder) => occluder.type === 'door', 18)
     if (door && door.type === 'door') {
@@ -1013,6 +1381,7 @@ const handlePointerDown = (event: JSX.TargetedPointerEvent<HTMLCanvasElement>): 
     viewer.value = point
     isMovingViewer.value = true
     selectedOccluderId.value = null
+    selectedTokenId.value = null
     event.currentTarget.setPointerCapture(event.pointerId)
     markExplored()
     requestCanvasRender()
@@ -1020,6 +1389,14 @@ const handlePointerDown = (event: JSX.TargetedPointerEvent<HTMLCanvasElement>): 
   }
 
   if (tool.value === 'erase') {
+    const token = nearestToken(rawPoint)
+    if (token) {
+      removeToken(token.id)
+      markExplored()
+      requestCanvasRender()
+      return
+    }
+
     const target = nearestEditTarget(rawPoint, () => true)
     if (target) {
       removeOccluder(target.occluder.id)
@@ -1035,6 +1412,7 @@ const handlePointerDown = (event: JSX.TargetedPointerEvent<HTMLCanvasElement>): 
     if (editTarget) {
       pushUndoHistory()
       selectedOccluderId.value = editTarget.occluder.id
+      selectedTokenId.value = null
       hoveredOccluderId.value = editTarget.occluder.id
       editDrag.value = {
         id: editTarget.occluder.id,
@@ -1049,6 +1427,7 @@ const handlePointerDown = (event: JSX.TargetedPointerEvent<HTMLCanvasElement>): 
   }
 
   selectedOccluderId.value = null
+  selectedTokenId.value = null
 
   dragStart.value = point
   previewPoint.value = point
@@ -1059,6 +1438,19 @@ const handlePointerDown = (event: JSX.TargetedPointerEvent<HTMLCanvasElement>): 
 const handlePointerMove = (event: JSX.TargetedPointerEvent<HTMLCanvasElement>): void => {
   const rawPoint = positionFromEvent(event)
   const point = snapPoint(rawPoint, event)
+  const tokenMove = tokenDrag.value
+  if (tokenMove) {
+    const dx = point.x - tokenMove.pointerStart.x
+    const dy = point.y - tokenMove.pointerStart.y
+    updateToken(tokenMove.id, {
+      ...tokenMove.original,
+      x: tokenMove.original.x + dx,
+      y: tokenMove.original.y + dy
+    })
+    requestCanvasRender()
+    return
+  }
+
   const drag = editDrag.value
   if (drag) {
     applyEditDrag(drag, point)
@@ -1075,7 +1467,15 @@ const handlePointerMove = (event: JSX.TargetedPointerEvent<HTMLCanvasElement>): 
   }
 
   if (!dragStart.value) {
+    if (tool.value === 'token') {
+      hoveredTokenId.value = nearestToken(rawPoint)?.id ?? null
+      hoveredOccluderId.value = null
+      requestCanvasRender()
+      return
+    }
+
     const editableFilter = editableFilterForTool()
+    hoveredTokenId.value = null
     hoveredOccluderId.value = editableFilter
       ? (nearestEditTarget(rawPoint, editableFilter)?.occluder.id ?? null)
       : null
@@ -1088,6 +1488,21 @@ const handlePointerMove = (event: JSX.TargetedPointerEvent<HTMLCanvasElement>): 
 
 const handlePointerUp = (event: JSX.TargetedPointerEvent<HTMLCanvasElement>): void => {
   const point = snapPoint(positionFromEvent(event), event)
+  if (tokenDrag.value) {
+    const drag = tokenDrag.value
+    const dx = point.x - drag.pointerStart.x
+    const dy = point.y - drag.pointerStart.y
+    updateToken(drag.id, {
+      ...drag.original,
+      x: drag.original.x + dx,
+      y: drag.original.y + dy
+    })
+    tokenDrag.value = null
+    event.currentTarget.releasePointerCapture(event.pointerId)
+    requestCanvasRender()
+    return
+  }
+
   if (editDrag.value) {
     const drag = editDrag.value
     applyEditDrag(drag, point)
@@ -1154,6 +1569,7 @@ const handlePointerCancel = (): void => {
   previewPoint.value = null
   isMovingViewer.value = false
   editDrag.value = null
+  tokenDrag.value = null
   requestCanvasRender()
 }
 
@@ -1170,7 +1586,8 @@ const exportSidecar = async (): Promise<void> => {
             open: isDoorOpen(occluder)
           }
         : occluder
-    )
+    ),
+    tokens: tokens.value
   }
   const json = `${JSON.stringify(sidecar, null, 2)}\n`
   try {
@@ -1226,6 +1643,11 @@ const getDoorStat = (): string => {
 const getSelectedOccluder = (): Occluder | null => {
   const id = selectedOccluderId.value
   return id ? (occluders.value.find((occluder) => occluder.id === id) ?? null) : null
+}
+
+const getSelectedToken = (): Token | null => {
+  const id = selectedTokenId.value
+  return id ? (tokens.value.find((token) => token.id === id) ?? null) : null
 }
 
 const convertSelectedOccluder = (targetType: 'wall' | 'door'): void => {
@@ -1302,6 +1724,99 @@ const ToolButton = ({
   </button>
 )
 
+const CounterTypeIcon = ({kind}: {kind: CounterKind}): JSX.Element => {
+  if (kind === 'robot') {
+    return (
+      <svg className="counter-option-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <rect x="7" y="8" width="10" height="9" rx="1" />
+        <rect x="9" y="5" width="6" height="3" rx="1" />
+        <path d="M12 5V2.5" />
+        <path d="M8.5 11h.01M15.5 11h.01" />
+        <path d="M9 20h6" />
+      </svg>
+    )
+  }
+
+  if (kind === 'monster') {
+    return (
+      <svg className="counter-option-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <ellipse cx="12" cy="12" rx="5.5" ry="4.2" />
+        <path d="M8 15c-2 1-3 2.4-3 4" />
+        <path d="M11 16c-.9 1.4-1.1 2.7-.7 4" />
+        <path d="M13 16c.9 1.4 1.1 2.7.7 4" />
+        <path d="M16 15c2 1 3 2.4 3 4" />
+      </svg>
+    )
+  }
+
+  if (kind === 'scientist') {
+    return (
+      <svg className="counter-option-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="9" cy="6" r="2.2" />
+        <path d="M9 8.5v7" />
+        <path d="M6.5 12h5" />
+        <path d="m14 9 4.5 9h-7L16 9" />
+        <path d="M14.2 15.5h3.6" />
+      </svg>
+    )
+  }
+
+  if (kind === 'police') {
+    return (
+      <svg className="counter-option-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 3 18 6v5.5c0 4-2.3 7-6 8.5-3.7-1.5-6-4.5-6-8.5V6l6-3Z" />
+        <path d="M9 11h6" />
+      </svg>
+    )
+  }
+
+  if (kind === 'aslan') {
+    return (
+      <svg className="counter-option-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="m7.5 7-2-3.5 4 1.9" />
+        <path d="m16.5 7 2-3.5-4 1.9" />
+        <ellipse cx="12" cy="12" rx="6" ry="5.2" />
+        <path d="M9 14.5c1.8 1 4.2 1 6 0" />
+      </svg>
+    )
+  }
+
+  if (kind === 'vargr') {
+    return (
+      <svg className="counter-option-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="m7 6-2-3 4 1.4" />
+        <ellipse cx="11" cy="12" rx="5.2" ry="4.8" />
+        <path d="m14.5 11 4.5 1.4-4.3 1.9" />
+        <path d="M8.5 15c1.5.9 3.3 1 5.1.2" />
+      </svg>
+    )
+  }
+
+  if (kind === 'kkree') {
+    return (
+      <svg className="counter-option-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <ellipse cx="10.5" cy="13" rx="5.7" ry="3.1" />
+        <path d="M15 10.5h3v-3" />
+        <circle cx="18" cy="6.3" r="2" />
+        <path d="M7 16v4M10 16v4M13 16v4M16 15.5V20" />
+      </svg>
+    )
+  }
+
+  return (
+    <svg className="counter-option-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="5" r="2.5" />
+      <path d="M12 7.8v7.4" />
+      <path d="M8.2 11.2h7.6" />
+      <path d="m10.4 15.2-2.2 5" />
+      <path d="m13.6 15.2 2.2 5" />
+      {kind === 'troop' ? <path d="m14 10.4 5.4-1.3" /> : null}
+      {kind === 'adventurer' ? <path d="m15 9.7 4.4-4.4" /> : null}
+      {kind === 'passenger' ? <circle cx="17.3" cy="13.2" r="2" /> : null}
+    </svg>
+  )
+}
+
 const App = (): JSX.Element => {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const viewportRef = useRef<HTMLDivElement>(null)
@@ -1334,6 +1849,9 @@ const App = (): JSX.Element => {
 
   const activeTileCount = tiles.value.length
   const selectedOccluder = getSelectedOccluder()
+  const selectedToken = getSelectedToken()
+  const nextGroup = normalizeCounterGroup(counterGroup.value)
+  const nextCounterLabel = `${nextGroup}${nextTokenNumber(nextGroup)}`
 
   return (
     <main className="app-shell">
@@ -1579,6 +2097,19 @@ const App = (): JSX.Element => {
                 Door
               </ToolButton>
               <ToolButton
+                value="token"
+                icon={
+                  <>
+                    <rect x="5" y="4" width="14" height="14" rx="2" />
+                    <circle cx="12" cy="9" r="2" />
+                    <path d="M9 16c.7-1.5 1.7-2.2 3-2.2s2.3.7 3 2.2" />
+                    <path d="M16 20h3" />
+                  </>
+                }
+              >
+                Counter
+              </ToolButton>
+              <ToolButton
                 value="erase"
                 icon={
                   <>
@@ -1629,6 +2160,69 @@ const App = (): JSX.Element => {
                     onClick={() => {
                       removeOccluder(selectedOccluder.id)
                       markExplored()
+                      requestCanvasRender()
+                    }}
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="panel">
+            <h2>Counters</h2>
+            <div className="counter-toolbar">
+              <label className="counter-group-control">
+                <span>Group</span>
+                <input
+                  id="counterGroupInput"
+                  type="text"
+                  inputMode="text"
+                  maxLength={2}
+                  value={counterGroup.value}
+                  onInput={(event) => {
+                    counterGroup.value = sanitizeCounterGroupInput(event.currentTarget.value)
+                  }}
+                />
+              </label>
+              <span className="counter-next" aria-label={`Next counter ${nextCounterLabel}`}>
+                {nextCounterLabel}
+              </span>
+            </div>
+            <div className="counter-grid" role="group" aria-label="Counter types">
+              {counterDefinitions.map((definition) => (
+                <button
+                  className={`counter-option${
+                    activeCounterKind.value === definition.kind ? ' active' : ''
+                  }`}
+                  key={definition.kind}
+                  type="button"
+                  aria-pressed={activeCounterKind.value === definition.kind}
+                  onClick={() => {
+                    activeCounterKind.value = definition.kind
+                    tool.value = 'token'
+                  }}
+                >
+                  <span
+                    className="counter-swatch"
+                    style={{backgroundColor: definition.color}}
+                    aria-hidden="true"
+                  >
+                    <CounterTypeIcon kind={definition.kind} />
+                  </span>
+                  <span>{definition.name}</span>
+                </button>
+              ))}
+            </div>
+            {selectedToken ? (
+              <div className="selection-actions" aria-label="Selected counter actions">
+                <span>{`${counterDefinitionFor(selectedToken.kind).name} ${selectedToken.label}`}</span>
+                <div className="selection-action-row single">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      removeToken(selectedToken.id)
                       requestCanvasRender()
                     }}
                   >
