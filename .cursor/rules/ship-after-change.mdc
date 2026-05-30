@@ -1,0 +1,16 @@
+---
+description: After code changes, commit, push, and verify live
+alwaysApply: true
+---
+
+# Ship after every change
+
+When you finish a requested change in this repo:
+
+1. Run the narrowest useful check (`npm run check` or a narrower command).
+2. Commit with a clear message.
+3. Push to `main`.
+4. Deploy when the Worker, build output, or served assets changed (`npm run deploy`).
+5. Verify on the live site at `https://los.tre.systems` — not just `tsc` or `curl /healthz` alone; open the affected pages in a browser and confirm behavior.
+
+Do not leave completed work uncommitted or undeployed unless the user explicitly says not to.
