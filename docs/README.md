@@ -12,6 +12,8 @@ formats in more depth.
 - [MULTIPLAYER.md](MULTIPLAYER.md) — design + roadmap for multiplayer with
   server-authoritative per-player fog of war (Durable Objects, CQRS-lite, SSE,
   Discord auth). Forward-looking; not built yet.
+- [CV_REVIEW_PIPELINE.md](CV_REVIEW_PIPELINE.md) — branch experiment for
+  improving CV-generated wall/door sidecars through local visual overlay review.
 - [diagrams/](diagrams/README.md) — Graphviz/DOT sources + rendered PNGs.
 
 ## Project layout
