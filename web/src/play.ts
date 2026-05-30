@@ -258,7 +258,7 @@ const hintText = (): string => {
 
 const syncDoorControlUi = (active: Board): void => {
   const checkbox = document.querySelector<HTMLInputElement>('#playerDoors')
-  const hint = document.querySelector('.hint')
+  const hint = document.querySelector('.play-hint')
   if (checkbox) checkbox.checked = playerDoorControl(active)
   if (hint) hint.textContent = hintText()
 }
@@ -281,15 +281,32 @@ const mount = (): void => {
       </label>`
     : ''
   root.innerHTML = `
-    <header class="play-hud">
-      <strong>Line of Sight — Multiplayer</strong>
-      <span id="status"></span>
-      <span id="who"></span>
-      <button id="copyLink" type="button">Copy invite link</button>
-      ${gmControls}
-      <span class="hint">${hintText()}</span>
-    </header>
-    <main class="play-board"><canvas id="board"></canvas></main>`
+    <div class="play-shell">
+      <aside class="play-sidebar" aria-label="Session controls">
+        <div class="play-brand">
+          <strong>Line of Sight</strong>
+          <span>Multiplayer</span>
+        </div>
+        <dl class="play-meta">
+          <div>
+            <dt>Status</dt>
+            <dd id="status"></dd>
+          </div>
+          <div>
+            <dt>Table</dt>
+            <dd>${tableId}</dd>
+          </div>
+          <div>
+            <dt>You</dt>
+            <dd id="who"></dd>
+          </div>
+        </dl>
+        <button id="copyLink" type="button">Copy invite link</button>
+        ${gmControls}
+        <p class="play-hint">${hintText()}</p>
+      </aside>
+      <main class="play-board"><canvas id="board"></canvas></main>
+    </div>`
 
   const element = document.querySelector<HTMLCanvasElement>('#board')
   const context = element?.getContext('2d')
