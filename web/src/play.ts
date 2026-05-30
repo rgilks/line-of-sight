@@ -9,7 +9,7 @@
 //   ?gm=1          spectator/GM view — sees ALL counters, manages doors, no fog
 import {effect, signal} from '@preact/signals'
 import {visibilityPolygon, type Occluder, type Point} from './los-core'
-import type {Board, CommandEnvelope, Token, ViewMessage} from '../../src/protocol'
+import type {Board, CommandEnvelope, CounterKind, Token, ViewMessage} from '../../src/protocol'
 import './play.css'
 
 const params = new URLSearchParams(location.search)
@@ -22,6 +22,24 @@ const tokens = signal<Token[]>([])
 const status = signal('Connecting…')
 const mapImage = signal<HTMLImageElement | null>(null)
 let loadedAssetRef = ''
+
+// Counter portraits (shared with the single-player tool, served from
+// /token-portraits). Cached per kind; loading one bumps portraitTick so the
+// render effect redraws once the image is ready.
+const portraitTick = signal(0)
+const portraits = new Map<CounterKind, HTMLImageElement>()
+const portraitFor = (kind: CounterKind): HTMLImageElement => {
+  let image = portraits.get(kind)
+  if (!image) {
+    image = new Image()
+    image.onload = () => {
+      portraitTick.value += 1
+    }
+    image.src = `/token-portraits/${kind}.webp`
+    portraits.set(kind, image)
+  }
+  return image
+}
 
 let canvas: HTMLCanvasElement
 let ctx: CanvasRenderingContext2D
@@ -189,18 +207,38 @@ const drawFog = (active: Board, me: Token): void => {
 
 const drawToken = (token: Token): void => {
   const mine = token.ownerId === you.value
+  const ring = mine ? '#39ff14' : '#4aa3ff'
+  const radius = 26
+  const image = portraitFor(token.kind)
+
+  ctx.save()
   ctx.beginPath()
-  ctx.arc(token.x, token.y, 26, 0, Math.PI * 2)
-  ctx.fillStyle = mine ? '#39ff14' : '#4aa3ff'
-  ctx.fill()
+  ctx.arc(token.x, token.y, radius, 0, Math.PI * 2)
+  ctx.closePath()
+  ctx.clip()
+  if (image.complete && image.naturalWidth > 0) {
+    ctx.drawImage(image, token.x - radius, token.y - radius, radius * 2, radius * 2)
+  } else {
+    ctx.fillStyle = ring
+    ctx.fill()
+  }
+  ctx.restore()
+
+  ctx.beginPath()
+  ctx.arc(token.x, token.y, radius, 0, Math.PI * 2)
   ctx.lineWidth = 3
-  ctx.strokeStyle = '#050505'
+  ctx.strokeStyle = ring
   ctx.stroke()
-  ctx.fillStyle = '#050505'
-  ctx.font = '700 22px "JetBrains Mono", monospace'
+
+  // Label sits just below the token for legibility over any portrait.
+  ctx.font = '700 15px "JetBrains Mono", monospace'
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
-  ctx.fillText(token.label, token.x, token.y)
+  ctx.lineWidth = 3
+  ctx.strokeStyle = '#050505'
+  ctx.strokeText(token.label, token.x, token.y + radius + 11)
+  ctx.fillStyle = '#f5f5f5'
+  ctx.fillText(token.label, token.x, token.y + radius + 11)
 }
 
 const draw = (): void => {
@@ -269,6 +307,7 @@ const wireCopyLink = (): void => {
 mount()
 
 effect(() => {
+  portraitTick.value // redraw when a counter portrait finishes loading
   draw()
   const statusEl = document.querySelector('#status')
   if (statusEl) statusEl.textContent = status.value

@@ -4,10 +4,12 @@
 // persistence is a later phase (see docs/MULTIPLAYER.md).
 import type {DurableObjectState} from './cf'
 import {
+  COUNTER_KINDS,
   visibleTokensFor,
   type Board,
   type Command,
   type CommandEnvelope,
+  type CounterKind,
   type DomainEvent,
   type PlayerId,
   type Token,
@@ -74,6 +76,15 @@ export class GameTable {
     return {x, y: Math.min(y, this.board.height - 80)}
   }
 
+  // Pick a counter portrait for a joining player — distinct from those in use
+  // while any remain free, then allow repeats.
+  private pickKind(): CounterKind {
+    const used = new Set([...this.tokens.values()].map((token) => token.kind))
+    const free = COUNTER_KINDS.filter((kind) => !used.has(kind))
+    const pool = free.length > 0 ? free : COUNTER_KINDS
+    return pool[Math.floor(Math.random() * pool.length)]
+  }
+
   // Tokens this connection may see: a GM sees all; a player is fog-gated.
   private tokensFor(playerId: PlayerId): Token[] {
     const all = [...this.tokens.values()]
@@ -91,8 +102,9 @@ export class GameTable {
     if (!gm) {
       const {x, y} = this.spawn()
       const label = `P${this.tokens.size + 1}`
-      this.tokens.set(playerId, {id: `token-${playerId}`, ownerId: playerId, label, x, y})
-      this.append({type: 'PlayerJoined', playerId, label, x, y})
+      const kind = this.pickKind()
+      this.tokens.set(playerId, {id: `token-${playerId}`, ownerId: playerId, label, kind, x, y})
+      this.append({type: 'PlayerJoined', playerId, label, kind, x, y})
     }
 
     const snapshot: ViewMessage = {

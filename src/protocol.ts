@@ -5,10 +5,42 @@ import {hasLineOfSight, type Occluder, type Point} from '../web/src/los-core'
 
 export type PlayerId = string
 
+// The counter portraits available at /token-portraits/<kind>.webp (shared with
+// the single-player tool). Players are assigned one at random on join.
+export type CounterKind =
+  | 'amphibian'
+  | 'engineer'
+  | 'insectoid'
+  | 'marine'
+  | 'medic'
+  | 'officer'
+  | 'psion'
+  | 'reptilian'
+  | 'scientist'
+  | 'scout'
+  | 'security'
+  | 'trader'
+
+export const COUNTER_KINDS: CounterKind[] = [
+  'amphibian',
+  'engineer',
+  'insectoid',
+  'marine',
+  'medic',
+  'officer',
+  'psion',
+  'reptilian',
+  'scientist',
+  'scout',
+  'security',
+  'trader'
+]
+
 export type Token = {
   id: string
   ownerId: PlayerId
   label: string
+  kind: CounterKind
   x: number
   y: number
 }
@@ -34,7 +66,7 @@ export type CommandEnvelope = {playerId: PlayerId; command: Command}
 
 // Server-internal facts; state is a fold over these. seq is monotonic per table.
 export type DomainEvent = {seq: number} & (
-  | {type: 'PlayerJoined'; playerId: PlayerId; label: string; x: number; y: number}
+  | {type: 'PlayerJoined'; playerId: PlayerId; label: string; kind: CounterKind; x: number; y: number}
   | {type: 'PlayerLeft'; playerId: PlayerId}
   | {type: 'PlayerRenamed'; playerId: PlayerId; label: string}
   | {type: 'TokenMoved'; playerId: PlayerId; x: number; y: number}
