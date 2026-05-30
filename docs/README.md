@@ -12,6 +12,10 @@ formats in more depth.
 - [MULTIPLAYER.md](MULTIPLAYER.md) — design + roadmap for multiplayer with
   server-authoritative per-player fog of war (Durable Objects, CQRS-lite, SSE,
   Discord auth). Forward-looking; not built yet.
+- [NN_WALL_DETECTION.md](NN_WALL_DETECTION.md) — research-backed plan for
+  neural wall/door detection on Geomorph tiles (branch
+  `feature/nn-wall-detection`). Classical CV bootstrap, agent-assisted label
+  correction, segmentation training, integration behind a feature flag.
 - [diagrams/](diagrams/README.md) — Graphviz/DOT sources + rendered PNGs.
 
 ## Project layout
