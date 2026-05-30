@@ -74,6 +74,54 @@ For each map:
 4. Render a `corrected` overlay from the patched sidecar.
 5. Summarise time/correction cost and whether the process is promising.
 
+The helper script for this branch is:
+
+```bash
+node scripts/cv-review-pilot.mjs
+```
+
+It writes detected sidecars, detected overlays, corrected overlays when matching
+corrected sidecars exist, and contact sheets under
+`local-reference/cv-review-pilot/`.
+
+## First Pilot Notes
+
+Initial sample size: 12 maps, covering Standard, Edge, and Corner tiles. Raw CV
+output over the sample produced 488 wall segments and 126 door segments.
+
+The first visual pass suggests three categories:
+
+- **Already useful:** structured engineering, bridge, stateroom, and room-heavy
+  tiles often need only spot correction. The detector usually finds the main
+  partition network and door candidates.
+- **Reviewable but ambiguous:** cargo maps depend on whether cargo containers
+  should block line of sight. If yes, CV currently under-detects them because it
+  treats disconnected cargo outlines as non-structural. A local review pass can
+  add those obstacles cleanly.
+- **Hard cases:** curved/domed rooms and decorative diagonal architecture need
+  either manual approximation with segments or a new deterministic post-process.
+  They are possible to correct, but not cheap enough to do blindly across all
+  maps.
+
+One representative hard correction was tried locally:
+
+| Map | Raw CV | Reviewed result | Note |
+| --- | --- | --- | --- |
+| `537 Cargo Bay - Full` | 2 walls, 2 doors | 46 walls, 3 doors | Added cargo-container obstacle outlines and a cargo-door segment. This changed an unusable sparse sidecar into a plausible LOS overlay. |
+
+The corrected files and overlay PNGs are intentionally local-only:
+
+```text
+local-reference/cv-review-pilot/corrected/sidecars/537-cargo-bay-full.sidecar.json
+local-reference/cv-review-pilot/corrected/overlays/537-cargo-bay-full.overlay.png
+```
+
+Early conclusion: this is a promising direction for a curated sidecar library,
+but not as a fully automatic batch process. The highest-value path is to let CV
+produce drafts, use local visual review for maps with high error or high play
+value, and feed recurring misses back into deterministic detection where
+possible.
+
 ## Correction Format
 
 Use the app's existing sidecar shape:
@@ -131,4 +179,3 @@ For now, review is done locally in Codex. Later, the app could offer an optional
 
 That should be treated as opt-in because it sends map imagery or derived map
 data off-device. The default app should remain local-first.
-
