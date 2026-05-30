@@ -46,8 +46,9 @@ export const redoStack = signal<EditorSnapshot[]>([])
 export const dropDepth = signal(0)
 export const renderTick = signal(0)
 export const drawerOpen = signal(true)
-export const activeDrawerTab = signal<DrawerTab>('tools')
+export const activeDrawerTab = signal<DrawerTab>('session')
 export const publishTableId = signal('demo')
+export const tablePublished = signal(false)
 
 // Live bindings for the mounted canvas/viewport, set once from App via setView.
 // Exported `let` so every module reads the current value after the UI mounts.

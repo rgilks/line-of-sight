@@ -1,7 +1,7 @@
 import type {Occluder, Point} from './los-core'
 
 export type Tool = 'viewer' | 'wall' | 'door' | 'erase' | 'token'
-export type DrawerTab = 'tools' | 'counters' | 'maps' | 'state'
+export type DrawerTab = 'session' | 'map' | 'edit' | 'counters'
 
 export type Tile = {
   id: string

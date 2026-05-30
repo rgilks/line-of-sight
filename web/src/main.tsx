@@ -17,9 +17,7 @@ import {
   gpuStatus,
   gridValue,
   hideUnseen,
-  occluders,
   preloadCounterPortraits,
-  publishTableId,
   redoStack,
   requestCanvasRender,
   runtimeStatus,
@@ -60,7 +58,7 @@ import {
   handleDrop
 } from './ui-actions'
 import {exportSidecar} from './export'
-import {publishToTable} from './publish'
+import {SessionPanel} from './session-panel'
 
 const counterDefinitionFor = (kind: (typeof counterDefinitions)[number]['kind']) =>
   counterDefinitions.find((definition) => definition.kind === kind) ?? counterDefinitions[0]
@@ -216,17 +214,253 @@ const App = (): JSX.Element => {
           </a>
 
           <div className="drawer-tabs" role="tablist" aria-label="Control sections">
-            <DrawerTabButton value="tools">Tools</DrawerTabButton>
+            <DrawerTabButton value="session">Session</DrawerTabButton>
+            <DrawerTabButton value="map">Map</DrawerTabButton>
+            <DrawerTabButton value="edit">Edit</DrawerTabButton>
             <DrawerTabButton value="counters">Counters</DrawerTabButton>
-            <DrawerTabButton value="maps">Maps</DrawerTabButton>
-            <DrawerTabButton value="state">State</DrawerTabButton>
           </div>
 
           <div className="drawer-content">
-            {activeDrawerTab.value === 'tools' ? (
+            {activeDrawerTab.value === 'session' ? <SessionPanel /> : null}
+
+            {activeDrawerTab.value === 'map' ? (
               <div className="drawer-tab-panel" role="tabpanel">
                 <div className="panel">
-                  <h2>Visibility</h2>
+                  <h2>Load & layout</h2>
+                  <p className="panel-lead">
+                    Drop map images on the board or pick files below. Set columns to arrange tiles,
+                    then analyze to detect walls and doors.
+                  </p>
+                  <div className="drawer-action-grid">
+                    <label className="file-button primary-action">
+                      <input
+                        id="fileInput"
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        onChange={(event) => {
+                          void loadMapFiles(event.currentTarget.files ?? [])
+                          event.currentTarget.value = ''
+                        }}
+                      />
+                      <Icon>
+                        <path d="M12 3v12" />
+                        <path d="m7 8 5-5 5 5" />
+                        <path d="M5 15v3a3 3 0 0 0 3 3h8a3 3 0 0 0 3-3v-3" />
+                      </Icon>
+                      <span>Select maps</span>
+                    </label>
+                    <button
+                      id="analyzeButton"
+                      type="button"
+                      className="primary-action"
+                      disabled={!activeTileCount}
+                      onClick={() => void analyzeTiles()}
+                    >
+                      <Icon>
+                        <path d="M14 4h6v6" />
+                        <path d="M20 4 13 11" />
+                        <path d="M4 20 10.5 13.5" />
+                        <path d="m8 4 1.5 3L13 8.5 9.5 10 8 13 6.5 10 3 8.5 6.5 7 8 4Z" />
+                      </Icon>
+                      <span>Analyze walls & doors</span>
+                    </button>
+                    <label className="number-control">
+                      <span>Columns</span>
+                      <input
+                        id="columnsInput"
+                        type="number"
+                        min="1"
+                        max="12"
+                        value={columnsValue.value}
+                        onInput={(event) => {
+                          columnsValue.value = Math.max(1, Number(event.currentTarget.value) || 1)
+                          arrangeTiles()
+                        }}
+                      />
+                    </label>
+                    <label className="number-control">
+                      <span>Grid</span>
+                      <input
+                        id="gridInput"
+                        type="number"
+                        min="10"
+                        max="200"
+                        value={gridValue.value}
+                        onInput={(event) => {
+                          gridValue.value = Math.max(10, Number(event.currentTarget.value) || 50)
+                          markExplored()
+                          requestCanvasRender()
+                        }}
+                      />
+                    </label>
+                    <button
+                      id="undoButton"
+                      type="button"
+                      disabled={undoStack.value.length === 0}
+                      title="Undo map correction"
+                      onClick={undoEditorChange}
+                    >
+                      <Icon>
+                        <path d="M9 14 4 9l5-5" />
+                        <path d="M4 9h10a6 6 0 0 1 0 12h-1" />
+                      </Icon>
+                      <span>Undo</span>
+                    </button>
+                    <button
+                      id="redoButton"
+                      type="button"
+                      disabled={redoStack.value.length === 0}
+                      title="Redo map correction"
+                      onClick={redoEditorChange}
+                    >
+                      <Icon>
+                        <path d="m15 14 5-5-5-5" />
+                        <path d="M20 9H10a6 6 0 0 0 0 12h1" />
+                      </Icon>
+                      <span>Redo</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="panel">
+                  <h2>Tiles</h2>
+                  {tiles.value.length === 0 ? (
+                    <p className="empty-hint">No tiles loaded — drag images onto the map or use Select maps.</p>
+                  ) : (
+                    <div id="tileList" className="tile-list">
+                      {tiles.value.map((tile) => (
+                        <div className="tile-item" key={tile.id}>
+                          <img src={tile.url} alt="" />
+                          <span>{`${tile.name} (${tile.width}x${tile.height})`}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : null}
+
+            {activeDrawerTab.value === 'edit' ? (
+              <div className="drawer-tab-panel" role="tabpanel">
+                <div className="panel">
+                  <h2>Editing tools</h2>
+                  <p className="panel-lead">
+                    Correct walls and doors, preview sight lines, and tune fog before you publish.
+                  </p>
+                  <div className="tool-grid" role="group" aria-label="Map editing tools">
+                    <ToolButton
+                      value="viewer"
+                      icon={
+                        <>
+                          <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" />
+                          <circle cx="12" cy="12" r="2.5" />
+                        </>
+                      }
+                    >
+                      POV
+                    </ToolButton>
+                    <ToolButton
+                      value="wall"
+                      icon={
+                        <>
+                          <path d="M4 8h16" />
+                          <path d="M4 16h16" />
+                          <path d="M8 8v8" />
+                          <path d="M16 8v8" />
+                        </>
+                      }
+                    >
+                      Wall
+                    </ToolButton>
+                    <ToolButton
+                      value="door"
+                      icon={
+                        <>
+                          <path d="M5 21V4h10v17" />
+                          <path d="M15 8h4v13" />
+                          <path d="M11 13h.01" />
+                        </>
+                      }
+                    >
+                      Door
+                    </ToolButton>
+                    <ToolButton
+                      value="token"
+                      icon={
+                        <>
+                          <rect x="5" y="4" width="14" height="14" rx="2" />
+                          <circle cx="12" cy="9" r="2" />
+                          <path d="M9 16c.7-1.5 1.7-2.2 3-2.2s2.3.7 3 2.2" />
+                          <path d="M16 20h3" />
+                        </>
+                      }
+                    >
+                      Counter
+                    </ToolButton>
+                    <ToolButton
+                      value="erase"
+                      icon={
+                        <>
+                          <path d="m16 3 5 5-11 11H5l-3-3L16 3Z" />
+                          <path d="M10 19h11" />
+                        </>
+                      }
+                    >
+                      Erase
+                    </ToolButton>
+                  </div>
+                  {selectedOccluder ? (
+                    <div className="selection-actions" aria-label="Selected map line actions">
+                      <span>{selectedOccluder.type === 'door' ? 'Door selected' : 'Wall selected'}</span>
+                      <div className="selection-action-row">
+                        <button
+                          type="button"
+                          aria-pressed={selectedOccluder.type === 'wall'}
+                          onClick={() => {
+                            convertSelectedOccluder('wall')
+                          }}
+                        >
+                          Wall
+                        </button>
+                        <button
+                          type="button"
+                          aria-pressed={selectedOccluder.type === 'door'}
+                          onClick={() => {
+                            convertSelectedOccluder('door')
+                          }}
+                        >
+                          Door
+                        </button>
+                      </div>
+                      <div className="selection-action-row">
+                        {selectedOccluder.type === 'door' ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDoorOpen(selectedOccluder.id, !isDoorOpen(selectedOccluder))
+                            }}
+                          >
+                            {isDoorOpen(selectedOccluder) ? 'Close' : 'Open'}
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            removeOccluder(selectedOccluder.id)
+                            markExplored()
+                            requestCanvasRender()
+                          }}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="panel">
+                  <h2>Visibility preview</h2>
                   <div className="drawer-action-grid">
                     <label className="sight-control">
                       <span>
@@ -268,15 +502,6 @@ const App = (): JSX.Element => {
                       </Icon>
                       <span>{showWalls.value ? 'Hide walls' : 'Show walls'}</span>
                     </button>
-                    <button id="analyzeButton" type="button" onClick={() => void analyzeTiles()}>
-                      <Icon>
-                        <path d="M14 4h6v6" />
-                        <path d="M20 4 13 11" />
-                        <path d="M4 20 10.5 13.5" />
-                        <path d="m8 4 1.5 3L13 8.5 9.5 10 8 13 6.5 10 3 8.5 6.5 7 8 4Z" />
-                      </Icon>
-                      <span>Analyze</span>
-                    </button>
                     <button
                       id="resetFogButton"
                       type="button"
@@ -315,122 +540,23 @@ const App = (): JSX.Element => {
                         <path d="m7 10 5 5 5-5" />
                         <path d="M5 21h14" />
                       </Icon>
-                      <span>Export</span>
+                      <span>Export sidecar</span>
                     </button>
                   </div>
-                </div>
-
-                <div className="panel">
-                  <h2>Tools</h2>
-                  <div className="tool-grid" role="group" aria-label="Map editing tools">
-              <ToolButton
-                value="viewer"
-                icon={
-                  <>
-                    <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" />
-                    <circle cx="12" cy="12" r="2.5" />
-                  </>
-                }
-              >
-                POV
-              </ToolButton>
-              <ToolButton
-                value="wall"
-                icon={
-                  <>
-                    <path d="M4 8h16" />
-                    <path d="M4 16h16" />
-                    <path d="M8 8v8" />
-                    <path d="M16 8v8" />
-                  </>
-                }
-              >
-                Wall
-              </ToolButton>
-              <ToolButton
-                value="door"
-                icon={
-                  <>
-                    <path d="M5 21V4h10v17" />
-                    <path d="M15 8h4v13" />
-                    <path d="M11 13h.01" />
-                  </>
-                }
-              >
-                Door
-              </ToolButton>
-              <ToolButton
-                value="token"
-                icon={
-                  <>
-                    <rect x="5" y="4" width="14" height="14" rx="2" />
-                    <circle cx="12" cy="9" r="2" />
-                    <path d="M9 16c.7-1.5 1.7-2.2 3-2.2s2.3.7 3 2.2" />
-                    <path d="M16 20h3" />
-                  </>
-                }
-              >
-                Counter
-              </ToolButton>
-              <ToolButton
-                value="erase"
-                icon={
-                  <>
-                    <path d="m16 3 5 5-11 11H5l-3-3L16 3Z" />
-                    <path d="M10 19h11" />
-                  </>
-                }
-              >
-                Erase
-              </ToolButton>
-            </div>
-            {selectedOccluder ? (
-              <div className="selection-actions" aria-label="Selected map line actions">
-                <span>{selectedOccluder.type === 'door' ? 'Door selected' : 'Wall selected'}</span>
-                <div className="selection-action-row">
-                  <button
-                    type="button"
-                    aria-pressed={selectedOccluder.type === 'wall'}
-                    onClick={() => {
-                      convertSelectedOccluder('wall')
-                    }}
-                  >
-                    Wall
-                  </button>
-                  <button
-                    type="button"
-                    aria-pressed={selectedOccluder.type === 'door'}
-                    onClick={() => {
-                      convertSelectedOccluder('door')
-                    }}
-                  >
-                    Door
-                  </button>
-                </div>
-                <div className="selection-action-row">
-                  {selectedOccluder.type === 'door' ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setDoorOpen(selectedOccluder.id, !isDoorOpen(selectedOccluder))
-                      }}
-                    >
-                      {isDoorOpen(selectedOccluder) ? 'Close' : 'Open'}
-                    </button>
-                  ) : null}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      removeOccluder(selectedOccluder.id)
-                      markExplored()
-                      requestCanvasRender()
-                    }}
-                  >
-                    Delete
-                  </button>
-                </div>
-              </div>
-            ) : null}
+                  <dl className="stats compact">
+                    <div>
+                      <dt>Board</dt>
+                      <dd id="boardStat">{getBoardStat()}</dd>
+                    </div>
+                    <div>
+                      <dt>Doors</dt>
+                      <dd id="doorStat">{getDoorStat()}</dd>
+                    </div>
+                    <div>
+                      <dt>POV</dt>
+                      <dd id="povStat">{getPovStat()}</dd>
+                    </div>
+                  </dl>
                 </div>
               </div>
             ) : null}
@@ -519,160 +645,6 @@ const App = (): JSX.Element => {
                       </div>
                     </div>
                   ) : null}
-                </div>
-              </div>
-            ) : null}
-
-            {activeDrawerTab.value === 'maps' ? (
-              <div className="drawer-tab-panel" role="tabpanel">
-                <div className="panel">
-                  <h2>Map Setup</h2>
-                  <div className="drawer-action-grid">
-                    <label className="file-button primary-action">
-                      <input
-                        id="fileInput"
-                        type="file"
-                        accept="image/*"
-                        multiple
-                        onChange={(event) => {
-                          void loadMapFiles(event.currentTarget.files ?? [])
-                          event.currentTarget.value = ''
-                        }}
-                      />
-                      <Icon>
-                        <path d="M12 3v12" />
-                        <path d="m7 8 5-5 5 5" />
-                        <path d="M5 15v3a3 3 0 0 0 3 3h8a3 3 0 0 0 3-3v-3" />
-                      </Icon>
-                      <span>Select maps</span>
-                    </label>
-                    <button
-                      id="undoButton"
-                      type="button"
-                      disabled={undoStack.value.length === 0}
-                      title="Undo map correction"
-                      onClick={undoEditorChange}
-                    >
-                      <Icon>
-                        <path d="M9 14 4 9l5-5" />
-                        <path d="M4 9h10a6 6 0 0 1 0 12h-1" />
-                      </Icon>
-                      <span>Undo</span>
-                    </button>
-                    <button
-                      id="redoButton"
-                      type="button"
-                      disabled={redoStack.value.length === 0}
-                      title="Redo map correction"
-                      onClick={redoEditorChange}
-                    >
-                      <Icon>
-                        <path d="m15 14 5-5-5-5" />
-                        <path d="M20 9H10a6 6 0 0 0 0 12h1" />
-                      </Icon>
-                      <span>Redo</span>
-                    </button>
-                    <label className="number-control">
-                      <span>Columns</span>
-                      <input
-                        id="columnsInput"
-                        type="number"
-                        min="1"
-                        max="12"
-                        value={columnsValue.value}
-                        onInput={(event) => {
-                          columnsValue.value = Math.max(1, Number(event.currentTarget.value) || 1)
-                          arrangeTiles()
-                        }}
-                      />
-                    </label>
-                    <label className="number-control">
-                      <span>Grid</span>
-                      <input
-                        id="gridInput"
-                        type="number"
-                        min="10"
-                        max="200"
-                        value={gridValue.value}
-                        onInput={(event) => {
-                          gridValue.value = Math.max(10, Number(event.currentTarget.value) || 50)
-                          markExplored()
-                          requestCanvasRender()
-                        }}
-                      />
-                    </label>
-                  </div>
-                </div>
-
-                <div className="panel">
-                  <h2>Tiles</h2>
-                  <div id="tileList" className="tile-list">
-                    {tiles.value.map((tile) => (
-                      <div className="tile-item" key={tile.id}>
-                        <img src={tile.url} alt="" />
-                        <span>{`${tile.name} (${tile.width}x${tile.height})`}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="panel">
-                  <h2>Multiplayer</h2>
-                  <div className="drawer-action-grid">
-                    <label className="number-control">
-                      <span>Table</span>
-                      <input
-                        id="tableInput"
-                        type="text"
-                        value={publishTableId.value}
-                        onInput={(event) => {
-                          publishTableId.value = event.currentTarget.value
-                        }}
-                      />
-                    </label>
-                    <button
-                      id="publishButton"
-                      type="button"
-                      onClick={() => void publishToTable(publishTableId.value)}
-                    >
-                      <Icon>
-                        <path d="M4 11a9 9 0 0 1 9 9" />
-                        <path d="M4 4a16 16 0 0 1 16 16" />
-                        <circle cx="5" cy="19" r="1" />
-                      </Icon>
-                      <span>Publish to table</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ) : null}
-
-            {activeDrawerTab.value === 'state' ? (
-              <div className="drawer-tab-panel" role="tabpanel">
-                <div className="panel">
-                  <h2>State</h2>
-                  <dl className="stats">
-                    <div>
-                      <dt>Board</dt>
-                      <dd id="boardStat">{getBoardStat()}</dd>
-                    </div>
-                    <div>
-                      <dt>Occluders</dt>
-                      <dd id="occluderStat">{occluders.value.length}</dd>
-                    </div>
-                    <div>
-                      <dt>Doors</dt>
-                      <dd id="doorStat">{getDoorStat()}</dd>
-                    </div>
-                    <div>
-                      <dt>POV</dt>
-                      <dd id="povStat">{getPovStat()}</dd>
-                    </div>
-                    <div>
-                      <dt>GPU</dt>
-                      <dd id="gpuStat">{gpuStatus.value}</dd>
-                    </div>
-                  </dl>
                 </div>
               </div>
             ) : null}

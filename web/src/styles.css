@@ -179,7 +179,7 @@ textarea:focus-visible {
   top: 12px;
   bottom: 12px;
   left: 12px;
-  width: min(360px, calc(100vw - 24px));
+  width: min(400px, calc(100vw - 24px));
   pointer-events: none;
   transform: translateX(calc(-100% - 12px));
   transition: transform 0.22s ease;
@@ -365,6 +365,191 @@ h2 {
     inset 0 0 12px rgba(var(--tre-green-rgb), 0.08);
   color: var(--tre-green);
   font-weight: 700;
+}
+
+button.primary-action {
+  border-color: rgba(var(--tre-green-rgb), 0.72);
+  background:
+    linear-gradient(180deg, rgba(var(--tre-green-rgb), 0.22), rgba(var(--tre-green-rgb), 0.08)),
+    rgba(0, 0, 0, 0.82);
+  box-shadow:
+    0 0 18px rgba(var(--tre-green-rgb), 0.18),
+    inset 0 0 12px rgba(var(--tre-green-rgb), 0.08);
+  color: var(--tre-green);
+  font-weight: 700;
+}
+
+button.full-width,
+.file-button.full-width {
+  width: 100%;
+}
+
+.panel-lead,
+.field-hint,
+.empty-hint,
+.session-footer p {
+  margin: 8px 0 0;
+  color: var(--tre-muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.field-hint.warn {
+  color: #ffb020;
+}
+
+.field-block {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.field-block span {
+  color: var(--tre-muted);
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.field-block input[type="text"] {
+  width: 100%;
+}
+
+.workflow-steps {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.workflow-step {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  border: 1px solid var(--tre-border);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.45);
+  padding: 10px;
+}
+
+.workflow-step.done {
+  border-color: rgba(var(--tre-green-rgb), 0.35);
+  background: rgba(var(--tre-green-rgb), 0.05);
+}
+
+.workflow-step-marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--tre-border-strong);
+  border-radius: 999px;
+  color: var(--tre-green);
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.workflow-step.done .workflow-step-marker {
+  border-color: var(--tre-green);
+  background: rgba(var(--tre-green-rgb), 0.14);
+}
+
+.workflow-step-body strong {
+  display: block;
+  color: var(--tre-white);
+  font-size: 13px;
+}
+
+.workflow-step-body p {
+  margin: 4px 0 0;
+  color: var(--tre-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.workflow-action {
+  margin-top: 8px;
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.link-card {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  border: 1px solid var(--tre-border);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.45);
+  padding: 10px;
+}
+
+.link-card-head {
+  display: grid;
+  gap: 4px;
+}
+
+.link-card-head strong {
+  color: var(--tre-white);
+  font-size: 13px;
+}
+
+.link-card-head span {
+  color: var(--tre-muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.link-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.link-row input[type="text"] {
+  width: 100%;
+  min-width: 0;
+  min-height: 34px;
+  color: var(--tre-muted);
+  font-size: 11px;
+}
+
+.open-gm-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--tre-green);
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.open-gm-link:hover {
+  text-decoration: underline;
+}
+
+.player-join-hint a {
+  color: var(--tre-green);
+}
+
+.stats.compact {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--tre-border);
+}
+
+.session-intro {
+  padding-top: 4px;
+}
+
+.session-footer {
+  border-bottom: 0;
+  padding-bottom: 4px;
 }
 
 .number-control,

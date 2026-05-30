@@ -2,7 +2,18 @@
 // tool into a multiplayer table so /play runs on the real map. Composes the map
 // tiles into one image (downscaled for upload; the client stretches it to board
 // size), uploads it privately to R2, then POSTs the board to the table DO.
-import {boardSize, doorStates, gridScale, hasMap, occluders, placements, setStatus, sightRadius} from './state'
+import {
+  boardSize,
+  doorStates,
+  gridScale,
+  hasMap,
+  occluders,
+  placements,
+  setStatus,
+  sightRadius,
+  tablePublished
+} from './state'
+import {gmPlayUrl, playerPlayUrl} from './table-links'
 import {isDoorOpen} from './visibility'
 
 const MAX_DIMENSION = 2048
@@ -68,9 +79,15 @@ export const publishToTable = async (rawTableId: string): Promise<void> => {
     headers: {'content-type': 'application/json'},
     body: JSON.stringify(board)
   })
-  setStatus(
-    published.ok
-      ? `Published to table "${tableId}". Open /play.html?table=${tableId} to play.`
-      : `Publish failed (${published.status}).`
-  )
+  if (published.ok) {
+    tablePublished.value = true
+    setStatus(`Published to "${tableId}". Share the player invite link — then open GM view to run the table.`)
+    return
+  }
+  setStatus(`Publish failed (${published.status}).`)
 }
+
+export const playLinksFor = (rawTableId: string): {player: string; gm: string} => ({
+  player: playerPlayUrl(rawTableId),
+  gm: gmPlayUrl(rawTableId)
+})
