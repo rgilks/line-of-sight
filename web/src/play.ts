@@ -35,6 +35,7 @@ const board = signal<Board | null>(null)
 const tokens = signal<Token[]>([])
 const status = signal('Connecting…')
 const mapImage = signal<HTMLImageElement | null>(null)
+const drawerOpen = signal(true)
 let loadedAssetRef = ''
 
 let canvas: HTMLCanvasElement
@@ -282,31 +283,48 @@ const mount = (): void => {
     : ''
   root.innerHTML = `
     <div class="play-shell">
-      <aside class="play-sidebar" aria-label="Session controls">
-        <div class="play-brand">
-          <strong>Line of Sight</strong>
-          <span>Multiplayer</span>
+      <aside class="play-drawer open" aria-label="Session controls">
+        <button
+          id="drawerToggle"
+          class="play-drawer-toggle"
+          type="button"
+          aria-expanded="true"
+          aria-label="Hide session panel"
+        >
+          <svg class="play-drawer-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="m15 18-6-6 6-6" />
+          </svg>
+        </button>
+        <div class="play-drawer-panel">
+          <div class="play-brand">
+            <strong>Line of Sight</strong>
+            <span>Multiplayer</span>
+          </div>
+          <dl class="play-meta">
+            <div>
+              <dt>Status</dt>
+              <dd id="status"></dd>
+            </div>
+            <div>
+              <dt>Table</dt>
+              <dd>${tableId}</dd>
+            </div>
+            <div>
+              <dt>You</dt>
+              <dd id="who"></dd>
+            </div>
+          </dl>
+          <button id="copyLink" type="button">Copy invite link</button>
+          ${gmControls}
+          <p class="play-hint">${hintText()}</p>
         </div>
-        <dl class="play-meta">
-          <div>
-            <dt>Status</dt>
-            <dd id="status"></dd>
-          </div>
-          <div>
-            <dt>Table</dt>
-            <dd>${tableId}</dd>
-          </div>
-          <div>
-            <dt>You</dt>
-            <dd id="who"></dd>
-          </div>
-        </dl>
-        <button id="copyLink" type="button">Copy invite link</button>
-        ${gmControls}
-        <p class="play-hint">${hintText()}</p>
       </aside>
       <main class="play-board"><canvas id="board"></canvas></main>
     </div>`
+
+  document.querySelector('#drawerToggle')?.addEventListener('click', () => {
+    drawerOpen.value = !drawerOpen.value
+  })
 
   const element = document.querySelector<HTMLCanvasElement>('#board')
   const context = element?.getContext('2d')
@@ -345,11 +363,24 @@ effect(() => {
   const statusEl = document.querySelector('#status')
   if (statusEl) statusEl.textContent = status.value
   const whoEl = document.querySelector('#who')
-  if (!whoEl) return
-  const me = myToken()
-  whoEl.textContent = isGm
-    ? `GM · ${tokens.value.length} counters`
-    : me
-      ? `You are ${me.label} · ${tokens.value.length} visible`
-      : ''
+  if (whoEl) {
+    const me = myToken()
+    whoEl.textContent = isGm
+      ? `GM · ${tokens.value.length} counters`
+      : me
+        ? `You are ${me.label} · ${tokens.value.length} visible`
+        : ''
+  }
+
+  const drawer = document.querySelector('.play-drawer')
+  const toggle = document.querySelector('#drawerToggle')
+  const icon = document.querySelector('.play-drawer-icon')
+  if (drawer) drawer.classList.toggle('open', drawerOpen.value)
+  if (toggle) {
+    toggle.setAttribute('aria-expanded', String(drawerOpen.value))
+    toggle.setAttribute('aria-label', drawerOpen.value ? 'Hide session panel' : 'Show session panel')
+  }
+  if (icon) {
+    icon.innerHTML = drawerOpen.value ? '<path d="m15 18-6-6 6-6" />' : '<path d="m9 18 6-6-6-6" />'
+  }
 })

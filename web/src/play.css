@@ -19,22 +19,37 @@ body {
 
 #app,
 .play-shell {
-  display: flex;
-  flex-direction: row;
-  height: 100vh;
-  min-height: 0;
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
 }
 
-.play-sidebar {
+.play-drawer {
+  position: fixed;
+  z-index: 20;
+  top: 12px;
+  bottom: 12px;
+  left: 12px;
+  width: min(320px, calc(100vw - 24px));
+  pointer-events: none;
+  transform: translateX(calc(-100% - 12px));
+  transition: transform 0.22s ease;
+}
+
+.play-drawer.open {
+  transform: translateX(0);
+}
+
+.play-drawer-panel {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  width: min(320px, 36vw);
-  min-width: 240px;
-  flex: 0 0 auto;
+  height: 100%;
   padding: 14px;
+  padding-top: 48px;
   overflow: auto;
-  border-right: 1px solid rgba(var(--green-rgb), 0.25);
+  border: 1px solid rgba(var(--green-rgb), 0.5);
+  border-radius: 8px;
   background:
     repeating-linear-gradient(
       45deg,
@@ -44,6 +59,45 @@ body {
       transparent 12px
     ),
     rgba(0, 0, 0, 0.92);
+  box-shadow:
+    0 0 28px rgba(var(--green-rgb), 0.13),
+    inset 0 0 22px rgba(var(--green-rgb), 0.045);
+  pointer-events: auto;
+}
+
+.play-drawer-toggle {
+  position: absolute;
+  z-index: 2;
+  top: 10px;
+  right: -46px;
+  width: 34px;
+  min-height: 34px;
+  padding: 0;
+  border: 1px solid rgba(var(--green-rgb), 0.48);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.86);
+  color: var(--green);
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.play-drawer.open .play-drawer-toggle {
+  right: 10px;
+}
+
+.play-drawer-icon {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentcolor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.play-drawer-toggle:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 2px;
 }
 
 .play-brand {
@@ -136,7 +190,8 @@ body {
 }
 
 .play-board {
-  flex: 1 1 auto;
+  position: absolute;
+  inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -159,9 +214,12 @@ body {
 }
 
 @media (max-width: 720px) {
-  .play-sidebar {
-    width: min(280px, 42vw);
-    min-width: 220px;
+  .play-drawer {
+    width: min(300px, calc(100vw - 24px));
+  }
+
+  .play-drawer-panel {
     padding: 12px;
+    padding-top: 46px;
   }
 }
