@@ -65,12 +65,18 @@ export const analyzeImageRgba = (
   }
 
   const effectiveGrid = Number.isFinite(gridScale) && gridScale > 0 ? gridScale : 50
-  const mask = buildDarkMask(width, height, rgba)
+  const mask = refineDarkMask(width, height, buildDarkMask(width, height, rgba), effectiveGrid)
   const minRun = Math.floor(Math.max(effectiveGrid * 0.45, 18))
   const snap = Math.max(effectiveGrid / 4, 4)
 
-  let horizontal = scanHorizontal(width, height, mask, minRun, snap)
-  let vertical = scanVertical(width, height, mask, minRun, snap)
+  const gridHorizontal = extractGridAxisWalls(width, height, mask, effectiveGrid, snap, true)
+  const gridVertical = extractGridAxisWalls(width, height, mask, effectiveGrid, snap, false)
+
+  let rawHorizontal = collapseCandidates(
+    scanHorizontal(width, height, mask, minRun, snap),
+    snap
+  )
+  let rawVertical = collapseCandidates(scanVertical(width, height, mask, minRun, snap), snap)
   let diagonalDown = scanDiagonalDown(width, height, mask, minRun, snap)
   let diagonalUp = scanDiagonalUp(width, height, mask, minRun, snap)
   let slopeDownSteep = scanSlopedDown(
@@ -113,8 +119,6 @@ export const analyzeImageRgba = (
     1,
     'slope-up-shallow'
   )
-  horizontal = collapseCandidates(horizontal, snap)
-  vertical = collapseCandidates(vertical, snap)
   diagonalDown = collapseCandidates(diagonalDown, snap)
   diagonalUp = collapseCandidates(diagonalUp, snap)
   slopeDownSteep = collapseCandidates(slopeDownSteep, snap)
@@ -123,12 +127,18 @@ export const analyzeImageRgba = (
   slopeUpShallow = collapseCandidates(slopeUpShallow, snap)
   const isStructural = (candidate: Candidate): boolean =>
     isStructuralWallCandidate(candidate, width, height, mask, effectiveGrid, snap)
-  const baseHorizontal = horizontal.filter(isStructural)
-  const baseVertical = vertical.filter(isStructural)
+  const baseHorizontal = collapseCandidates(
+    [...gridHorizontal, ...rawHorizontal.filter(isStructural)],
+    snap
+  )
+  const baseVertical = collapseCandidates(
+    [...gridVertical, ...rawVertical.filter(isStructural)],
+    snap
+  )
   const structuralHorizontal = promoteConnectedThinAxisCandidates(
-    horizontal,
+    rawHorizontal,
     baseHorizontal,
-    vertical,
+    [...baseVertical, ...rawVertical],
     true,
     width,
     height,
@@ -137,9 +147,9 @@ export const analyzeImageRgba = (
     snap
   )
   const structuralVertical = promoteConnectedThinAxisCandidates(
-    vertical,
+    rawVertical,
     baseVertical,
-    horizontal,
+    [...baseHorizontal, ...rawHorizontal],
     false,
     width,
     height,
@@ -147,13 +157,6 @@ export const analyzeImageRgba = (
     effectiveGrid,
     snap
   )
-  const structuralDiagonalDown = diagonalDown.filter(isStructural)
-  const structuralDiagonalUp = diagonalUp.filter(isStructural)
-  const structuralSlopeDownSteep = slopeDownSteep.filter(isStructural)
-  const structuralSlopeUpSteep = slopeUpSteep.filter(isStructural)
-  const structuralSlopeDownShallow = slopeDownShallow.filter(isStructural)
-  const structuralSlopeUpShallow = slopeUpShallow.filter(isStructural)
-
   const doorCandidates = detectDoorCandidates(
     structuralHorizontal,
     structuralVertical,
@@ -164,18 +167,31 @@ export const analyzeImageRgba = (
     snap
   )
 
-  const wallCandidates = refineWallCandidates(
-    [
-      ...structuralHorizontal,
-      ...structuralVertical,
-      ...structuralDiagonalDown,
-      ...structuralDiagonalUp,
-      ...structuralSlopeDownSteep,
-      ...structuralSlopeUpSteep,
-      ...structuralSlopeDownShallow,
-      ...structuralSlopeUpShallow
-    ],
-    effectiveGrid,
+  const wallCandidates = suppressParallelDuplicates(
+    filterFloorPlanWallCandidates(
+      retainConnectedWallNetwork(
+        refineWallCandidates(
+          [
+            ...structuralHorizontal,
+            ...structuralVertical,
+            ...diagonalDown.filter(isStructural),
+            ...diagonalUp.filter(isStructural),
+            ...slopeDownSteep.filter(isStructural),
+            ...slopeUpSteep.filter(isStructural),
+            ...slopeDownShallow.filter(isStructural),
+            ...slopeUpShallow.filter(isStructural)
+          ],
+          effectiveGrid,
+          snap
+        ),
+        effectiveGrid,
+        snap
+      ),
+      width,
+      height,
+      mask,
+      effectiveGrid
+    ),
     snap
   )
 
@@ -399,6 +415,460 @@ const buildDarkMask = (
     }
   }
   return mask
+}
+
+const refineDarkMask = (
+  width: number,
+  height: number,
+  mask: Uint8Array,
+  gridScale: number
+): Uint8Array => {
+  const radius = 1
+  let refined = morphClose(mask, width, height, radius)
+  const minArea = Math.max(6, Math.round(gridScale * 0.04))
+  return removeSmallComponents(refined, width, height, minArea)
+}
+
+const morphErode = (
+  mask: Uint8Array,
+  width: number,
+  height: number,
+  radius: number
+): Uint8Array => {
+  const out = new Uint8Array(width * height)
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      let keep = 1
+      for (let dy = -radius; dy <= radius && keep; dy += 1) {
+        for (let dx = -radius; dx <= radius; dx += 1) {
+          const sampleX = x + dx
+          const sampleY = y + dy
+          if (sampleX < 0 || sampleX >= width || sampleY < 0 || sampleY >= height) {
+            keep = 0
+            break
+          }
+          if (mask[sampleY * width + sampleX] === 0) {
+            keep = 0
+            break
+          }
+        }
+      }
+      out[y * width + x] = keep
+    }
+  }
+  return out
+}
+
+const morphDilate = (
+  mask: Uint8Array,
+  width: number,
+  height: number,
+  radius: number
+): Uint8Array => {
+  const out = new Uint8Array(width * height)
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      let keep = 0
+      for (let dy = -radius; dy <= radius && !keep; dy += 1) {
+        for (let dx = -radius; dx <= radius; dx += 1) {
+          const sampleX = x + dx
+          const sampleY = y + dy
+          if (sampleX < 0 || sampleX >= width || sampleY < 0 || sampleY >= height) continue
+          if (mask[sampleY * width + sampleX] === 1) {
+            keep = 1
+            break
+          }
+        }
+      }
+      out[y * width + x] = keep
+    }
+  }
+  return out
+}
+
+const morphOpen = (
+  mask: Uint8Array,
+  width: number,
+  height: number,
+  radius: number
+): Uint8Array => morphDilate(morphErode(mask, width, height, radius), width, height, radius)
+
+const morphClose = (
+  mask: Uint8Array,
+  width: number,
+  height: number,
+  radius: number
+): Uint8Array => morphErode(morphDilate(mask, width, height, radius), width, height, radius)
+
+const removeSmallComponents = (
+  mask: Uint8Array,
+  width: number,
+  height: number,
+  minArea: number
+): Uint8Array => {
+  const out = mask.slice()
+  const visited = new Uint8Array(width * height)
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const start = y * width + x
+      if (visited[start] || mask[start] === 0) continue
+
+      const stack = [start]
+      const component: number[] = []
+      visited[start] = 1
+
+      while (stack.length > 0) {
+        const index = stack.pop()
+        if (index === undefined) continue
+        component.push(index)
+        const px = index % width
+        const py = Math.floor(index / width)
+        for (const [dx, dy] of [
+          [-1, 0],
+          [1, 0],
+          [0, -1],
+          [0, 1]
+        ]) {
+          const nx = px + dx
+          const ny = py + dy
+          if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue
+          const next = ny * width + nx
+          if (visited[next] || mask[next] === 0) continue
+          visited[next] = 1
+          stack.push(next)
+        }
+      }
+
+      if (component.length < minArea) {
+        for (const index of component) out[index] = 0
+      }
+    }
+  }
+
+  return out
+}
+
+const extractGridAxisWalls = (
+  width: number,
+  height: number,
+  mask: Uint8Array,
+  gridScale: number,
+  snap: number,
+  horizontal: boolean
+): Candidate[] => {
+  const bandHalf = Math.max(2, Math.round(gridScale * 0.1))
+  const minRun = Math.floor(Math.max(gridScale * 0.45, 18))
+  const darkThreshold = 0.34
+  const candidates: Candidate[] = []
+  const lineCount = Math.ceil((horizontal ? height : width) / gridScale)
+
+  for (let gridIndex = 0; gridIndex <= lineCount; gridIndex += 1) {
+    const lineCenter = gridIndex * gridScale
+    if (lineCenter >= (horizontal ? height : width)) break
+
+    const profile = new Float32Array(horizontal ? width : height)
+    if (horizontal) {
+      for (let x = 0; x < width; x += 1) {
+        let dark = 0
+        let samples = 0
+        for (
+          let y = Math.max(0, lineCenter - bandHalf);
+          y <= Math.min(height - 1, lineCenter + bandHalf);
+          y += 1
+        ) {
+          samples += 1
+          dark += mask[y * width + x]
+        }
+        profile[x] = samples > 0 ? dark / samples : 0
+      }
+    } else {
+      for (let y = 0; y < height; y += 1) {
+        let dark = 0
+        let samples = 0
+        for (
+          let x = Math.max(0, lineCenter - bandHalf);
+          x <= Math.min(width - 1, lineCenter + bandHalf);
+          x += 1
+        ) {
+          samples += 1
+          dark += mask[y * width + x]
+        }
+        profile[y] = samples > 0 ? dark / samples : 0
+      }
+    }
+
+    let index = 0
+    const axisLimit = horizontal ? width : height
+    while (index < axisLimit) {
+      while (index < axisLimit && profile[index] < darkThreshold) index += 1
+      const start = index
+      while (index < axisLimit && profile[index] >= darkThreshold) index += 1
+      const end = index
+      if (end - start < minRun) continue
+
+      const snappedLine = snapValue(lineCenter, snap)
+      if (horizontal) {
+        candidates.push({
+          orientation: 'horizontal',
+          x1: snapValue(start, snap),
+          y1: snappedLine,
+          x2: snapValue(end, snap),
+          y2: snappedLine,
+          length: snapValue(end, snap) - snapValue(start, snap)
+        })
+      } else {
+        candidates.push({
+          orientation: 'vertical',
+          x1: snappedLine,
+          y1: snapValue(start, snap),
+          x2: snappedLine,
+          y2: snapValue(end, snap),
+          length: snapValue(end, snap) - snapValue(start, snap)
+        })
+      }
+    }
+  }
+
+  return collapseCandidates(candidates, snap)
+}
+
+const suppressParallelDuplicates = (candidates: Candidate[], snap: number): Candidate[] => {
+  const horizontals = candidates.filter((candidate) => candidate.orientation === 'horizontal')
+  const verticals = candidates.filter((candidate) => candidate.orientation === 'vertical')
+  const others = candidates.filter(
+    (candidate) => candidate.orientation !== 'horizontal' && candidate.orientation !== 'vertical'
+  )
+
+  return [
+    ...suppressParallelAxisDuplicates(horizontals, true, snap),
+    ...suppressParallelAxisDuplicates(verticals, false, snap),
+    ...others
+  ]
+}
+
+const suppressParallelAxisDuplicates = (
+  candidates: Candidate[],
+  horizontal: boolean,
+  snap: number
+): Candidate[] => {
+  const lineTolerance = snap * 0.85
+  const kept: Candidate[] = []
+
+  for (const candidate of [...candidates].sort((first, second) => second.length - first.length)) {
+    const line = horizontal ? candidate.y1 : candidate.x1
+    const [start, end] = candidateInterval(candidate)
+    const isDuplicate = kept.some((existing) => {
+      const existingLine = horizontal ? existing.y1 : existing.x1
+      if (Math.abs(existingLine - line) > lineTolerance) return false
+      const [existingStart, existingEnd] = candidateInterval(existing)
+      const overlap = Math.min(end, existingEnd) - Math.max(start, existingStart)
+      if (overlap <= 0) return false
+      const shorter = Math.min(end - start, existingEnd - existingStart)
+      return shorter > 0 && overlap / shorter >= 0.65
+    })
+
+    if (!isDuplicate) kept.push(candidate)
+  }
+
+  return kept
+}
+
+const retainConnectedWallNetwork = (
+  candidates: Candidate[],
+  gridScale: number,
+  snap: number
+): Candidate[] => {
+  const axisCandidates = candidates.filter(
+    (candidate) => candidate.orientation === 'horizontal' || candidate.orientation === 'vertical'
+  )
+  const nonAxisCandidates = candidates.filter(
+    (candidate) => candidate.orientation !== 'horizontal' && candidate.orientation !== 'vertical'
+  )
+  const key = (candidate: Candidate): string => candidateKey(candidate, snap)
+  const kept = new Set<string>()
+  const seedLength = gridScale * 1.35
+  const attachLength = Math.max(gridScale * 0.38, 16)
+  const junctionTolerance = Math.max(snap * 1.2, gridScale * 0.18)
+
+  for (const candidate of axisCandidates) {
+    if (candidate.length >= seedLength) kept.add(key(candidate))
+  }
+
+  for (const candidate of axisCandidates) {
+    if (kept.has(key(candidate))) continue
+    if (
+      candidate.length >= gridScale * 0.92 &&
+      candidate.length <= gridScale * 1.08 &&
+      wallTouchesKeptNetwork(candidate, axisCandidates, kept, junctionTolerance, snap)
+    ) {
+      kept.add(key(candidate))
+    }
+  }
+
+  let grew = true
+  while (grew) {
+    grew = false
+    for (const candidate of axisCandidates) {
+      if (kept.has(key(candidate))) continue
+      if (candidate.length < attachLength) continue
+      if (wallTouchesKeptNetwork(candidate, axisCandidates, kept, junctionTolerance, snap)) {
+        kept.add(key(candidate))
+        grew = true
+      }
+    }
+  }
+
+  return [
+    ...axisCandidates.filter((candidate) => kept.has(key(candidate))),
+    ...nonAxisCandidates
+  ]
+}
+
+const wallTouchesKeptNetwork = (
+  candidate: Candidate,
+  axisCandidates: Candidate[],
+  kept: Set<string>,
+  tolerance: number,
+  snap: number
+): boolean => {
+  const horizontal = candidate.orientation === 'horizontal'
+  const line = horizontal ? candidate.y1 : candidate.x1
+  const [start, end] = candidateInterval(candidate)
+
+  for (const endpoint of [start, end]) {
+    for (const other of axisCandidates) {
+      if (!kept.has(candidateKey(other, snap))) continue
+
+      if (other.orientation === candidate.orientation) {
+        const otherLine = horizontal ? other.y1 : other.x1
+        if (Math.abs(otherLine - line) > tolerance) continue
+        const [otherStart, otherEnd] = candidateInterval(other)
+        if (endpoint >= otherStart - tolerance && endpoint <= otherEnd + tolerance) return true
+        continue
+      }
+
+      if (horizontal) {
+        const otherX = other.x1
+        const [otherYStart, otherYEnd] = candidateInterval(other)
+        if (
+          Math.abs(endpoint - otherX) <= tolerance &&
+          line >= otherYStart - tolerance &&
+          line <= otherYEnd + tolerance
+        ) {
+          return true
+        }
+      } else {
+        const otherY = other.y1
+        const [otherXStart, otherXEnd] = candidateInterval(other)
+        if (
+          Math.abs(endpoint - otherY) <= tolerance &&
+          line >= otherXStart - tolerance &&
+          line <= otherXEnd + tolerance
+        ) {
+          return true
+        }
+      }
+    }
+  }
+
+  return false
+}
+
+const filterFloorPlanWallCandidates = (
+  candidates: Candidate[],
+  width: number,
+  height: number,
+  mask: Uint8Array,
+  gridScale: number
+): Candidate[] =>
+  candidates.filter((candidate) =>
+    isFloorPlanWallCandidate(candidate, width, height, mask, gridScale)
+  )
+
+const isFloorPlanWallCandidate = (
+  candidate: Candidate,
+  width: number,
+  height: number,
+  mask: Uint8Array,
+  gridScale: number
+): boolean => {
+  if (candidate.orientation !== 'horizontal' && candidate.orientation !== 'vertical') {
+    return true
+  }
+
+  const margin = Math.max(4, Math.round(gridScale * 0.12))
+  const gap = Math.max(2, Math.round(gridScale * 0.06))
+  const minSpan = Math.max(gridScale * 0.38, 16)
+
+  if (candidate.orientation === 'horizontal') {
+    const y = Math.round(candidate.y1)
+    const [xStart, xEnd] = boundedRange(
+      Math.min(candidate.x1, candidate.x2),
+      Math.max(candidate.x1, candidate.x2),
+      width
+    )
+    if (xEnd - xStart < minSpan) return false
+
+    const coreDark = 1 - sampleWhiteRatio(mask, width, height, xStart, xEnd, y - 1, y + 2)
+    const onNorthEdge = y <= gap + 2
+    const onSouthEdge = y >= height - gap - 3
+    const north = sampleWhiteRatio(mask, width, height, xStart, xEnd, y - margin, y - gap)
+    const south = sampleWhiteRatio(mask, width, height, xStart, xEnd, y + gap, y + margin)
+
+    return (
+      coreDark >= 0.32 &&
+      (onNorthEdge || north >= 0.62) &&
+      (onSouthEdge || south >= 0.62)
+    )
+  }
+
+  const x = Math.round(candidate.x1)
+  const [yStart, yEnd] = boundedRange(
+    Math.min(candidate.y1, candidate.y2),
+    Math.max(candidate.y1, candidate.y2),
+    height
+  )
+  if (yEnd - yStart < minSpan) return false
+
+  const coreDark = 1 - sampleWhiteRatio(mask, width, height, x - 1, x + 2, yStart, yEnd)
+  const onWestEdge = x <= gap + 2
+  const onEastEdge = x >= width - gap - 3
+  const west = sampleWhiteRatio(mask, width, height, x - margin, x - gap, yStart, yEnd)
+  const east = sampleWhiteRatio(mask, width, height, x + gap, x + margin, yStart, yEnd)
+
+  return (
+    coreDark >= 0.32 &&
+    (onWestEdge || west >= 0.62) &&
+    (onEastEdge || east >= 0.62)
+  )
+}
+
+const sampleWhiteRatio = (
+  mask: Uint8Array,
+  width: number,
+  height: number,
+  xStart: number,
+  xEnd: number,
+  yStart: number,
+  yEnd: number
+): number => {
+  const left = clamp(Math.min(xStart, xEnd), 0, width)
+  const right = clamp(Math.max(xStart, xEnd), 0, width)
+  const top = clamp(Math.min(yStart, yEnd), 0, height)
+  const bottom = clamp(Math.max(yStart, yEnd), 0, height)
+  if (right <= left || bottom <= top) return 0
+
+  let white = 0
+  let samples = 0
+  for (let y = top; y < bottom; y += 1) {
+    for (let x = left; x < right; x += 1) {
+      samples += 1
+      if (mask[y * width + x] === 0) white += 1
+    }
+  }
+
+  return samples > 0 ? white / samples : 0
 }
 
 const scanHorizontal = (
