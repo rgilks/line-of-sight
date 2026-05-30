@@ -1,15 +1,20 @@
 // Minimal multiplayer client (separate /play page; the single-player tool at
 // index.html is untouched). It opens the per-player SSE stream, renders the
 // fog-gated tokens the server sends, draws its own POV fog with the shared core,
-// and POSTs MoveToken when you click the board. Open in two browsers to watch
-// server-authoritative line of sight: another player's counter only appears when
-// your point of view can actually see it.
+// POSTs MoveToken when you click the board, and toggles a door when you click on
+// one. Open in two browsers to watch server-authoritative line of sight: another
+// player's counter only appears when your point of view can actually see it.
+//
+//   ?table=<name>  join a specific table (default "demo")
+//   ?gm=1          spectator/GM view — sees ALL counters, manages doors, no fog
 import {effect, signal} from '@preact/signals'
-import {visibilityPolygon, type Point} from './los-core'
+import {visibilityPolygon, type Occluder, type Point} from './los-core'
 import type {Board, CommandEnvelope, Token, ViewMessage} from '../../src/protocol'
 import './play.css'
 
-const tableId = new URLSearchParams(location.search).get('table') ?? 'demo'
+const params = new URLSearchParams(location.search)
+const tableId = params.get('table') ?? 'demo'
+const isGm = params.get('gm') === '1'
 
 const you = signal<string | null>(null)
 const board = signal<Board | null>(null)
@@ -40,6 +45,7 @@ const post = (command: CommandEnvelope['command']): void => {
 const ensureMap = (next: Board): void => {
   if (!next.assetRef || next.assetRef === 'composed-board') {
     mapImage.value = null
+    loadedAssetRef = ''
     return
   }
   if (next.assetRef === loadedAssetRef) return
@@ -51,26 +57,24 @@ const ensureMap = (next: Board): void => {
   image.src = `/api/tables/${tableId}/map/${next.assetRef}`
 }
 
+const applyView = (next: Board, nextTokens: Token[]): void => {
+  board.value = next
+  tokens.value = nextTokens
+  ensureMap(next)
+}
+
 const connect = (): void => {
-  const source = new EventSource(`/api/tables/${tableId}/stream`)
+  const source = new EventSource(`/api/tables/${tableId}/stream${isGm ? '?gm=1' : ''}`)
   source.onopen = () => {
-    status.value = `Connected · table "${tableId}"`
+    status.value = `Connected · table "${tableId}"${isGm ? ' · GM view' : ''}`
   }
   source.onerror = () => {
     status.value = 'Disconnected — retrying…'
   }
   source.onmessage = (event) => {
     const message = JSON.parse(event.data) as ViewMessage
-    if (message.type === 'snapshot') {
-      you.value = message.you
-      board.value = message.board
-      tokens.value = message.tokens
-      ensureMap(message.board)
-      return
-    }
-    tokens.value = message.tokens
-    const current = board.value
-    if (current) board.value = {...current, doorStates: message.doorStates}
+    if (message.type === 'snapshot') you.value = message.you
+    applyView(message.board, message.tokens)
   }
   window.addEventListener('beforeunload', () => source.close())
 }
@@ -85,10 +89,49 @@ const pointerToBoard = (event: PointerEvent): Point | null => {
   }
 }
 
+const distanceToSegment = (point: Point, segment: Occluder): number => {
+  const dx = segment.x2 - segment.x1
+  const dy = segment.y2 - segment.y1
+  const lengthSquared = dx * dx + dy * dy
+  if (lengthSquared === 0) return Math.hypot(point.x - segment.x1, point.y - segment.y1)
+  const t = Math.max(
+    0,
+    Math.min(1, ((point.x - segment.x1) * dx + (point.y - segment.y1) * dy) / lengthSquared)
+  )
+  return Math.hypot(point.x - (segment.x1 + t * dx), point.y - (segment.y1 + t * dy))
+}
+
+const doorOpen = (active: Board, door: Occluder): boolean =>
+  active.doorStates[door.id]?.open ?? (door.type === 'door' && door.open)
+
+const nearestDoor = (point: Point, active: Board): Occluder | null => {
+  let nearest: Occluder | null = null
+  let nearestDistance = 26
+  for (const occluder of active.occluders) {
+    if (occluder.type !== 'door') continue
+    const distance = distanceToSegment(point, occluder)
+    if (distance < nearestDistance) {
+      nearest = occluder
+      nearestDistance = distance
+    }
+  }
+  return nearest
+}
+
 const onPointerDown = (event: PointerEvent): void => {
   const point = pointerToBoard(event)
+  const active = board.value
+  if (!point || !active) return
+
+  // Clicking a door toggles it (re-gates everyone's sight). Anywhere else moves.
+  const door = nearestDoor(point, active)
+  if (door) {
+    post({type: 'ToggleDoor', doorId: door.id, open: !doorOpen(active, door)})
+    return
+  }
+
   const me = myToken()
-  if (!point || !me) return
+  if (!me) return
   // Optimistic local move; the server echo reconciles it.
   tokens.value = tokens.value.map((token) =>
     token.id === me.id ? {...token, x: point.x, y: point.y} : token
@@ -99,14 +142,13 @@ const onPointerDown = (event: PointerEvent): void => {
 const drawOccluders = (active: Board): void => {
   ctx.lineCap = 'round'
   for (const occluder of active.occluders) {
-    const open = occluder.type === 'door' && (active.doorStates[occluder.id]?.open ?? occluder.open)
     ctx.strokeStyle =
       occluder.type === 'door'
-        ? open
+        ? doorOpen(active, occluder)
           ? 'rgba(22, 163, 74, 0.85)'
           : 'rgba(249, 115, 22, 0.9)'
         : 'rgba(230, 230, 230, 0.5)'
-    ctx.lineWidth = occluder.type === 'door' ? 6 : 4
+    ctx.lineWidth = occluder.type === 'door' ? 8 : 4
     ctx.beginPath()
     ctx.moveTo(occluder.x1, occluder.y1)
     ctx.lineTo(occluder.x2, occluder.y2)
@@ -174,19 +216,22 @@ const draw = (): void => {
 
   drawOccluders(active)
   const me = myToken()
-  if (me) drawFog(active, me)
+  if (me) drawFog(active, me) // GM (no token) sees the whole board, no fog
   for (const token of tokens.value) drawToken(token)
 }
 
 const mount = (): void => {
   const root = document.querySelector('#app')
   if (!root) throw new Error('Missing #app root.')
+  const hint = isGm
+    ? 'GM view — you see every counter. Click a door to open/close it.'
+    : 'Click the board to move your counter. Click a door to open/close it. Open this URL in another browser to join.'
   root.innerHTML = `
     <header class="play-hud">
       <strong>Line of Sight — Multiplayer</strong>
       <span id="status"></span>
       <span id="who"></span>
-      <span class="hint">Click the board to move your counter. Open this URL in another browser to join.</span>
+      <span class="hint">${hint}</span>
     </header>
     <main class="play-board"><canvas id="board"></canvas></main>`
 
@@ -206,6 +251,11 @@ effect(() => {
   const statusEl = document.querySelector('#status')
   if (statusEl) statusEl.textContent = status.value
   const whoEl = document.querySelector('#who')
+  if (!whoEl) return
   const me = myToken()
-  if (whoEl) whoEl.textContent = me ? `You are ${me.label} · ${tokens.value.length} visible` : ''
+  whoEl.textContent = isGm
+    ? `GM · ${tokens.value.length} counters`
+    : me
+      ? `You are ${me.label} · ${tokens.value.length} visible`
+      : ''
 })

@@ -39,12 +39,15 @@ export type DomainEvent = {seq: number} & (
   | {type: 'PlayerRenamed'; playerId: PlayerId; label: string}
   | {type: 'TokenMoved'; playerId: PlayerId; x: number; y: number}
   | {type: 'DoorToggled'; doorId: string; open: boolean}
+  | {type: 'BoardPublished'; assetRef: string}
 )
 
-// Server -> client read model. `tokens` is ALREADY fog-gated for the recipient.
+// Server -> client read model. `tokens` is ALREADY fog-gated for the recipient,
+// and `board` is included so a freshly published board (new map + occluders)
+// reaches already-connected clients without a reconnect.
 export type ViewMessage =
   | {type: 'snapshot'; you: PlayerId; board: Board; tokens: Token[]}
-  | {type: 'update'; doorStates: Record<string, {open: boolean}>; tokens: Token[]}
+  | {type: 'update'; board: Board; tokens: Token[]}
 
 const isDoorOpen = (board: Board, doorId: string, fallback: boolean): boolean =>
   board.doorStates[doorId]?.open ?? fallback
