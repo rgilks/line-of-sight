@@ -2,7 +2,7 @@
 
 Graphviz / DOT sources plus rendered PNGs. The `.dot` files are the source of
 truth; the PNGs are committed so they render inline on GitHub. Mermaid is used
-only for small diagrams inline in Markdown (see [patterns.md](../patterns.md));
+only for small diagrams inline in Markdown (see [PATTERNS.md](../PATTERNS.md));
 anything with clusters or many edges is a `.dot` here.
 
 ## Files

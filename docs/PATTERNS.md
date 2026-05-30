@@ -75,10 +75,11 @@ inputs.
 - Thresholds are derived from `gridScale` (`minRun`, `snap`, …), not hard-coded —
   keep new thresholds relative to the grid so behaviour scales with resolution.
 - The caps (≤500 walls, ≤200 doors) are part of the contract; if you change them,
-  update [`sidecar-format.md`](sidecar-format.md) and the
+  update the [sidecar format](ARCHITECTURE.md#sidecar-format) and the
   [analysis pipeline diagram](diagrams/analysis-pipeline.dot).
 
-See the full pipeline in [los-core.md](los-core.md) and the
+See the full pipeline in
+[the deterministic core](ARCHITECTURE.md#the-deterministic-core) and the
 [analysis pipeline diagram](diagrams/analysis-pipeline.png).
 
 ## Signals and Rendering
