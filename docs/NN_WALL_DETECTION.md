@@ -9,6 +9,29 @@ It is forward-looking work on branch `feature/nn-wall-detection`. Production
 on `main` continues to use `analyzeImageRgba` in `web/src/los-core.ts` until
 an NN path proves better on held-out maps.
 
+## Plan review summary (after further research)
+
+A second research pass (browser inference, small-dataset training, mask
+vectorization, and noisy-label risk) confirmed the overall approach and changed
+four things:
+
+1. **Browser inference is viable** with ONNX Runtime Web + WebGPU and a WASM
+   fallback, if the model is kept small (FP16, static shapes, ≲100 MB). The app
+   already probes WebGPU in `web/src/gpu.ts`. See
+   [Browser inference feasibility](#browser-inference-feasibility).
+2. **Agent-generated corrections are pseudo-labels and can inject noise** that
+   measurably degrades segmentation training. We add explicit label-quality
+   controls (CV/agent agreement, human spot-check, noise-robust loss). See
+   [Label quality and noise control](#label-quality-and-noise-control).
+3. **Mask → vector is a known, non-trivial step** with established solutions
+   (box-fitting beats naive simplification; skeleton + graph normalization).
+   Our existing snap/merge logic plays this role; we reference the literature.
+   See [Mask to vector post-processing](#mask-to-vector-post-processing).
+4. **The app is currently export-only** (`ARCHITECTURE.md`: "the app does not
+   currently re-import sidecars"). The correction loop needs a **sidecar
+   importer** so corrected/agent-edited labels can round-trip into the editor.
+   This is now a prerequisite, not an afterthought.
+
 ## Goal
 
 Improve wall and door extraction on Geomorph JPGs (Standard, Edge, Corner) while
@@ -84,8 +107,39 @@ A typical agent loop:
 
 This is **human-in-the-loop** in the research sense (expert review before labels
 enter training), but the “expert” can be an agent operating on visual evidence
-rather than a person clicking every segment. Human spot-checking on a sample of
-corrected maps is still recommended before trusting a training run.
+rather than a person clicking every segment.
+
+> **Prerequisite — sidecar import.** The app today is export-only
+> (`ARCHITECTURE.md`, Sidecar format). The correction loop needs a **sidecar
+> importer** so an agent (or person) can edit a sidecar, reload it into the
+> editor, and verify it visually before it becomes a label. Building a small,
+> well-tested `importSidecar` is the first concrete task on this branch.
+
+### Label quality and noise control
+
+Agent corrections are **pseudo-labels**. The semi-supervised segmentation
+literature is consistent that wrong pseudo-labels degrade the final model — the
+worst ~10% by confidence are actively harmful, and confidence filtering alone is
+not sufficient to catch them ([Pseudo-Label Noise Suppression,
+2022](https://ar5iv.labs.arxiv.org/html/2210.10426)). VLM/image-level models in
+particular localize poorly and produce noisy dense predictions
+([SemiVL](https://arxiv.org/html/2311.16241)). Treat agent-edited sidecars with
+the same suspicion.
+
+Controls we will apply:
+
+- **Two-source agreement.** Keep both the classical CV occluders and the agent's
+  corrected set; flag maps where they disagree heavily for human review (this is
+  also the active-learning signal in the AAAI HITL work).
+- **Human spot-check.** Review a sample (≈10%) of corrected maps, weighted toward
+  high-disagreement and hard tiles (hangars, cargo, curved rooms), before any
+  training run.
+- **Noise-robust training.** Use Dice/Tversky plus a noise-tolerant term
+  (e.g. Symmetric Cross-Entropy) and pseudo-label loss weighting rather than
+  trusting every labeled pixel equally.
+- **Provenance metadata.** Record per-sidecar whether labels are CV-only,
+  agent-corrected, or human-verified, so we can train on, ablate, or down-weight
+  each tier.
 
 ### Phase 3 — Training set construction
 
@@ -121,8 +175,30 @@ Training stack (proposed, not fixed):
 
 - Python + PyTorch
 - Small U-Net or lightweight encoder–decoder (SegFormer/MiT-style)
-- Loss: Tversky or Dice (thin walls are the hard case in multiple papers)
-- Optional pretrain on public floor-plan data, then fine-tune on Geomorph labels
+- Loss: Tversky or Dice (thin walls are the hard case in multiple papers),
+  optionally combined with Symmetric Cross-Entropy for noise tolerance
+- **Transfer learning**: start from a pretrained backbone (e.g. MobileNetV2 /
+  ImageNet, or a CubiCasa wall model) — repeatedly shown to make hundreds- or
+  even tens-of-images datasets workable
+
+#### Dataset size and augmentation
+
+Research on data-efficient U-Nets shows useful segmentation from **hundreds, or
+even ~10–100, labeled images** when augmentation and transfer learning are used
+(e.g. data-efficient U-Net on 10 SEM images; golf-course segmentation on <100
+images reaching Dice ≈ 0.75). Our ~400 Geomorph tiles are comfortably in range.
+
+Augmentation must respect the domain — aggressive geometric warps can destroy
+thin structures:
+
+- **Safe and meaningful:** 90°/180°/270° rotations and H/V flips. Geomorphs are
+  grid-aligned, so these preserve wall geometry and multiply data ~8×.
+- **Use with care:** brightness/contrast/blur/JPEG noise (these maps are JPEGs,
+  so mild compression noise is realistic and helpful).
+- **Avoid:** small-angle rotation, shear, and elastic warps — they blur the
+  fixed 50/53 px grid and thin walls the model most needs to learn.
+- **Tiling option:** train on grid-aligned crops (e.g. 256×256) to increase
+  sample count and keep input sizes static for WebGPU.
 
 ### Phase 5 — Integration
 
@@ -141,6 +217,47 @@ analyzeImageRgbaNN(...)  // ONNX or WASM runtime in browser, or offline tool fir
 Flow: NN masks → existing vectorization (snap, merge, suppress duplicates,
 network filter) → `Occluder[]`. Classical path stays when NN is off or
 low-confidence.
+
+#### Browser inference feasibility
+
+In-browser segmentation is realistic in 2026 and fits the local-asset,
+no-server-upload model best:
+
+- **Runtime:** ONNX Runtime Web with the **WebGPU** execution provider and a
+  **WASM fallback** (`executionProviders: [{name:'webgpu'}, {name:'wasm'}]`).
+  The app already has a WebGPU capability probe in `web/src/gpu.ts` to gate this.
+- **Budget:** keep the model **≲100 MB** (FP16 weights), use **static input
+  shapes** to enable graph capture, and warm up once (first run pays a
+  ~50–200 ms shader-compile cost; cache the session).
+- **Throughput:** ResNet-50-class models run ~15–30 ms on desktop GPUs and
+  ~30–60 ms on mobile via WebGPU, vs 300–500 ms on CPU/WASM. A small U-Net on
+  256×256 tiles is well within interactive budget; tile a 1000×1000 map and
+  stitch.
+- **Fallbacks:** if WebGPU is absent or the model is too heavy, fall back to
+  WASM inference or to the classical `analyzeImageRgba`. An offline Node/Python
+  inference tool is the simplest first integration before wiring the browser.
+
+This keeps the deterministic-core boundary intact: the model produces masks; a
+pure post-process turns masks into `Occluder[]`.
+
+#### Mask to vector post-processing
+
+Turning a segmentation mask into clean, axis-aligned segments is a known,
+non-trivial step — naive contour simplification (Ramer–Douglas–Peucker) yields
+jagged "sawtooth" walls. The literature favours geometry-aware methods:
+
+- **Box-fitting** (Barreiro-style rectangle fitting) reconstructs coherent wall
+  rectangles from imperfect masks and beats RDP simplification.
+- **Skeletonization** (Zhang–Suen / Lee) + **graph normalization** (spur
+  pruning, junction stabilization, collinear merge) — see the `mask2graph`
+  approach for a deterministic, reproducible pipeline.
+- **Geometric regularization**: snap endpoints, enforce orthogonality, merge
+  collinear runs.
+
+Our existing core already does much of this (grid snap, `mergeAxisCandidates`,
+`removeRedundantCandidates`, network filter). The plan is to **reuse it as the
+mask post-processor**, adding box-fitting / skeleton steps only if the mask
+boundaries prove too noisy for the current snapping logic.
 
 ## Research this plan draws on
 
@@ -188,6 +305,29 @@ low-confidence.
 | **Progressive active learning on floorplans** | [PMC](https://pmc.ncbi.nlm.nih.gov/articles/PMC10533859/) | Seed labels → model-assisted completion → expert correction pass. |
 | **Weak supervision (Snorkel)** | [Guide](https://snorkel.ai/data-centric-ai/weak-supervision/) | Combining noisy labeling functions—our classical CV is one such function. |
 
+### Pseudo-label noise (why agent labels need controls)
+
+| Paper | Link | Takeaway |
+|-------|------|----------|
+| **Pseudo-Label Noise Suppression** (2022) | [arXiv:2210.10426](https://ar5iv.labs.arxiv.org/html/2210.10426) | Wrong pseudo-labels hurt; worst ~10% confidence are harmful; confidence filtering alone is insufficient. Use SCE loss + loss weighting. |
+| **SemiVL** (2023) | [arXiv:2311.16241](https://arxiv.org/html/2311.16241) | VLMs localize poorly and give noisy dense predictions; anchor with high-confidence, frozen guidance. Argues for not trusting image-level model labels directly. |
+
+### Browser inference
+
+| Resource | Link | Takeaway |
+|----------|------|----------|
+| **ONNX Runtime Web — WebGPU** | [Docs](https://onnxruntime.ai/docs/tutorials/web/ep-webgpu.html) | WebGPU EP + WASM fallback; static shapes + graph capture; IO binding to avoid CPU↔GPU copies. |
+| **PyTorch in the browser (2026)** | [Guide](https://techbytes.app/posts/pytorch-browser-wasm-webgpu-tutorial-2026/) | Author in PyTorch, export ONNX, run with ORT Web; keep inputs small and fixed-size; FP16. |
+
+### Small-dataset segmentation and mask→vector
+
+| Resource | Link | Takeaway |
+|----------|------|----------|
+| **Data-efficient U-Net** (2025) | [arXiv:2511.11485](https://arxiv.org/html/2511.11485) | Lightweight U-Net trained on ~10 images via tiling + augmentation; generalized to a new domain. |
+| **Limited-data segmentation (Albumentations + transfer)** | [Guide](https://developmentseed.org/tensorflow-eo-training-2/docs/Lesson6b_dealing_with_limited_data.html) | Augmentation + pretrained backbone + Dice loss for small, imbalanced sets. |
+| **Post-processing masks → vector floorplans** (thesis) | [PDF](https://www.diva-portal.org/smash/get/diva2:1987376/FULLTEXT01.pdf) | Barreiro box-fitting beats RDP; removes jagged edges from imperfect masks. |
+| **mask2graph** | [GitHub](https://github.com/farzadhallaji/mask2graph) | Deterministic skeleton → junction-stabilized graph with spur pruning; reproducible mask-to-topology. |
+
 ### Adjacent product (game maps, classical CV)
 
 | Resource | Link | Takeaway |
@@ -211,12 +351,14 @@ the high-value training signal.
 
 | Item | Description |
 |------|-------------|
-| `training/README.md` | How to lay out data locally |
-| `training/rasterize-sidecar.mjs` | Sidecar JSON → wall/door PNG masks |
+| **`importSidecar` + tests** | **Prerequisite.** Round-trip sidecar JSON back into the editor so corrected/agent labels can be reloaded and verified. |
+| `training/README.md` | How to lay out data locally + label provenance tiers |
 | `training/export-cv-labels.mjs` | Batch classical detection → draft sidecars for correction |
-| `training/evaluate.mjs` | Compare CV vs NN vs corrected GT on held-out maps |
-| `training/train/` (Python) | Segmentation training script (later) |
-| Feature flag in UI or core | Optional NN inference path (later) |
+| `training/rasterize-sidecar.mjs` | Sidecar JSON → wall/door PNG masks (native + tiled) |
+| `training/agreement.mjs` | CV vs agent-corrected diff → flag high-disagreement maps for human review |
+| `training/evaluate.mjs` | Compare CV vs NN vs corrected GT on held-out maps (segment F1, not raw counts) |
+| `training/train/` (Python) | Segmentation training: U-Net + transfer learning, Dice/Tversky (+SCE), grid-safe augmentation |
+| `analyzeImageRgbaNN` | Optional NN inference path (ONNX Runtime Web + WASM fallback) behind a feature flag |
 
 Scripts that already support this work:
 
@@ -246,14 +388,20 @@ Before merging any NN path to `main`:
 
 ## Suggested execution order
 
+0. **Sidecar import:** Add and test `importSidecar` so labels round-trip into the
+   editor. Without this, the correction loop cannot be verified visually.
 1. **Seed set:** Pick ~30–50 diverse maps; run CV; agent-correct sidecars with
-   overlay feedback; human spot-check ~10%.
+   overlay feedback; record provenance; human spot-check ~10% (high-disagreement
+   and hard tiles first).
 2. **Rasterize:** Build `training/rasterize-sidecar.mjs`; verify masks align with
-   JPG walls/doors.
-3. **Baseline train:** Small U-Net on seed set only; evaluate on held-out tiles.
-4. **Scale labels:** Agent-correct more maps; active learning on maps with highest
-   edit distance vs CV output.
-5. **Integrate:** `analyzeImageRgbaNN` behind flag; benchmark; iterate.
+   JPG walls/doors at native and tiled resolution.
+3. **Baseline train:** Small U-Net (pretrained backbone) on seed set with
+   grid-safe augmentation; evaluate on held-out tiles with segment F1.
+4. **Scale labels:** Agent-correct more maps; use CV/agent disagreement as the
+   active-learning signal for what to review next.
+5. **Integrate:** `analyzeImageRgbaNN` (offline tool first, then ONNX Runtime
+   Web behind a flag); reuse core vectorization as the mask post-processor;
+   benchmark vs classical; iterate.
 
 ## References in this repo
 
