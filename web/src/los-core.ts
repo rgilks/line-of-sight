@@ -121,12 +121,10 @@ export const analyzeImageRgba = (
   slopeUpSteep = collapseCandidates(slopeUpSteep, snap)
   slopeDownShallow = collapseCandidates(slopeDownShallow, snap)
   slopeUpShallow = collapseCandidates(slopeUpShallow, snap)
-  const baseHorizontal = horizontal.filter((candidate) =>
+  const isStructural = (candidate: Candidate): boolean =>
     isStructuralWallCandidate(candidate, width, height, mask, effectiveGrid, snap)
-  )
-  const baseVertical = vertical.filter((candidate) =>
-    isStructuralWallCandidate(candidate, width, height, mask, effectiveGrid, snap)
-  )
+  const baseHorizontal = horizontal.filter(isStructural)
+  const baseVertical = vertical.filter(isStructural)
   const structuralHorizontal = promoteConnectedThinAxisCandidates(
     horizontal,
     baseHorizontal,
@@ -149,24 +147,12 @@ export const analyzeImageRgba = (
     effectiveGrid,
     snap
   )
-  const structuralDiagonalDown = diagonalDown.filter((candidate) =>
-    isStructuralWallCandidate(candidate, width, height, mask, effectiveGrid, snap)
-  )
-  const structuralDiagonalUp = diagonalUp.filter((candidate) =>
-    isStructuralWallCandidate(candidate, width, height, mask, effectiveGrid, snap)
-  )
-  const structuralSlopeDownSteep = slopeDownSteep.filter((candidate) =>
-    isStructuralWallCandidate(candidate, width, height, mask, effectiveGrid, snap)
-  )
-  const structuralSlopeUpSteep = slopeUpSteep.filter((candidate) =>
-    isStructuralWallCandidate(candidate, width, height, mask, effectiveGrid, snap)
-  )
-  const structuralSlopeDownShallow = slopeDownShallow.filter((candidate) =>
-    isStructuralWallCandidate(candidate, width, height, mask, effectiveGrid, snap)
-  )
-  const structuralSlopeUpShallow = slopeUpShallow.filter((candidate) =>
-    isStructuralWallCandidate(candidate, width, height, mask, effectiveGrid, snap)
-  )
+  const structuralDiagonalDown = diagonalDown.filter(isStructural)
+  const structuralDiagonalUp = diagonalUp.filter(isStructural)
+  const structuralSlopeDownSteep = slopeDownSteep.filter(isStructural)
+  const structuralSlopeUpSteep = slopeUpSteep.filter(isStructural)
+  const structuralSlopeDownShallow = slopeDownShallow.filter(isStructural)
+  const structuralSlopeUpShallow = slopeUpShallow.filter(isStructural)
 
   const doorCandidates = detectDoorCandidates(
     structuralHorizontal,

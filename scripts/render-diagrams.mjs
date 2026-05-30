@@ -1,13 +1,9 @@
 #!/usr/bin/env node
-import {spawnSync} from 'node:child_process'
-import {existsSync, readdirSync} from 'node:fs'
+import {existsSync} from 'node:fs'
 import {join} from 'node:path'
+import {diagramDir, dotAvailable, listDotFiles, renderDiagram} from './_diagrams.mjs'
 
-const repoRoot = process.cwd()
-const diagramDir = join(repoRoot, 'docs', 'diagrams')
-
-const probe = spawnSync('dot', ['-V'], {stdio: 'ignore'})
-if (probe.error || probe.status !== 0) {
+if (!dotAvailable()) {
   console.error('Cannot render diagrams: Graphviz `dot` is not on PATH.')
   console.error('Install it with `brew install graphviz` (macOS) or your package manager.')
   process.exit(1)
@@ -18,9 +14,7 @@ if (!existsSync(diagramDir)) {
   process.exit(1)
 }
 
-const dotFiles = readdirSync(diagramDir)
-  .filter((file) => file.endsWith('.dot'))
-  .sort()
+const dotFiles = listDotFiles()
 
 if (dotFiles.length === 0) {
   console.log('No .dot files to render.')
@@ -29,17 +23,13 @@ if (dotFiles.length === 0) {
 
 let failed = false
 for (const file of dotFiles) {
-  const source = join(diagramDir, file)
-  const output = source.replace(/\.dot$/, '.png')
-  const result = spawnSync('dot', ['-Tpng:cairo', source, '-Gdpi=220', '-o', output], {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe']
-  })
+  const png = file.replace(/\.dot$/, '.png')
+  const result = renderDiagram(file, join(diagramDir, png))
   if (result.status !== 0) {
     failed = true
     console.error(`Failed to render ${file}: ${result.stderr.trim()}`)
   } else {
-    console.log(`Rendered ${file} -> ${file.replace(/\.dot$/, '.png')}`)
+    console.log(`Rendered ${file} -> ${png}`)
   }
 }
 

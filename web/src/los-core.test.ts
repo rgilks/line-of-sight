@@ -43,6 +43,13 @@ const polygonArea = (points: Point[]): number => {
   return Math.abs(area) / 2
 }
 
+// A 200x200 image with one full-width 5px dark band on the y=100 grid line.
+const horizontalWallImage = (): Uint8ClampedArray => {
+  const rgba = blankRgba(200, 200)
+  fillBand(rgba, 200, 98, 103, 0, 200)
+  return rgba
+}
+
 describe('analyzeImageRgba', () => {
   it('rejects non-positive dimensions', () => {
     expect(() => analyzeImageRgba(0, 10, blankRgba(1, 10), 50)).toThrow()
@@ -56,15 +63,15 @@ describe('analyzeImageRgba', () => {
     expect(analyzeImageRgba(200, 200, blankRgba(200, 200), 50)).toEqual([])
   })
 
-  it('detects a horizontal wall from a dark band on a grid line', () => {
-    const width = 200
-    const height = 200
-    const rgba = blankRgba(width, height)
-    // A 5px-thick dark band centred on the y=100 grid line, spanning full width.
-    fillBand(rgba, width, 98, 103, 0, width)
+  it('is deterministic for identical pixels', () => {
+    const rgba = horizontalWallImage()
+    expect(analyzeImageRgba(200, 200, rgba, 50)).toEqual(analyzeImageRgba(200, 200, rgba, 50))
+  })
 
-    const occluders = analyzeImageRgba(width, height, rgba, 50)
-    const walls = occluders.filter((occluder) => occluder.type === 'wall')
+  it('detects a horizontal wall from a dark band on a grid line', () => {
+    const walls = analyzeImageRgba(200, 200, horizontalWallImage(), 50).filter(
+      (occluder) => occluder.type === 'wall'
+    )
 
     expect(walls.length).toBeGreaterThan(0)
     expect(
@@ -75,16 +82,29 @@ describe('analyzeImageRgba', () => {
   })
 
   it('assigns stable, zero-padded, position-ordered wall ids', () => {
-    const width = 200
-    const height = 200
-    const rgba = blankRgba(width, height)
-    fillBand(rgba, width, 98, 103, 0, width)
-
-    const walls = analyzeImageRgba(width, height, rgba, 50).filter(
+    const walls = analyzeImageRgba(200, 200, horizontalWallImage(), 50).filter(
       (occluder) => occluder.type === 'wall'
     )
 
     expect(walls[0]?.id).toBe('wall-0001')
+  })
+
+  it('detects a closed door in a grid-aligned gap between two collinear walls', () => {
+    const width = 300
+    const height = 200
+    const rgba = blankRgba(width, height)
+    // Two wall runs on the y=100 grid line with a ~one-cell gap (150–200) between them.
+    fillBand(rgba, width, 98, 103, 0, 150)
+    fillBand(rgba, width, 98, 103, 200, width)
+
+    const doors = analyzeImageRgba(width, height, rgba, 50).filter(
+      (occluder) => occluder.type === 'door'
+    )
+
+    expect(doors.length).toBeGreaterThan(0)
+    // Doors are emitted closed with zero-padded ids.
+    expect(doors[0]?.id).toBe('door-0001')
+    expect(doors[0]?.open).toBe(false)
   })
 })
 
@@ -113,7 +133,9 @@ describe('hasLineOfSight', () => {
     const to = {x: 150, y: 100}
 
     expect(hasLineOfSight(from, to, [door], {})).toBe(false)
+    // Both the {open} object and bare boolean lookup shapes are accepted.
     expect(hasLineOfSight(from, to, [door], {'door-0001': {open: true}})).toBe(true)
+    expect(hasLineOfSight(from, to, [door], {'door-0001': true})).toBe(true)
   })
 })
 

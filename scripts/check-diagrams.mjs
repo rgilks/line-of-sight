@@ -1,18 +1,14 @@
 #!/usr/bin/env node
-import {spawnSync} from 'node:child_process'
-import {existsSync, mkdtempSync, readdirSync, rmSync} from 'node:fs'
+import {existsSync, mkdtempSync, rmSync} from 'node:fs'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
-
-const repoRoot = process.cwd()
-const diagramDir = join(repoRoot, 'docs', 'diagrams')
+import {diagramDir, dotAvailable, listDotFiles, renderDiagram} from './_diagrams.mjs'
 
 // Graphviz is required to render PNGs from .dot sources. If `dot` isn't on PATH
 // (typical in slim CI/build images), skip rather than fail — the .dot sources
 // are the source of truth and local pre-commit / CI with Graphviz installed is
 // the authoritative gate against broken syntax.
-const probe = spawnSync('dot', ['-V'], {stdio: 'ignore'})
-if (probe.error || probe.status !== 0) {
+if (!dotAvailable()) {
   console.log('Diagram check skipped: Graphviz `dot` not available on PATH.')
   process.exit(0)
 }
@@ -22,9 +18,7 @@ if (!existsSync(diagramDir)) {
   process.exit(0)
 }
 
-const dotFiles = readdirSync(diagramDir)
-  .filter((file) => file.endsWith('.dot'))
-  .sort()
+const dotFiles = listDotFiles()
 
 if (dotFiles.length === 0) {
   console.log('Diagram check skipped: no .dot files in docs/diagrams.')
@@ -40,20 +34,14 @@ const failures = []
 // produce stale-PNG false positives on every push.
 try {
   for (const file of dotFiles) {
-    const source = join(diagramDir, file)
-    const expectedPng = source.replace(/\.dot$/, '.png')
-    const renderedPng = join(tempDir, file.replace(/\.dot$/, '.png'))
+    const expectedPng = join(diagramDir, file.replace(/\.dot$/, '.png'))
 
     if (!existsSync(expectedPng)) {
       failures.push(`${file}: missing committed PNG next to .dot source`)
       continue
     }
 
-    const result = spawnSync(
-      'dot',
-      ['-Tpng:cairo', source, '-Gdpi=220', '-o', renderedPng],
-      {encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']}
-    )
+    const result = renderDiagram(file, join(tempDir, file.replace(/\.dot$/, '.png')))
 
     if (result.error) {
       failures.push(`${file}: could not run Graphviz dot (${result.error.message})`)
