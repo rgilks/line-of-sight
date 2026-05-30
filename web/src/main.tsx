@@ -19,6 +19,7 @@ import {
   hideUnseen,
   occluders,
   preloadCounterPortraits,
+  publishTableId,
   redoStack,
   requestCanvasRender,
   runtimeStatus,
@@ -59,6 +60,7 @@ import {
   handleDrop
 } from './ui-actions'
 import {exportSidecar} from './export'
+import {publishToTable} from './publish'
 
 const counterDefinitionFor = (kind: (typeof counterDefinitions)[number]['kind']) =>
   counterDefinitions.find((definition) => definition.kind === kind) ?? counterDefinitions[0]
@@ -611,6 +613,35 @@ const App = (): JSX.Element => {
                         <span>{`${tile.name} (${tile.width}x${tile.height})`}</span>
                       </div>
                     ))}
+                  </div>
+                </div>
+
+                <div className="panel">
+                  <h2>Multiplayer</h2>
+                  <div className="drawer-action-grid">
+                    <label className="number-control">
+                      <span>Table</span>
+                      <input
+                        id="tableInput"
+                        type="text"
+                        value={publishTableId.value}
+                        onInput={(event) => {
+                          publishTableId.value = event.currentTarget.value
+                        }}
+                      />
+                    </label>
+                    <button
+                      id="publishButton"
+                      type="button"
+                      onClick={() => void publishToTable(publishTableId.value)}
+                    >
+                      <Icon>
+                        <path d="M4 11a9 9 0 0 1 9 9" />
+                        <path d="M4 4a16 16 0 0 1 16 16" />
+                        <circle cx="5" cy="19" r="1" />
+                      </Icon>
+                      <span>Publish to table</span>
+                    </button>
                   </div>
                 </div>
               </div>

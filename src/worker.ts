@@ -10,8 +10,8 @@ export interface Env {
   MAPS: R2Bucket
 }
 
-// Route /api/tables/<id>/(stream|commands) to that table's Durable Object.
-const tableRoute = /^\/api\/tables\/([^/]+)\/(stream|commands)$/
+// Route /api/tables/<id>/(stream|commands|board) to that table's Durable Object.
+const tableRoute = /^\/api\/tables\/([^/]+)\/(stream|commands|board)$/
 // GM-uploaded map storage. POST .../map uploads; GET .../map/<ref> serves.
 const mapUploadRoute = /^\/api\/tables\/([^/]+)\/map$/
 const mapGetRoute = /^\/api\/tables\/([^/]+)\/map\/([^/]+)$/
