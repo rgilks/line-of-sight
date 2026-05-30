@@ -68,10 +68,15 @@ const exploredCanvas = document.createElement('canvas')
 const exploredCtx = exploredCanvas.getContext('2d')
 if (!exploredCtx) throw new Error('Offscreen canvas is required.')
 
+const fogCanvas = document.createElement('canvas')
+const fogCtx = fogCanvas.getContext('2d')
+if (!fogCtx) throw new Error('Offscreen fog canvas is required.')
+
 const gridScale = (): number => Math.max(10, gridValue.value || 50)
 const sightRadius = (): number => Math.max(50, sightValue.value || 700)
 const columns = (): number => Math.max(1, columnsValue.value || 1)
 const hasMap = (): boolean => placements.value.length > 0
+const screenPixels = (pixels: number): number => Math.max(0.5, pixels / zoom.value)
 
 const nextId = (prefix: string): string =>
   `${prefix}-${crypto.randomUUID().slice(0, 8)}`
@@ -185,6 +190,8 @@ const syncCanvasSize = (clearExplored = false): void => {
     exploredCanvas.height = height
     clearExplored = true
   }
+  if (fogCanvas.width !== width) fogCanvas.width = width
+  if (fogCanvas.height !== height) fogCanvas.height = height
   if (clearExplored) exploredCtx.clearRect(0, 0, width, height)
   updateCanvasDisplaySize()
 }
@@ -246,6 +253,7 @@ const analyzeTiles = async (): Promise<void> => {
       occluders.value.some((occluder) => occluder.type === 'door' && occluder.id === doorId)
     )
   )
+  exploredCtx.clearRect(0, 0, boardSize.value.width, boardSize.value.height)
   markExplored()
   setStatus(`Analyzed ${placements.value.length} tile(s); review the overlay before export.`)
   requestCanvasRender()
@@ -419,15 +427,22 @@ const renderBoard = (): void => {
     return
   }
 
+  drawMapTiles()
+  drawGrid()
+  drawDoorMarkers()
+  drawFog()
+  drawDebugWalls()
+  drawPreview()
+  drawViewer()
+}
+
+const drawMapTiles = (): void => {
+  ctx.save()
+  ctx.filter = 'contrast(1.08) brightness(1.025)'
   for (const placement of placements.value) {
     ctx.drawImage(placement.tile.image, placement.x, placement.y)
   }
-
-  drawGrid()
-  drawOccluders()
-  drawFog()
-  drawPreview()
-  drawViewer()
+  ctx.restore()
 }
 
 const drawGrid = (): void => {
@@ -435,7 +450,7 @@ const drawGrid = (): void => {
   ctx.save()
   ctx.strokeStyle =
     placements.value.length === 0 ? 'rgba(255, 255, 255, 0.14)' : 'rgba(255, 255, 255, 0.055)'
-  ctx.lineWidth = 1
+  ctx.lineWidth = screenPixels(1)
   for (let x = 0; x <= boardSize.value.width; x += scale) {
     ctx.beginPath()
     ctx.moveTo(x, 0)
@@ -453,8 +468,17 @@ const drawGrid = (): void => {
 
 const drawFog = (): void => {
   const polygon = getVisiblePolygon()
+  if (hideUnseen.value) {
+    drawNeverExploredFog()
+    drawOutsideVisibleFog(polygon, 'rgba(218, 221, 219, 0.52)')
+  } else {
+    drawOutsideVisibleFog(polygon, 'rgba(226, 229, 226, 0.58)')
+  }
+}
+
+const drawOutsideVisibleFog = (polygon: Point[], fillStyle: string): void => {
   ctx.save()
-  ctx.fillStyle = hideUnseen.value ? '#eeeeee' : 'rgba(238, 238, 238, 0.64)'
+  ctx.fillStyle = fillStyle
   ctx.beginPath()
   ctx.rect(0, 0, boardSize.value.width, boardSize.value.height)
   if (polygon.length > 2) {
@@ -470,21 +494,45 @@ const drawFog = (): void => {
   ctx.restore()
 }
 
-const drawOccluders = (): void => {
+const drawNeverExploredFog = (): void => {
+  fogCtx.clearRect(0, 0, boardSize.value.width, boardSize.value.height)
+  fogCtx.save()
+  fogCtx.fillStyle = '#e7e9e6'
+  fogCtx.fillRect(0, 0, boardSize.value.width, boardSize.value.height)
+  fogCtx.globalCompositeOperation = 'destination-out'
+  fogCtx.drawImage(exploredCanvas, 0, 0)
+  fogCtx.restore()
+  ctx.drawImage(fogCanvas, 0, 0)
+}
+
+const drawDoorMarkers = (): void => {
   ctx.save()
   ctx.lineCap = 'round'
   for (const occluder of occluders.value) {
-    const isDoor = occluder.type === 'door'
-    if (!isDoor && !showWalls.value) continue
-
-    if (isDoor) {
+    if (occluder.type === 'door') {
       drawDoorStateMarker(occluder, isDoorOpen(occluder))
-      continue
     }
+  }
+  ctx.restore()
+}
 
-    ctx.strokeStyle = '#d72638'
-    ctx.lineWidth = 4
+const drawDebugWalls = (): void => {
+  if (!showWalls.value) return
+
+  ctx.save()
+  ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
+  for (const occluder of occluders.value) {
+    if (occluder.type !== 'wall') continue
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.55)'
+    ctx.lineWidth = screenPixels(5)
     ctx.setLineDash([])
+    ctx.beginPath()
+    ctx.moveTo(occluder.x1, occluder.y1)
+    ctx.lineTo(occluder.x2, occluder.y2)
+    ctx.stroke()
+    ctx.strokeStyle = '#d72638'
+    ctx.lineWidth = screenPixels(2.5)
     ctx.beginPath()
     ctx.moveTo(occluder.x1, occluder.y1)
     ctx.lineTo(occluder.x2, occluder.y2)
@@ -501,7 +549,7 @@ const drawDoorStateMarker = (door: DoorOccluder, open: boolean): void => {
   const uy = dy / length
   const px = -uy
   const py = ux
-  const cap = Math.min(8, Math.max(5, length * 0.22))
+  const cap = Math.min(screenPixels(7), Math.max(screenPixels(4), length * 0.18))
 
   const strokeSegment = (
     x1: number,
@@ -525,43 +573,43 @@ const drawDoorStateMarker = (door: DoorOccluder, open: boolean): void => {
   ctx.setLineDash([])
 
   if (!open) {
-    strokeSegment(door.x1, door.y1, door.x2, door.y2, 9, 'rgba(0, 0, 0, 0.72)')
-    strokeSegment(door.x1, door.y1, door.x2, door.y2, 5, '#f97316')
+    strokeSegment(door.x1, door.y1, door.x2, door.y2, screenPixels(6), 'rgba(0, 0, 0, 0.38)')
+    strokeSegment(door.x1, door.y1, door.x2, door.y2, screenPixels(3.2), 'rgba(249, 115, 22, 0.92)')
     strokeSegment(
       door.x1 - px * cap,
       door.y1 - py * cap,
       door.x1 + px * cap,
       door.y1 + py * cap,
-      4,
-      '#f97316'
+      screenPixels(2.6),
+      'rgba(249, 115, 22, 0.92)'
     )
     strokeSegment(
       door.x2 - px * cap,
       door.y2 - py * cap,
       door.x2 + px * cap,
       door.y2 + py * cap,
-      4,
-      '#f97316'
+      screenPixels(2.6),
+      'rgba(249, 115, 22, 0.92)'
     )
     ctx.restore()
     return
   }
 
-  ctx.setLineDash([3, 8])
-  strokeSegment(door.x1, door.y1, door.x2, door.y2, 7, 'rgba(0, 0, 0, 0.62)')
-  strokeSegment(door.x1, door.y1, door.x2, door.y2, 3, '#24a148')
+  ctx.setLineDash([screenPixels(3), screenPixels(7)])
+  strokeSegment(door.x1, door.y1, door.x2, door.y2, screenPixels(5), 'rgba(0, 0, 0, 0.32)')
+  strokeSegment(door.x1, door.y1, door.x2, door.y2, screenPixels(2.2), 'rgba(22, 163, 74, 0.88)')
   ctx.setLineDash([])
 
-  const swingRadius = Math.min(28, Math.max(12, length * 0.72))
+  const swingRadius = Math.min(screenPixels(26), Math.max(screenPixels(12), length * 0.68))
   const closedAngle = Math.atan2(uy, ux)
   const openAngle = closedAngle + Math.PI / 2
   const leafX = door.x1 + Math.cos(openAngle) * swingRadius
   const leafY = door.y1 + Math.sin(openAngle) * swingRadius
 
-  strokeSegment(door.x1, door.y1, leafX, leafY, 6, 'rgba(0, 0, 0, 0.62)')
-  strokeSegment(door.x1, door.y1, leafX, leafY, 3, '#24a148')
-  ctx.strokeStyle = '#24a148'
-  ctx.lineWidth = 2
+  strokeSegment(door.x1, door.y1, leafX, leafY, screenPixels(4.8), 'rgba(0, 0, 0, 0.32)')
+  strokeSegment(door.x1, door.y1, leafX, leafY, screenPixels(2.2), 'rgba(22, 163, 74, 0.88)')
+  ctx.strokeStyle = 'rgba(22, 163, 74, 0.58)'
+  ctx.lineWidth = screenPixels(1.6)
   ctx.beginPath()
   ctx.arc(door.x1, door.y1, swingRadius, closedAngle, openAngle)
   ctx.stroke()
@@ -574,8 +622,8 @@ const drawPreview = (): void => {
   if (!start || !point || (tool.value !== 'wall' && tool.value !== 'door')) return
   ctx.save()
   ctx.strokeStyle = tool.value === 'door' ? '#f97316' : '#d72638'
-  ctx.lineWidth = tool.value === 'door' ? 7 : 4
-  ctx.setLineDash([8, 8])
+  ctx.lineWidth = tool.value === 'door' ? screenPixels(5) : screenPixels(3)
+  ctx.setLineDash([screenPixels(8), screenPixels(8)])
   ctx.beginPath()
   ctx.moveTo(start.x, start.y)
   ctx.lineTo(point.x, point.y)
@@ -584,16 +632,17 @@ const drawPreview = (): void => {
 }
 
 const drawViewer = (): void => {
+  const viewerRadius = screenPixels(11)
   ctx.save()
   ctx.fillStyle = '#2f80ed'
   ctx.strokeStyle = '#ffffff'
-  ctx.lineWidth = 3
+  ctx.lineWidth = screenPixels(3)
   ctx.beginPath()
-  ctx.arc(viewer.value.x, viewer.value.y, 13, 0, Math.PI * 2)
+  ctx.arc(viewer.value.x, viewer.value.y, viewerRadius, 0, Math.PI * 2)
   ctx.fill()
   ctx.stroke()
   ctx.strokeStyle = 'rgba(47, 128, 237, 0.35)'
-  ctx.lineWidth = 2
+  ctx.lineWidth = screenPixels(2)
   ctx.beginPath()
   ctx.arc(viewer.value.x, viewer.value.y, sightRadius(), 0, Math.PI * 2)
   ctx.stroke()
@@ -1078,7 +1127,7 @@ const App = (): JSX.Element => {
             id="fogModeButton"
             type="button"
             aria-pressed={hideUnseen.value}
-            title="Toggle opaque unseen areas"
+            title="Toggle whether never-seen areas hide the map"
             onClick={() => {
               hideUnseen.value = !hideUnseen.value
             }}
@@ -1089,7 +1138,7 @@ const App = (): JSX.Element => {
               <path d="M9.9 4.2A9.8 9.8 0 0 1 12 4c6 0 9.5 8 9.5 8a17.4 17.4 0 0 1-2.2 3.3" />
               <path d="M6.6 6.6C3.9 8.4 2.5 12 2.5 12s3.5 8 9.5 8a9.7 9.7 0 0 0 4.7-1.2" />
             </Icon>
-            <span>Hide unseen</span>
+            <span>{hideUnseen.value ? 'Unknown hidden' : 'Known map'}</span>
           </button>
           <button id="exportButton" type="button" onClick={() => void exportSidecar()}>
             <Icon>
