@@ -461,20 +461,32 @@ input[type="range"]::-moz-range-thumb {
   margin-top: 10px;
 }
 
-.counter-group-control {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  color: var(--tre-muted);
-  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 12px;
+.counter-group-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
-.counter-group-control input {
-  width: 56px;
-  text-align: center;
-  text-transform: uppercase;
+.counter-group-button {
+  min-width: 0;
+  width: 34px;
+  min-height: 34px;
+  padding: 0;
+}
+
+.counter-group-button span {
+  width: 18px;
+  height: 18px;
+  border: 2px solid #050505;
+  border-radius: 999px;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.22);
+}
+
+.counter-group-button.active {
+  border-color: var(--tre-green);
+  box-shadow:
+    0 0 14px rgba(var(--tre-green-rgb), 0.16),
+    inset 0 0 10px rgba(var(--tre-green-rgb), 0.08);
 }
 
 .counter-next {
