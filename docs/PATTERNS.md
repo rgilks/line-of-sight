@@ -162,7 +162,8 @@ flowchart LR
 
 Generation is `analyzeImageRgba` in `web/src/los-core.ts`; review/re-analysis is
 `analyzeTiles`, the editing tools, and `carveDoorGaps` in `web/src/main.tsx`;
-export is `exportSidecar` (shape in [sidecar-format.md](sidecar-format.md)).
+export is `exportSidecar` (shape in
+[sidecar format](ARCHITECTURE.md#sidecar-format)).
 
 **Why:** raster maps are ambiguous — antialiasing, furniture, and labels all read
 as dark pixels — so detection is always approximate. Rather than chase perfect
