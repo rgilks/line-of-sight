@@ -2,6 +2,7 @@
 .wrangler/
 dist/
 node_modules/
+.claude/scheduled_tasks.lock
 
 # Local licensed product assets. These are useful for development but must not
 # be committed to the public repository.
