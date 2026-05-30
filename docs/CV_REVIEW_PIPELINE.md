@@ -122,6 +122,38 @@ produce drafts, use local visual review for maps with high error or high play
 value, and feed recurring misses back into deterministic detection where
 possible.
 
+## Second Iteration Notes
+
+The first recurring detector miss was large rectangular cargo or machinery
+outlines. These are not always bulkheads, but in play they can be real LOS
+blockers. A conservative rectangle-outline pass was added to `analyzeImageRgba`:
+it finds isolated dark connected components whose bounding boxes have strong
+dark coverage on all four sides, are large enough to matter, and are not touching
+the map edge. Those boxes become four wall candidates.
+
+Measured effect:
+
+| Scope | Before | After |
+| --- | --- | --- |
+| 12-map pilot | 488 walls, 126 doors | 613 walls, 126 doors |
+| All 400 local Geomorphs | 14,279 walls, 4,075 doors | 15,504 walls, 4,075 doors |
+| Sparse maps in full benchmark | 20 | 16 |
+
+Pilot examples:
+
+- `103 Cargo Bay - Full` now recovers cargo container outlines automatically.
+- `537 Cargo Bay - Full` improved from `2 walls, 2 doors` raw CV to
+  `40 walls, 2 doors`; a local reviewed sidecar adds the missing cargo-door
+  segment and ends at `46 walls, 3 doors`.
+- `572 Stellar Cartography` remains a hard curved-wall case; a local reviewed
+  sidecar adds a polyline approximation to test that curated non-grid walls can
+  still be useful without changing the visibility core.
+
+Current assessment: the pilot is good enough to prove the technique. The best
+near-term path is targeted deterministic improvements for common patterns
+(rectangular blockers, better curved-wall approximation, door symbols) plus
+local review for maps that are still sparse or visually odd.
+
 ## Correction Format
 
 Use the app's existing sidecar shape:

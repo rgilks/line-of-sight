@@ -33,6 +33,21 @@ const fillBand = (
   }
 }
 
+const fillRect = (
+  rgba: Uint8ClampedArray,
+  width: number,
+  xStart: number,
+  yStart: number,
+  xEnd: number,
+  yEnd: number
+): void => {
+  for (let y = yStart; y < yEnd; y += 1) {
+    for (let x = xStart; x < xEnd; x += 1) {
+      setDark(rgba, width, x, y)
+    }
+  }
+}
+
 const polygonArea = (points: Point[]): number => {
   let area = 0
   for (let index = 0; index < points.length; index += 1) {
@@ -105,6 +120,24 @@ describe('analyzeImageRgba', () => {
     // Doors are emitted closed with zero-padded ids.
     expect(doors[0]?.id).toBe('door-0001')
     expect(doors[0]?.open).toBe(false)
+  })
+
+  it('detects an isolated rectangular cargo obstacle outline', () => {
+    const width = 220
+    const height = 220
+    const rgba = blankRgba(width, height)
+    fillRect(rgba, width, 63, 63, 157, 67)
+    fillRect(rgba, width, 63, 153, 157, 157)
+    fillRect(rgba, width, 63, 63, 67, 157)
+    fillRect(rgba, width, 153, 63, 157, 157)
+
+    const walls = analyzeImageRgba(width, height, rgba, 50).filter(
+      (occluder) => occluder.type === 'wall'
+    )
+
+    expect(walls.length).toBeGreaterThanOrEqual(4)
+    expect(walls.some((wall) => Math.abs(wall.y1 - 62.5) <= 1)).toBe(true)
+    expect(walls.some((wall) => Math.abs(wall.x1 - 62.5) <= 1)).toBe(true)
   })
 })
 

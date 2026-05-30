@@ -124,11 +124,15 @@ Input is a raw RGBA buffer plus a `gridScale` hint. The buffer length must equal
    connect to perpendicular walls at their endpoints
    (`axisEndpointSupportCount`) — this recovers thin interior walls that the
    strict band test would drop.
-7. **Door detection** (`detectDoorCandidates`), see below.
-8. **Refine** (`refineWallCandidates`). Collinear axis walls on the same grid
+7. **Rectangular obstacle recovery** (`extractRectangularObstacleCandidates`).
+   Closed dark-outline rectangles, such as large cargo containers, are converted
+   into four blocking wall segments when all four sides have strong dark
+   coverage and the component is not part of the map edge.
+8. **Door detection** (`detectDoorCandidates`), see below.
+9. **Refine** (`refineWallCandidates`). Collinear axis walls on the same grid
    line are merged across small gaps (`mergeAxisCandidates`), then segments
    mostly covered by a longer one are dropped (`removeRedundantCandidates`).
-9. **Emit.** Walls are sorted longest-first, capped at **500**, clamped to the
+10. **Emit.** Walls are sorted longest-first, capped at **500**, clamped to the
    board, and assigned stable ids `wall-0001`, `wall-0002`, …. Doors are emitted
    `closed` (`open: false`) with ids `door-0001`, ….
 

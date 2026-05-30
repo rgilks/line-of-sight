@@ -65,6 +65,7 @@ digraph AnalysisPipeline {
   ];
 
   PROMOTE [label=<<B>promoteConnectedThinAxisCandidates</B><BR/><FONT POINT-SIZE="15">recover ~2px walls joined to perpendiculars</FONT>>, width=3.4];
+  RECT [label=<<B>extractRectangularObstacleCandidates</B><BR/><FONT POINT-SIZE="15">large isolated outline boxes become blockers</FONT>>, width=3.4];
 
   subgraph cluster_doors {
     graph [
@@ -100,7 +101,9 @@ digraph AnalysisPipeline {
   IN -> M -> S -> CO -> D1;
   D1 -> PROMOTE [label="axis: thin but connected"];
   D1 -> REFINE [label="Yes: structural walls"];
+  M -> RECT [label="closed dark-outline components"];
   PROMOTE -> REFINE;
+  RECT -> REFINE;
   D1 -> DR1 [label="feed structural walls", lhead=cluster_doors];
   PROMOTE -> DR1 [lhead=cluster_doors, style=dashed, color="#6b7280", fontcolor="#6b7280"];
   REFINE -> OUT [label="walls"];

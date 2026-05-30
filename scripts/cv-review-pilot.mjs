@@ -100,7 +100,10 @@ const renderContactSheet = async ({rows, layer, outPath}) => {
   const thumbs = []
 
   for (const row of rows) {
-    const source = row[layer]?.overlayPath
+    const source =
+      layer === 'reviewed'
+        ? (row.corrected?.overlayPath ?? row.detected.overlayPath)
+        : row[layer]?.overlayPath
     if (!source) continue
     const image = sharp(source).resize({width: thumbWidth})
     const buffer = await image.png().toBuffer()
@@ -123,7 +126,7 @@ const renderContactSheet = async ({rows, layer, outPath}) => {
     const top = gap + row * cellHeight
     const labelSvg = Buffer.from(
       `<svg width="${thumbWidth}" height="${labelHeight}" xmlns="http://www.w3.org/2000/svg"><text x="0" y="19" font-family="Menlo, monospace" font-size="15" fill="#ffffff">${svgEscape(
-        thumb.row.slug
+        `${thumb.row.slug}${layer === 'reviewed' && thumb.row.corrected ? ' *' : ''}`
       )}</text></svg>`
     )
     composites.push({input: labelSvg, left, top})
@@ -233,5 +236,10 @@ await renderContactSheet({
   rows,
   layer: 'corrected',
   outPath: path.join(reportDir, 'corrected-contact-sheet.png')
+})
+await renderContactSheet({
+  rows,
+  layer: 'reviewed',
+  outPath: path.join(reportDir, 'reviewed-contact-sheet.png')
 })
 console.log(JSON.stringify(report, null, 2))
