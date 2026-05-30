@@ -50,7 +50,7 @@ Live verification should include:
   `rust-wasm-version` branch.
 
 Architecture, design patterns, and diagrams are documented in [`docs/`](docs/README.md).
-Read [`docs/patterns/`](docs/patterns/README.md) before non-trivial changes — this
+Read [`docs/patterns.md`](docs/patterns.md) before non-trivial changes — this
 codebase is organised around a small set of named patterns (deterministic core,
 layered separation, signals + single render effect, snapshot undo/redo, and
 candidate → review → export).

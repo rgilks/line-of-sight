@@ -7,8 +7,8 @@ module-level signals and is **in-memory only** — reload starts fresh, so the
 [sidecar export](sidecar-format.md) is the thing to keep.
 
 The two patterns behind this UI are
-[signals and rendering](patterns/signals-and-rendering.md) (how state drives
-the canvas) and [snapshot undo/redo](patterns/snapshot-undo-redo.md).
+[signals and rendering](patterns.md#signals-and-rendering) (how state drives
+the canvas) and [snapshot undo/redo](patterns.md#snapshot-undoredo).
 
 ## Layout
 

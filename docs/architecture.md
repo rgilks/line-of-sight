@@ -7,7 +7,7 @@ strict, one-directional dependency rule.
 ![System overview](diagrams/system-overview.png)
 
 This document is the map of *what exists and where*. The
-[patterns](patterns/README.md) explain *why each piece has its shape*; diagram
+[patterns](patterns.md) explain *why each piece has its shape*; diagram
 sources live in [`diagrams/`](diagrams/README.md).
 
 ## Layers
@@ -85,10 +85,10 @@ Local map images ──drag/drop or picker──▶ tiles ──arrange──▶
   reload starts fresh, so the sidecar export is the durable artifact. Two
   offscreen canvases back the fog (`exploredCanvas`, `fogCanvas`); undo/redo is a
   bounded stack of `EditorSnapshot`s. See
-  [signals and rendering](patterns/signals-and-rendering.md) and
-  [snapshot undo/redo](patterns/snapshot-undo-redo.md).
+  [signals and rendering](patterns.md#signals-and-rendering) and
+  [snapshot undo/redo](patterns.md#snapshot-undoredo).
 - **Build** — Vite builds `web/` into `dist/client` (`root: 'web'`). TypeScript
   is strict ESM with `jsxImportSource: "preact"`. Runtime dependencies are kept
   minimal: `preact` and `@preact/signals`.
-- **Patterns** — the design patterns that hold this together are documented one
-  per file in [`patterns/`](patterns/README.md).
+- **Patterns** — the design patterns that hold this together are written up in
+  [`patterns.md`](patterns.md).

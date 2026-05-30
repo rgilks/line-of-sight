@@ -11,8 +11,8 @@ formats in more depth.
 - [ui.md](ui.md) — the browser app: tools, drawer tabs, counters, fog,
   undo/redo, and keyboard shortcuts.
 - [sidecar-format.md](sidecar-format.md) — the exported LOS sidecar JSON shape.
-- [patterns/](patterns/README.md) — the load-bearing design patterns, one per
-  file. Read before non-trivial changes.
+- [patterns.md](patterns.md) — the load-bearing design patterns. Read before
+  non-trivial changes.
 - [diagrams/](diagrams/README.md) — Graphviz/DOT sources + rendered PNGs.
 
 ## Project layout
