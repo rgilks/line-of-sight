@@ -53,6 +53,8 @@ export type Board = {
   sightRadius: number
   occluders: Occluder[]
   doorStates: Record<string, {open: boolean}>
+  /** When false, only the GM connection may toggle doors. Defaults to true. */
+  playerDoorControl?: boolean
 }
 
 // Client -> server intent. The caller's playerId travels in the POST envelope,
@@ -61,6 +63,7 @@ export type Command =
   | {type: 'SetName'; name: string}
   | {type: 'MoveToken'; x: number; y: number}
   | {type: 'ToggleDoor'; doorId: string; open: boolean}
+  | {type: 'SetPlayerDoorControl'; enabled: boolean}
 
 export type CommandEnvelope = {playerId: PlayerId; command: Command}
 
@@ -71,6 +74,7 @@ export type DomainEvent = {seq: number} & (
   | {type: 'PlayerRenamed'; playerId: PlayerId; label: string}
   | {type: 'TokenMoved'; playerId: PlayerId; x: number; y: number}
   | {type: 'DoorToggled'; doorId: string; open: boolean}
+  | {type: 'PlayerDoorControlSet'; enabled: boolean}
   | {type: 'BoardPublished'; assetRef: string}
 )
 

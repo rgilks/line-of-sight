@@ -42,7 +42,8 @@ const seedBoard = (): Board => ({
     {type: 'door', id: 'seed-door', x1: 500, y1: 430, x2: 500, y2: 570, open: false},
     {type: 'wall', id: 'seed-wall-bottom', x1: 500, y1: 570, x2: 500, y2: 900}
   ],
-  doorStates: {}
+  doorStates: {},
+  playerDoorControl: true
 })
 
 export class GameTable {
@@ -147,7 +148,19 @@ export class GameTable {
 
   // Returns an error string if the command is not allowed for this player.
   private apply(playerId: PlayerId, command: Command): string | null {
+    const connection = this.connections.get(playerId)
+
+    if (command.type === 'SetPlayerDoorControl') {
+      if (!connection?.gm) return 'GM only'
+      this.board = {...this.board, playerDoorControl: command.enabled}
+      this.append({type: 'PlayerDoorControlSet', enabled: command.enabled})
+      return null
+    }
+
     if (command.type === 'ToggleDoor') {
+      if (this.board.playerDoorControl === false && !connection?.gm) {
+        return 'Doors are locked — GM only'
+      }
       this.board.doorStates = {...this.board.doorStates, [command.doorId]: {open: command.open}}
       this.append({type: 'DoorToggled', doorId: command.doorId, open: command.open})
       return null
@@ -183,7 +196,11 @@ export class GameTable {
       return Response.json({error: 'Invalid board'}, {status: 400})
     }
 
-    this.board = {...board, doorStates: board.doorStates ?? {}}
+    this.board = {
+      ...board,
+      doorStates: board.doorStates ?? {},
+      playerDoorControl: board.playerDoorControl ?? true
+    }
     this.append({type: 'BoardPublished', assetRef: board.assetRef})
     this.projectAll()
     return Response.json({ok: true, seq: this.seq})

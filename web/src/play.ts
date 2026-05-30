@@ -2,15 +2,29 @@
 // index.html is untouched). It opens the per-player SSE stream, renders the
 // fog-gated tokens the server sends, draws its own POV fog with the shared core,
 // POSTs MoveToken when you click the board, and toggles a door when you click on
-// one. Open in two browsers to watch server-authoritative line of sight: another
-// player's counter only appears when your point of view can actually see it.
+// one (unless the GM has locked doors). Open in two browsers to watch
+// server-authoritative line of sight: another player's counter only appears when
+// your point of view can actually see it.
 //
 //   ?table=<name>  join a specific table (default "demo")
 //   ?gm=1          spectator/GM view — sees ALL counters, manages doors, no fog
 import {effect, signal} from '@preact/signals'
+import {drawCounterToken} from './counter-render'
 import {visibilityPolygon, type Occluder, type Point} from './los-core'
-import type {Board, CommandEnvelope, CounterKind, Token, ViewMessage} from '../../src/protocol'
+import {counterDefinitions, counterPortraits, preloadCounterPortraits} from './state'
+import type {Board, CommandEnvelope, Token, ViewMessage} from '../../src/protocol'
 import './play.css'
+
+preloadCounterPortraits()
+
+// Redraw when a counter portrait finishes loading.
+const portraitTick = signal(0)
+const bumpPortraitTick = (): void => {
+  portraitTick.value += 1
+}
+for (const image of counterPortraits.values()) {
+  image.addEventListener('load', bumpPortraitTick)
+}
 
 const params = new URLSearchParams(location.search)
 const tableId = params.get('table') ?? 'demo'
@@ -23,26 +37,16 @@ const status = signal('Connecting…')
 const mapImage = signal<HTMLImageElement | null>(null)
 let loadedAssetRef = ''
 
-// Counter portraits (shared with the single-player tool, served from
-// /token-portraits). Cached per kind; loading one bumps portraitTick so the
-// render effect redraws once the image is ready.
-const portraitTick = signal(0)
-const portraits = new Map<CounterKind, HTMLImageElement>()
-const portraitFor = (kind: CounterKind): HTMLImageElement => {
-  let image = portraits.get(kind)
-  if (!image) {
-    image = new Image()
-    image.onload = () => {
-      portraitTick.value += 1
-    }
-    image.src = `/token-portraits/${kind}.webp`
-    portraits.set(kind, image)
-  }
-  return image
-}
-
 let canvas: HTMLCanvasElement
 let ctx: CanvasRenderingContext2D
+
+const playerDoorControl = (active: Board): boolean => active.playerDoorControl !== false
+
+const canToggleDoors = (): boolean => {
+  const active = board.value
+  if (!active) return false
+  return isGm || playerDoorControl(active)
+}
 
 const myToken = (): Token | null => {
   const id = you.value
@@ -59,7 +63,6 @@ const post = (command: CommandEnvelope['command']): void => {
   })
 }
 
-// Load the GM-uploaded map for a real assetRef; the seed board has no image.
 const ensureMap = (next: Board): void => {
   if (!next.assetRef || next.assetRef === 'composed-board') {
     mapImage.value = null
@@ -79,6 +82,7 @@ const applyView = (next: Board, nextTokens: Token[]): void => {
   board.value = next
   tokens.value = nextTokens
   ensureMap(next)
+  syncDoorControlUi(next)
 }
 
 const connect = (): void => {
@@ -141,16 +145,16 @@ const onPointerDown = (event: PointerEvent): void => {
   const active = board.value
   if (!point || !active) return
 
-  // Clicking a door toggles it (re-gates everyone's sight). Anywhere else moves.
   const door = nearestDoor(point, active)
   if (door) {
-    post({type: 'ToggleDoor', doorId: door.id, open: !doorOpen(active, door)})
+    if (canToggleDoors()) {
+      post({type: 'ToggleDoor', doorId: door.id, open: !doorOpen(active, door)})
+    }
     return
   }
 
   const me = myToken()
   if (!me) return
-  // Optimistic local move; the server echo reconciles it.
   tokens.value = tokens.value.map((token) =>
     token.id === me.id ? {...token, x: point.x, y: point.y} : token
   )
@@ -206,39 +210,19 @@ const drawFog = (active: Board, me: Token): void => {
 }
 
 const drawToken = (token: Token): void => {
+  const active = board.value
+  if (!active) return
   const mine = token.ownerId === you.value
-  const ring = mine ? '#39ff14' : '#4aa3ff'
-  const radius = 26
-  const image = portraitFor(token.kind)
-
-  ctx.save()
-  ctx.beginPath()
-  ctx.arc(token.x, token.y, radius, 0, Math.PI * 2)
-  ctx.closePath()
-  ctx.clip()
-  if (image.complete && image.naturalWidth > 0) {
-    ctx.drawImage(image, token.x - radius, token.y - radius, radius * 2, radius * 2)
-  } else {
-    ctx.fillStyle = ring
-    ctx.fill()
-  }
-  ctx.restore()
-
-  ctx.beginPath()
-  ctx.arc(token.x, token.y, radius, 0, Math.PI * 2)
-  ctx.lineWidth = 3
-  ctx.strokeStyle = ring
-  ctx.stroke()
-
-  // Label sits just below the token for legibility over any portrait.
-  ctx.font = '700 15px "JetBrains Mono", monospace'
-  ctx.textAlign = 'center'
-  ctx.textBaseline = 'middle'
-  ctx.lineWidth = 3
-  ctx.strokeStyle = '#050505'
-  ctx.strokeText(token.label, token.x, token.y + radius + 11)
-  ctx.fillStyle = '#f5f5f5'
-  ctx.fillText(token.label, token.x, token.y + radius + 11)
+  drawCounterToken(
+    ctx,
+    {kind: token.kind, label: token.label, x: token.x, y: token.y},
+    {
+      gridScale: active.gridScale,
+      portraits: counterPortraits,
+      counterDefinitions,
+      isPov: mine
+    }
+  )
 }
 
 const draw = (): void => {
@@ -254,23 +238,56 @@ const draw = (): void => {
 
   drawOccluders(active)
   const me = myToken()
-  if (me) drawFog(active, me) // GM (no token) sees the whole board, no fog
+  if (me) drawFog(active, me)
   for (const token of tokens.value) drawToken(token)
+}
+
+const hintText = (): string => {
+  const active = board.value
+  if (isGm) {
+    const locked = active != null && !playerDoorControl(active)
+    return locked
+      ? 'GM view — doors locked (players cannot toggle). Click a door to open/close it.'
+      : 'GM view — you see every counter. Click a door to open/close it.'
+  }
+  if (active && !playerDoorControl(active)) {
+    return 'Click the board to move your counter. Doors are locked — ask the GM to open them.'
+  }
+  return 'Click the board to move your counter. Click a door to open/close it. Open this URL in another browser to join.'
+}
+
+const syncDoorControlUi = (active: Board): void => {
+  const checkbox = document.querySelector<HTMLInputElement>('#playerDoors')
+  const hint = document.querySelector('.hint')
+  if (checkbox) checkbox.checked = playerDoorControl(active)
+  if (hint) hint.textContent = hintText()
+}
+
+const wireDoorControl = (): void => {
+  const checkbox = document.querySelector<HTMLInputElement>('#playerDoors')
+  if (!checkbox) return
+  checkbox.addEventListener('change', () => {
+    post({type: 'SetPlayerDoorControl', enabled: checkbox.checked})
+  })
 }
 
 const mount = (): void => {
   const root = document.querySelector('#app')
   if (!root) throw new Error('Missing #app root.')
-  const hint = isGm
-    ? 'GM view — you see every counter. Click a door to open/close it.'
-    : 'Click the board to move your counter. Click a door to open/close it. Open this URL in another browser to join.'
+  const gmControls = isGm
+    ? `<label class="gm-door-lock">
+        <input id="playerDoors" type="checkbox" checked />
+        Players can open doors
+      </label>`
+    : ''
   root.innerHTML = `
     <header class="play-hud">
       <strong>Line of Sight — Multiplayer</strong>
       <span id="status"></span>
       <span id="who"></span>
       <button id="copyLink" type="button">Copy invite link</button>
-      <span class="hint">${hint}</span>
+      ${gmControls}
+      <span class="hint">${hintText()}</span>
     </header>
     <main class="play-board"><canvas id="board"></canvas></main>`
 
@@ -281,11 +298,10 @@ const mount = (): void => {
   ctx = context
   canvas.addEventListener('pointerdown', onPointerDown)
   wireCopyLink()
+  wireDoorControl()
   connect()
 }
 
-// Copy the clean player-join URL for this table (no gm flag) to the clipboard so
-// the GM can paste it to players.
 const wireCopyLink = (): void => {
   const button = document.querySelector<HTMLButtonElement>('#copyLink')
   if (!button) return
@@ -297,7 +313,6 @@ const wireCopyLink = (): void => {
         window.setTimeout(() => (button.textContent = 'Copy invite link'), 1500)
       },
       () => {
-        // Clipboard blocked (e.g. insecure context) — show the URL to copy by hand.
         button.textContent = inviteUrl
       }
     )
@@ -307,7 +322,8 @@ const wireCopyLink = (): void => {
 mount()
 
 effect(() => {
-  portraitTick.value // redraw when a counter portrait finishes loading
+  portraitTick.value
+  board.value
   draw()
   const statusEl = document.querySelector('#status')
   if (statusEl) statusEl.textContent = status.value
