@@ -40,6 +40,16 @@ describe('generateMap', () => {
     expect(types.has('cargo')).toBe(true)
   })
 
+  it('keeps focal rooms (bridge, medbay) singular across seeds', () => {
+    for (let seed = 1; seed <= 20; seed += 1) {
+      const m = generateMap({...defaultSpec(seed), theme: 'military'})
+      const counts = new Map<string, number>()
+      for (const room of m.rooms) counts.set(room.type, (counts.get(room.type) ?? 0) + 1)
+      expect(counts.get('bridge') ?? 0).toBeLessThanOrEqual(1)
+      expect(counts.get('medbay') ?? 0).toBeLessThanOrEqual(1)
+    }
+  })
+
   it('rooms do not overlap each other', () => {
     const m = generateMap(defaultSpec(11))
     for (let i = 0; i < m.rooms.length; i += 1)

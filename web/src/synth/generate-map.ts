@@ -50,11 +50,26 @@ const splitRect = (rng: Rng, rect: Rect, spec: MapSpec): Rect[] => {
 
 type Theme = MapSpec['theme']
 
-const themeFill: Record<Theme, RoomType[]> = {
-  civilian: ['quarters', 'common', 'fresher', 'storage', 'medbay'],
-  military: ['quarters', 'engineering', 'storage', 'medbay', 'bridge'],
-  industrial: ['cargo', 'engineering', 'storage', 'common'],
-  derelict: ['storage', 'cargo', 'quarters', 'engineering', 'common']
+// Per theme: `focal` rooms appear at most once each (a deck has one bridge, one
+// medbay) and take the largest rooms; `common` rooms fill the rest by weighted
+// pick — repeats in the list raise a type's weight.
+const themePalette: Record<Theme, {focal: RoomType[]; common: RoomType[]}> = {
+  civilian: {
+    focal: ['bridge', 'medbay'],
+    common: ['quarters', 'quarters', 'quarters', 'common', 'fresher', 'storage']
+  },
+  military: {
+    focal: ['bridge', 'medbay'],
+    common: ['quarters', 'quarters', 'engineering', 'storage', 'storage', 'common']
+  },
+  industrial: {
+    focal: ['bridge', 'medbay'],
+    common: ['cargo', 'cargo', 'engineering', 'engineering', 'storage', 'common']
+  },
+  derelict: {
+    focal: ['bridge'],
+    common: ['storage', 'storage', 'cargo', 'quarters', 'engineering', 'common']
+  }
 }
 
 const roomLabels: Record<RoomType, string> = {
@@ -70,13 +85,14 @@ const roomLabels: Record<RoomType, string> = {
 }
 
 const assignTypes = (rng: Rng, rects: Rect[], spec: MapSpec): Room[] => {
-  // Largest cells get the "important" required rooms so they read as focal
-  // spaces; the rest fill from the theme palette.
+  // Largest rooms get required types, then one of each focal type; the rest fill
+  // from the weighted common palette — so focal rooms stay singular and central
+  // instead of a deck sprouting six bridges.
   const order = [...rects].sort((a, b) => b.w * b.h - a.w * a.h)
-  const fill = themeFill[spec.theme]
-  const required = [...spec.required]
+  const {focal, common} = themePalette[spec.theme]
+  const queue = [...spec.required, ...focal.filter((t) => !spec.required.includes(t))]
   return order.map((rect, index) => {
-    const type = required.shift() ?? pick(rng, fill)
+    const type = queue.shift() ?? pick(rng, common)
     return {...rect, id: `room-${String(index + 1).padStart(3, '0')}`, type, label: roomLabels[type]}
   })
 }
