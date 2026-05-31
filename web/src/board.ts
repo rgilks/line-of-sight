@@ -1,7 +1,8 @@
-import {analyzeImageRgba, type DoorOccluder, type Occluder} from './los-core'
+import {analyzeImageRgba, type DoorOccluder, type Occluder, type WallOccluder} from './los-core'
 import type {Placement, Tile} from './types'
 import {
   boardSize,
+  boardViewport,
   canvas,
   columns,
   doorCarveTolerance,
@@ -12,7 +13,9 @@ import {
   gridScale,
   hoveredOccluderId,
   hoveredTokenId,
+  maxZoom,
   minCarvedWallLength,
+  minZoom,
   nextId,
   occluders,
   placements,
@@ -20,12 +23,14 @@ import {
   selectedOccluderId,
   selectedTokenId,
   setStatus,
+  showWalls,
   tiles,
   tokens,
   zoom,
   requestCanvasRender
 } from './state'
 import {resetHistory, pushUndoHistory} from './history'
+import {notifyTableBoardChanged} from './publish'
 import {markExplored} from './visibility'
 
 const imageFilesFrom = (files: Iterable<File>): File[] =>
@@ -92,7 +97,44 @@ export const loadMapFiles = async (files: Iterable<File>): Promise<void> => {
   await analyzeTiles()
 }
 
+const tileIdFromOccluderId = (id: string): string | null => {
+  const colon = id.indexOf(':')
+  return colon > 0 ? id.slice(0, colon) : null
+}
+
+const relocateBoardContentForLayout = (before: Placement[], after: Placement[]): void => {
+  const deltas = new Map<string, {dx: number; dy: number}>()
+  for (const placement of after) {
+    const previous = before.find((entry) => entry.tile.id === placement.tile.id)
+    if (!previous) continue
+    const dx = placement.x - previous.x
+    const dy = placement.y - previous.y
+    if (dx !== 0 || dy !== 0) deltas.set(placement.tile.id, {dx, dy})
+  }
+  if (deltas.size === 0) return
+
+  occluders.value = occluders.value.map((occluder) => {
+    const tileId = tileIdFromOccluderId(occluder.id)
+    const delta = tileId ? deltas.get(tileId) : undefined
+    if (!delta) return occluder
+    return {
+      ...occluder,
+      x1: occluder.x1 + delta.dx,
+      y1: occluder.y1 + delta.dy,
+      x2: occluder.x2 + delta.dx,
+      y2: occluder.y2 + delta.dy
+    }
+  })
+  markExplored()
+}
+
 export const arrangeTiles = (): void => {
+  const previousPlacements = placements.value.map((placement) => ({
+    tile: placement.tile,
+    x: placement.x,
+    y: placement.y
+  }))
+
   if (tiles.value.length === 0) {
     placements.value = []
     resizeBoard(1000, 1000)
@@ -110,7 +152,26 @@ export const arrangeTiles = (): void => {
     y: Math.floor(index / colCount) * cellHeight
   }))
   resizeBoard(usedColumns * cellWidth, Math.ceil(tiles.value.length / colCount) * cellHeight)
+  if (previousPlacements.length > 0) {
+    relocateBoardContentForLayout(previousPlacements, placements.value)
+  }
+  scheduleFitBoardToViewport()
+  notifyTableBoardChanged()
   requestCanvasRender()
+}
+
+export const reorderTile = (fromIndex: number, toIndex: number): void => {
+  const count = tiles.value.length
+  if (count < 2 || fromIndex < 0 || fromIndex >= count || toIndex < 0 || toIndex >= count) return
+  if (fromIndex === toIndex) return
+
+  pushUndoHistory()
+  const nextTiles = [...tiles.value]
+  const [moved] = nextTiles.splice(fromIndex, 1)
+  nextTiles.splice(toIndex, 0, moved)
+  tiles.value = nextTiles
+  arrangeTiles()
+  setStatus('Map order updated on the board.')
 }
 
 export const resizeBoard = (width: number, height: number): void => {
@@ -144,6 +205,44 @@ export const updateCanvasDisplaySize = (): void => {
   canvas.style.height = `${boardSize.value.height * zoom.value}px`
 }
 
+const fitPaddingPx = 12
+
+let fitFrame = 0
+
+/** Scale and center the board so the full map fits in the viewport. */
+export const fitBoardToViewport = (): void => {
+  if (!boardViewport || placements.value.length === 0) return
+
+  const {width, height} = boardSize.value
+  if (width <= 0 || height <= 0) return
+
+  const availWidth = boardViewport.clientWidth - fitPaddingPx * 2
+  const availHeight = boardViewport.clientHeight - fitPaddingPx * 2
+  if (availWidth <= 0 || availHeight <= 0) return
+
+  const fitZoom = Math.min(availWidth / width, availHeight / height)
+  zoom.value = Math.min(maxZoom, Math.max(minZoom, fitZoom))
+  updateCanvasDisplaySize()
+  boardViewport.scrollLeft = 0
+  boardViewport.scrollTop = 0
+}
+
+/** Defer fit until the viewport has settled after layout. */
+export const scheduleFitBoardToViewport = (): void => {
+  if (typeof window === 'undefined') {
+    fitBoardToViewport()
+    return
+  }
+
+  if (fitFrame !== 0) cancelAnimationFrame(fitFrame)
+  fitFrame = requestAnimationFrame(() => {
+    fitFrame = requestAnimationFrame(() => {
+      fitFrame = 0
+      fitBoardToViewport()
+    })
+  })
+}
+
 export const analyzeTiles = async (): Promise<void> => {
   if (placements.value.length === 0) {
     setStatus('Select one or more map images first.')
@@ -171,7 +270,7 @@ export const analyzeTiles = async (): Promise<void> => {
   }
 
   pushUndoHistory()
-  occluders.value = carveDoorGaps([...generated, ...manual])
+  occluders.value = sealDoorWallJunctions(carveDoorGaps([...generated, ...manual]))
   doorStates.value = Object.fromEntries(
     Object.entries(doorStates.value).filter(([doorId]) =>
       occluders.value.some((occluder) => occluder.type === 'door' && occluder.id === doorId)
@@ -181,7 +280,12 @@ export const analyzeTiles = async (): Promise<void> => {
   hoveredOccluderId.value = null
   exploredCtx.clearRect(0, 0, boardSize.value.width, boardSize.value.height)
   markExplored()
-  setStatus(`Analyzed ${placements.value.length} tile(s); review the overlay before export.`)
+  showWalls.value = true
+  scheduleFitBoardToViewport()
+  setStatus(
+    `Analyzed ${placements.value.length} tile(s); walls shown on map — click to select, Erase or Del to remove.`
+  )
+  notifyTableBoardChanged()
   requestCanvasRender()
 }
 
@@ -199,7 +303,9 @@ const transformOccluder = (occluder: Occluder, placement: Placement): Occluder =
     : {...base, type: 'wall'}
 }
 
-const occluderAxis = (occluder: Occluder): 'horizontal' | 'vertical' | null => {
+type LineOccluder = WallOccluder | DoorOccluder
+
+const occluderAxis = (occluder: LineOccluder): 'horizontal' | 'vertical' | null => {
   const dx = Math.abs(occluder.x2 - occluder.x1)
   const dy = Math.abs(occluder.y2 - occluder.y1)
   if (dx >= minCarvedWallLength && dy <= doorCarveTolerance) return 'horizontal'
@@ -207,10 +313,10 @@ const occluderAxis = (occluder: Occluder): 'horizontal' | 'vertical' | null => {
   return null
 }
 
-const lineCoordinate = (occluder: Occluder, axis: 'horizontal' | 'vertical'): number =>
+const lineCoordinate = (occluder: LineOccluder, axis: 'horizontal' | 'vertical'): number =>
   axis === 'horizontal' ? (occluder.y1 + occluder.y2) / 2 : (occluder.x1 + occluder.x2) / 2
 
-const intervalFor = (occluder: Occluder, axis: 'horizontal' | 'vertical'): [number, number] => {
+const intervalFor = (occluder: LineOccluder, axis: 'horizontal' | 'vertical'): [number, number] => {
   const first = axis === 'horizontal' ? occluder.x1 : occluder.y1
   const second = axis === 'horizontal' ? occluder.x2 : occluder.y2
   return first <= second ? [first, second] : [second, first]
@@ -262,8 +368,9 @@ export const carveDoorGaps = (items: Occluder[]): Occluder[] => {
         }
 
         const [doorStart, doorEnd] = intervalFor(door, axis)
-        const start = Math.max(wallStart, doorStart - doorCarveTolerance / 2)
-        const end = Math.min(wallEnd, doorEnd + doorCarveTolerance / 2)
+        const carvePad = doorCarveTolerance
+        const start = Math.max(wallStart, doorStart - carvePad)
+        const end = Math.min(wallEnd, doorEnd + carvePad)
         return end - start >= minCarvedWallLength ? [[start, end]] : []
       })
     )
@@ -294,4 +401,101 @@ export const carveDoorGaps = (items: Occluder[]): Occluder[] => {
   }
 
   return carved
+}
+
+const junctionSealDistance = 14
+
+/** Extend doors and wall segments so endpoints meet, closing sight-line cracks at jambs. */
+export const sealDoorWallJunctions = (items: Occluder[]): Occluder[] => {
+  const doors = items.filter((item): item is DoorOccluder => item.type === 'door')
+  if (doors.length === 0) return items
+
+  const wallPieces = items.filter((item): item is WallOccluder => item.type === 'wall')
+  const adjustedWalls = new Map<string, WallOccluder>()
+  const adjustedDoors = new Map<string, DoorOccluder>()
+
+  for (const door of doors) {
+    adjustedDoors.set(door.id, {...door})
+  }
+  for (const wall of wallPieces) {
+    adjustedWalls.set(wall.id, {...wall})
+  }
+
+  for (const door of doors) {
+    const doorAxis = occluderAxis(door)
+    if (!doorAxis) continue
+
+    const doorLine = lineCoordinate(door, doorAxis)
+    let [doorStart, doorEnd] = intervalFor(door, doorAxis)
+
+    for (const wall of wallPieces) {
+      const wallAxis = occluderAxis(wall)
+      if (wallAxis !== doorAxis) continue
+      const wallLine = lineCoordinate(wall, doorAxis)
+      if (Math.abs(wallLine - doorLine) > doorCarveTolerance) continue
+
+      const [wallStart, wallEnd] = intervalFor(wall, doorAxis)
+      if (Math.abs(wallEnd - doorStart) <= junctionSealDistance) {
+        doorStart = Math.min(doorStart, wallEnd)
+      }
+      if (Math.abs(wallStart - doorEnd) <= junctionSealDistance) {
+        doorEnd = Math.max(doorEnd, wallStart)
+      }
+      if (Math.abs(wallStart - doorStart) <= junctionSealDistance) {
+        doorStart = Math.min(doorStart, wallStart)
+      }
+      if (Math.abs(wallEnd - doorEnd) <= junctionSealDistance) {
+        doorEnd = Math.max(doorEnd, wallEnd)
+      }
+    }
+
+    adjustedDoors.set(door.id, {
+      ...door,
+      x1: doorAxis === 'horizontal' ? doorStart : doorLine,
+      y1: doorAxis === 'vertical' ? doorStart : doorLine,
+      x2: doorAxis === 'horizontal' ? doorEnd : doorLine,
+      y2: doorAxis === 'vertical' ? doorEnd : doorLine
+    })
+  }
+
+  for (const wall of wallPieces) {
+    const wallAxis = occluderAxis(wall)
+    if (!wallAxis) continue
+
+    const wallLine = lineCoordinate(wall, wallAxis)
+    let [wallStart, wallEnd] = intervalFor(wall, wallAxis)
+
+    for (const door of doors) {
+      const doorAxis = occluderAxis(door)
+      if (doorAxis !== wallAxis) continue
+      const doorLine = lineCoordinate(door, wallAxis)
+      if (Math.abs(doorLine - wallLine) > doorCarveTolerance) continue
+
+      const [doorStart, doorEnd] = intervalFor(
+        adjustedDoors.get(door.id) ?? door,
+        wallAxis
+      )
+
+      if (wallEnd <= doorStart && doorStart - wallEnd <= junctionSealDistance) {
+        wallEnd = doorStart
+      }
+      if (wallStart >= doorEnd && wallStart - doorEnd <= junctionSealDistance) {
+        wallStart = doorEnd
+      }
+    }
+
+    adjustedWalls.set(wall.id, {
+      ...wall,
+      x1: wallAxis === 'horizontal' ? wallStart : wallLine,
+      y1: wallAxis === 'vertical' ? wallStart : wallLine,
+      x2: wallAxis === 'horizontal' ? wallEnd : wallLine,
+      y2: wallAxis === 'vertical' ? wallEnd : wallLine
+    })
+  }
+
+  return items.map((item) => {
+    if (item.type === 'door') return adjustedDoors.get(item.id) ?? item
+    if (item.type === 'wall') return adjustedWalls.get(item.id) ?? item
+    return item
+  })
 }

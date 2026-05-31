@@ -150,8 +150,8 @@ one shared history hook.
 ## Candidate → Review → Export
 
 Automatic detection is a **candidate generator only**. The pipeline never
-produces an authoritative answer; it proposes walls and doors, the human reviews
-and corrects them, and the **sidecar export** is the reviewed, durable artifact.
+proposes walls and doors; the human corrects them on the map, and the **sidecar
+export** is the reviewed, durable artifact.
 
 ```mermaid
 flowchart LR

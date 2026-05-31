@@ -9,3 +9,7 @@ node_modules/
 Geomorphs/
 Counters/
 local-reference/
+
+# Local browser automation artifacts
+.playwright-cli/
+output/

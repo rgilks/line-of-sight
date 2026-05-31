@@ -49,6 +49,25 @@ No new geometry code — `hasLineOfSight` / `visibilityPolygon` already exist an
 are pure, so they run unchanged in a Worker / Durable Object. This is the main
 reason the rest of the design is cheap.
 
+### Movement (D&D 5e SRD)
+
+Per [SRD movement rules](https://5e.d20srd.org/srd/combat/movementandPosition.htm),
+on your turn you can move up to your **speed** (walking speed is **30 feet** for
+most humanoids). Battle maps treat each square as **5 feet**.
+
+The play client enforces both:
+
+1. **Line of sight** — destination must be inside your current visibility polygon.
+2. **Per-turn distance** — destination must be within your movement budget.
+
+Defaults on publish: `feetPerSquare: 5`, `defaultMoveFeet: 30`. Board pixels use
+`gridScale` (pixels per square), so 30 ft → 6 squares → `6 × gridScale` pixels
+(e.g. 300 px when `gridScale` is 50).
+
+The **GM** can override any counter’s budget with `SetTokenMoveFeet` (haste,
+slow, monsters with different speeds, etc.). Overrides are stored on the token as
+`moveFeet` and validated server-side on every `MoveToken`.
+
 ## Architecture overview
 
 ```mermaid

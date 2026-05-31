@@ -90,13 +90,13 @@ export const SessionPanel = (): JSX.Element => {
             done={mapReady}
             step={1}
             title="Load map tiles"
-            detail="Drag geomorph images onto the board or use Select maps at the top of the drawer."
+            detail="Drag a geomorph image onto the board or use Select map at the top of the drawer."
           />
           <WorkflowStep
             done={wallsReady}
             step={2}
             title="Detect walls & doors"
-            detail="Run Analyze & review, then use the correction tools in the same drawer."
+            detail="Walls and doors appear when maps load. Click lines on the map to fix mistakes, or Re-analyze after changing grid scale."
           />
           <WorkflowStep
             done={published}
@@ -172,8 +172,9 @@ export const SessionPanel = (): JSX.Element => {
 
       <div className="panel session-footer">
         <p>
-          <strong>During play:</strong> keep GM view open on a second screen. Republish here if you
-          change walls or doors in the editor — connected players receive the update.
+          <strong>During play:</strong> keep GM view open on a second screen. After the first publish,
+          walls, doors, and map layout edits in the editor sync to connected players automatically;
+          use Republish only if you need to force a full refresh.
         </p>
         <p className="player-join-hint">
           Players can also go to{' '}

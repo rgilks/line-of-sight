@@ -220,28 +220,28 @@ them while replacing the auto-generated ones.
 
 - **Load** local map images via the picker or by dragging files onto the window
   (drag state is tracked so the drop zone can highlight).
-- **Columns** (`columnsValue`, default 2) controls how `arrangeTiles` lays tiles
-  into a grid; the board is sized to fit.
+- **Per row** (`columnsValue`, default 2, shown when multiple tiles are loaded)
+  controls how `arrangeTiles` lays tiles into a grid; the board is sized to fit.
+  Reorder maps with the ↑↓ controls in the tile list — list order is
+  left-to-right, then down, and detected walls move with each tile.
 - **Grid** (`gridValue`, default 50) is the pixel grid scale passed to analysis
   and used for snapping and door carving.
-- **Analyze & review** rasterises each placement and runs the core detector,
-  mapping results back into board space, carving door gaps out of overlapping
-  walls, then selecting the first generated candidate for review.
+- **Re-analyze** rasterises each placement and runs the core detector, mapping
+  results back into board space and carving door gaps out of overlapping walls.
+  `showWalls` turns on automatically so overlays are visible immediately.
 
-### Review mode
+### Map correction
 
-Review mode is a lightweight candidate stepper driven by `reviewMode` and
-`reviewCursor`. It selects one generated occluder at a time, enables
-`showWalls`, centers the board on the candidate, and reuses the same selection
-overlay and correction actions as normal editing:
+Corrections happen on the canvas, not through a sidebar queue:
 
-- **Keep / next** advances to the next detected candidate.
-- **Wall / Door** converts the selected candidate in place.
-- **Open / Close** toggles selected doors.
-- **Delete** removes a bad generated candidate and advances to the next one.
+- **POV** tool: click counters for line of sight; click walls/doors to select
+  (click a selected door again to open/close).
+- **Wall / Door** tools: drag on the map to add lines; drag handles to reshape.
+- **Erase** tool: click a wall, door, or counter to remove it.
+- **Delete / Backspace** removes the current selection; **O** toggles a selected door.
 
-Manual occluders keep their `manual-` prefix and are not part of the generated
-review queue, so re-running analysis still preserves hand corrections.
+Manual occluders keep their `manual-` prefix, so re-running analysis still
+preserves hand-drawn walls and doors while replacing auto-generated ones.
 
 ### Counters
 

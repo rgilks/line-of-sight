@@ -22,6 +22,7 @@ import {
   povTokenId
 } from './state'
 import {markExplored} from './visibility'
+import {notifyTableBoardChanged} from './publish'
 
 const cloneOccluders = (items: Occluder[]): Occluder[] =>
   items.map((occluder) => ({...occluder}))
@@ -76,6 +77,7 @@ const restoreEditorSnapshot = (snapshot: EditorSnapshot): void => {
   exploredCtx.clearRect(0, 0, boardSize.value.width, boardSize.value.height)
   markExplored()
   requestCanvasRender()
+  notifyTableBoardChanged()
 }
 
 export const undoEditorChange = (): void => {

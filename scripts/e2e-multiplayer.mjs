@@ -145,7 +145,7 @@ try {
 
   await author.getByRole('tab', {name: 'Map'}).click()
   await author.locator('#fileInput').setInputFiles(mapPath)
-  await waitStatus(author, 'Analyzed .* review', 'author-upload-analyze')
+  await waitStatus(author, 'Analyzed .* tile', 'author-upload-analyze')
 
   await author.getByRole('tab', {name: 'Session'}).click()
   const wallCount = await author.locator('.stats.compact dd').nth(1).textContent()

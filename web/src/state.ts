@@ -45,8 +45,6 @@ export const redoStack = signal<EditorSnapshot[]>([])
 export const dropDepth = signal(0)
 export const renderTick = signal(0)
 export const drawerOpen = signal(true)
-export const reviewMode = signal(false)
-export const reviewCursor = signal(0)
 export const publishTableId = signal('demo')
 export const tablePublished = signal(false)
 

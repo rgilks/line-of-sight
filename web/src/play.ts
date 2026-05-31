@@ -10,9 +10,17 @@
 //   ?gm=1          spectator/GM view — sees ALL counters, manages doors, no fog
 import {effect, signal} from '@preact/signals'
 import {drawCounterToken} from './counter-render'
-import {visibilityPolygon, type Occluder, type Point} from './los-core'
+import {distanceToOccluder, visibilityPolygon, type Occluder, type Point} from './los-core'
 import {counterDefinitions, counterPortraits, preloadCounterPortraits} from './state'
-import type {Board, CommandEnvelope, Token, ViewMessage} from '../../src/protocol'
+import {
+  moveRadiusPixels,
+  tokenMoveFeet,
+  validateTokenMove,
+  type Board,
+  type CommandEnvelope,
+  type Token,
+  type ViewMessage
+} from '../../src/protocol'
 import './play.css'
 
 preloadCounterPortraits()
@@ -36,10 +44,24 @@ const tokens = signal<Token[]>([])
 const status = signal('Connecting…')
 const mapImage = signal<HTMLImageElement | null>(null)
 const drawerOpen = signal(true)
-let loadedAssetRef = ''
+const zoom = signal(1)
+const minZoom = 0.08
+const maxZoom = 4
+let loadedMapKey = ''
 
 let canvas: HTMLCanvasElement
 let ctx: CanvasRenderingContext2D
+let boardViewport: HTMLDivElement | null = null
+
+let panPointer: {
+  pointerId: number
+  startX: number
+  startY: number
+  scrollLeft: number
+  scrollTop: number
+} | null = null
+
+let fitFrame = 0
 
 const playerDoorControl = (active: Board): boolean => active.playerDoorControl !== false
 
@@ -67,23 +89,118 @@ const post = (command: CommandEnvelope['command']): void => {
 const ensureMap = (next: Board): void => {
   if (!next.assetRef || next.assetRef === 'composed-board') {
     mapImage.value = null
-    loadedAssetRef = ''
+    loadedMapKey = ''
     return
   }
-  if (next.assetRef === loadedAssetRef) return
-  loadedAssetRef = next.assetRef
+  const mapKey = `${next.assetRef}:${next.boardSeq ?? 0}`
+  if (mapKey === loadedMapKey) return
+  loadedMapKey = mapKey
   const image = new Image()
   image.onload = () => {
     mapImage.value = image
   }
-  image.src = `/api/tables/${tableId}/map/${next.assetRef}`
+  image.src = `/api/tables/${tableId}/map/${next.assetRef}?v=${next.boardSeq ?? 0}`
+}
+
+const boardGeometryChanged = (previous: Board | null, next: Board): boolean => {
+  if (!previous) return true
+  if (previous.boardSeq !== next.boardSeq) return true
+  if (previous.assetRef !== next.assetRef) return true
+  if (previous.width !== next.width || previous.height !== next.height) return true
+  if (previous.occluders.length !== next.occluders.length) return true
+  if (JSON.stringify(previous.doorStates) !== JSON.stringify(next.doorStates)) return true
+  return JSON.stringify(previous.occluders) !== JSON.stringify(next.occluders)
 }
 
 const applyView = (next: Board, nextTokens: Token[]): void => {
+  const previous = board.value
+  const geometryChanged = boardGeometryChanged(previous, next)
   board.value = next
   tokens.value = nextTokens
   ensureMap(next)
   syncDoorControlUi(next)
+  if (geometryChanged && previous) {
+    status.value = isGm ? 'Table map updated.' : 'The GM updated the map.'
+  }
+  const boardLayoutChanged =
+    !previous ||
+    previous.width !== next.width ||
+    previous.height !== next.height ||
+    previous.assetRef !== next.assetRef
+  if (boardLayoutChanged) {
+    scheduleFitBoardToViewport()
+  } else {
+    updateCanvasDisplaySize()
+  }
+}
+
+const updateCanvasDisplaySize = (): void => {
+  const active = board.value
+  if (!active || !canvas) return
+  canvas.style.width = `${active.width * zoom.value}px`
+  canvas.style.height = `${active.height * zoom.value}px`
+}
+
+const fitBoardToViewport = (): void => {
+  const active = board.value
+  if (!boardViewport || !active) return
+
+  const fitPaddingPx = 12
+  const availWidth = boardViewport.clientWidth - fitPaddingPx * 2
+  const availHeight = boardViewport.clientHeight - fitPaddingPx * 2
+  if (availWidth <= 0 || availHeight <= 0) return
+
+  const fitZoom = Math.min(availWidth / active.width, availHeight / active.height)
+  zoom.value = Math.min(maxZoom, Math.max(minZoom, fitZoom))
+  updateCanvasDisplaySize()
+  boardViewport.scrollLeft = 0
+  boardViewport.scrollTop = 0
+}
+
+const scheduleFitBoardToViewport = (): void => {
+  if (typeof window === 'undefined') {
+    fitBoardToViewport()
+    return
+  }
+
+  if (fitFrame !== 0) cancelAnimationFrame(fitFrame)
+  fitFrame = requestAnimationFrame(() => {
+    fitFrame = requestAnimationFrame(() => {
+      fitFrame = 0
+      fitBoardToViewport()
+    })
+  })
+}
+
+const setZoom = (
+  nextZoom: number,
+  anchor?: {boardX: number; boardY: number; viewportX: number; viewportY: number}
+): void => {
+  zoom.value = Math.min(maxZoom, Math.max(minZoom, nextZoom))
+  updateCanvasDisplaySize()
+  if (anchor && boardViewport) {
+    boardViewport.scrollLeft = anchor.boardX * zoom.value - anchor.viewportX
+    boardViewport.scrollTop = anchor.boardY * zoom.value - anchor.viewportY
+  }
+}
+
+const handleWheel = (event: WheelEvent): void => {
+  const active = board.value
+  if (!active || !boardViewport || !canvas) return
+  event.preventDefault()
+
+  const rect = canvas.getBoundingClientRect()
+  const viewportRect = boardViewport.getBoundingClientRect()
+  const boardX = ((event.clientX - rect.left) / rect.width) * active.width
+  const boardY = ((event.clientY - rect.top) / rect.height) * active.height
+  const factor = event.deltaY < 0 ? 1.12 : 1 / 1.12
+
+  setZoom(zoom.value * factor, {
+    boardX,
+    boardY,
+    viewportX: event.clientX - viewportRect.left,
+    viewportY: event.clientY - viewportRect.top
+  })
 }
 
 const connect = (): void => {
@@ -106,33 +223,27 @@ const pointerToBoard = (event: PointerEvent): Point | null => {
   const active = board.value
   if (!active) return null
   const rect = canvas.getBoundingClientRect()
+  if (rect.width <= 0 || rect.height <= 0) return null
   return {
     x: ((event.clientX - rect.left) / rect.width) * active.width,
     y: ((event.clientY - rect.top) / rect.height) * active.height
   }
 }
 
-const distanceToSegment = (point: Point, segment: Occluder): number => {
-  const dx = segment.x2 - segment.x1
-  const dy = segment.y2 - segment.y1
-  const lengthSquared = dx * dx + dy * dy
-  if (lengthSquared === 0) return Math.hypot(point.x - segment.x1, point.y - segment.y1)
-  const t = Math.max(
-    0,
-    Math.min(1, ((point.x - segment.x1) * dx + (point.y - segment.y1) * dy) / lengthSquared)
-  )
-  return Math.hypot(point.x - (segment.x1 + t * dx), point.y - (segment.y1 + t * dy))
+const boardPickRadius = (screenPixels: number): number => {
+  const active = board.value
+  if (!active) return screenPixels
+  const rect = canvas.getBoundingClientRect()
+  if (rect.width <= 0) return screenPixels
+  return screenPixels * (active.width / rect.width)
 }
-
-const doorOpen = (active: Board, door: Occluder): boolean =>
-  active.doorStates[door.id]?.open ?? (door.type === 'door' && door.open)
 
 const nearestDoor = (point: Point, active: Board): Occluder | null => {
   let nearest: Occluder | null = null
-  let nearestDistance = 26
+  let nearestDistance = boardPickRadius(26)
   for (const occluder of active.occluders) {
     if (occluder.type !== 'door') continue
-    const distance = distanceToSegment(point, occluder)
+    const distance = distanceToOccluder(point, occluder)
     if (distance < nearestDistance) {
       nearest = occluder
       nearestDistance = distance
@@ -141,7 +252,53 @@ const nearestDoor = (point: Point, active: Board): Occluder | null => {
   return nearest
 }
 
+const doorOpen = (active: Board, door: Occluder): boolean =>
+  active.doorStates[door.id]?.open ?? (door.type === 'door' && door.open)
+
+/** Pan gestures: right/middle drag, or ⌘/Meta + left-drag (natural on Mac trackpads). */
+const shouldStartPan = (event: PointerEvent): boolean =>
+  event.button === 1 || event.button === 2 || (event.button === 0 && event.metaKey)
+
+const onPanPointerMove = (event: PointerEvent): void => {
+  if (!boardViewport || !panPointer || panPointer.pointerId !== event.pointerId) return
+  event.preventDefault()
+  boardViewport.scrollLeft = panPointer.scrollLeft - (event.clientX - panPointer.startX)
+  boardViewport.scrollTop = panPointer.scrollTop - (event.clientY - panPointer.startY)
+}
+
+const endPanPointer = (event: PointerEvent): void => {
+  if (!boardViewport || !panPointer || panPointer.pointerId !== event.pointerId) return
+  panPointer = null
+  boardViewport.classList.remove('is-panning')
+  window.removeEventListener('pointermove', onPanPointerMove)
+  window.removeEventListener('pointerup', endPanPointer)
+  window.removeEventListener('pointercancel', endPanPointer)
+}
+
+const onPanPointerDown = (event: PointerEvent): void => {
+  if (!boardViewport || !shouldStartPan(event)) return
+
+  event.preventDefault()
+  event.stopPropagation()
+  panPointer = {
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    scrollLeft: boardViewport.scrollLeft,
+    scrollTop: boardViewport.scrollTop
+  }
+  boardViewport.classList.add('is-panning')
+  window.addEventListener('pointermove', onPanPointerMove)
+  window.addEventListener('pointerup', endPanPointer)
+  window.addEventListener('pointercancel', endPanPointer)
+}
+
+const blockContextMenu = (event: Event): void => {
+  event.preventDefault()
+}
+
 const onPointerDown = (event: PointerEvent): void => {
+  if (event.button !== 0 || event.metaKey) return
   const point = pointerToBoard(event)
   const active = board.value
   if (!point || !active) return
@@ -156,6 +313,11 @@ const onPointerDown = (event: PointerEvent): void => {
 
   const me = myToken()
   if (!me) return
+  const moveCheck = validateTokenMove(me, active, point, {gm: isGm})
+  if (!moveCheck.ok) {
+    status.value = moveCheck.reason
+    return
+  }
   tokens.value = tokens.value.map((token) =>
     token.id === me.id ? {...token, x: point.x, y: point.y} : token
   )
@@ -239,8 +401,23 @@ const draw = (): void => {
 
   drawOccluders(active)
   const me = myToken()
-  if (me) drawFog(active, me)
+  if (me) {
+    drawFog(active, me)
+    if (!isGm) drawMoveRadius(active, me)
+  }
   for (const token of tokens.value) drawToken(token)
+}
+
+const drawMoveRadius = (active: Board, me: Token): void => {
+  const radius = moveRadiusPixels(me, active)
+  ctx.save()
+  ctx.strokeStyle = 'rgba(57, 255, 20, 0.42)'
+  ctx.lineWidth = 2
+  ctx.setLineDash([10, 8])
+  ctx.beginPath()
+  ctx.arc(me.x, me.y, radius, 0, Math.PI * 2)
+  ctx.stroke()
+  ctx.restore()
 }
 
 const hintText = (): string => {
@@ -248,13 +425,13 @@ const hintText = (): string => {
   if (isGm) {
     const locked = active != null && !playerDoorControl(active)
     return locked
-      ? 'GM view — doors locked (players cannot toggle). Click a door to open/close it.'
-      : 'GM view — you see every counter. Click a door to open/close it.'
+      ? 'GM view — wheel to zoom; ⌘-drag or right-drag to pan. Doors locked; click doors to toggle.'
+      : 'GM view — wheel to zoom; ⌘-drag or right-drag to pan. Click doors to toggle.'
   }
   if (active && !playerDoorControl(active)) {
-    return 'Click the board to move your counter. Doors are locked — ask the GM to open them.'
+    return 'Move within the green ring (30 ft by default). Wheel to zoom; ⌘-drag or right-drag to pan. Doors are GM-only.'
   }
-  return 'Click the board to move your counter. Click a door to open/close it. Open this URL in another browser to join.'
+  return 'Move within the green ring (30 ft by default). Click doors to toggle. Wheel to zoom; ⌘-drag or right-drag to pan.'
 }
 
 const syncDoorControlUi = (active: Board): void => {
@@ -272,6 +449,59 @@ const wireDoorControl = (): void => {
   })
 }
 
+const syncGmTokenMoves = (): void => {
+  const container = document.querySelector<HTMLDivElement>('#gmTokenMoves')
+  if (!container) return
+  if (!isGm) {
+    container.hidden = true
+    return
+  }
+
+  const active = board.value
+  container.hidden = false
+  const list = document.querySelector('#gmTokenMoveList')
+  if (!list) {
+    const listEl = document.createElement('div')
+    listEl.id = 'gmTokenMoveList'
+    listEl.className = 'play-gm-move-list'
+    container.appendChild(listEl)
+  }
+
+  const moveList = document.querySelector('#gmTokenMoveList')
+  if (!moveList || !active) return
+
+  const owned = [...tokens.value].sort((a, b) => a.label.localeCompare(b.label))
+  moveList.innerHTML = owned
+    .map(
+      (token) => `
+        <label class="play-gm-move-row">
+          <span>${token.label}</span>
+          <input
+            type="number"
+            min="0"
+            max="999"
+            step="5"
+            value="${tokenMoveFeet(token, active)}"
+            data-player-id="${token.ownerId}"
+            aria-label="Move feet for ${token.label}"
+          />
+        </label>`
+    )
+    .join('')
+}
+
+const wireGmTokenMoves = (): void => {
+  const container = document.querySelector('#gmTokenMoves')
+  if (!container || !isGm) return
+  container.addEventListener('change', (event) => {
+    const input = (event.target as HTMLElement).closest<HTMLInputElement>('input[data-player-id]')
+    if (!input) return
+    const playerId = input.dataset.playerId
+    if (!playerId) return
+    post({type: 'SetTokenMoveFeet', playerId, moveFeet: Math.max(0, Number(input.value) || 0)})
+  })
+}
+
 const mount = (): void => {
   const root = document.querySelector('#app')
   if (!root) throw new Error('Missing #app root.')
@@ -284,56 +514,76 @@ const mount = (): void => {
   root.innerHTML = `
     <div class="play-shell">
       <aside class="play-drawer open" aria-label="Session controls">
-        <button
-          id="drawerToggle"
-          class="play-drawer-toggle"
-          type="button"
-          aria-expanded="true"
-          aria-label="Hide session panel"
-        >
-          <svg class="play-drawer-icon" viewBox="0 0 24 24" aria-hidden="true">
-            <path d="m15 18-6-6 6-6" />
-          </svg>
-        </button>
         <div class="play-drawer-panel">
-          <div class="play-brand">
-            <strong>Line of Sight</strong>
-            <span>Multiplayer</span>
+          <header class="play-drawer-header">
+            <div class="play-brand">
+              <strong>Line of Sight</strong>
+              <span>Multiplayer</span>
+            </div>
+            <button
+              id="drawerToggle"
+              class="play-drawer-toggle"
+              type="button"
+              aria-expanded="true"
+              aria-label="Hide session panel"
+            >
+              <svg class="play-drawer-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="m15 18-6-6 6-6" />
+              </svg>
+            </button>
+          </header>
+          <div class="play-drawer-content">
+            <dl class="play-meta">
+              <div>
+                <dt>Status</dt>
+                <dd id="status"></dd>
+              </div>
+              <div>
+                <dt>Table</dt>
+                <dd>${tableId}</dd>
+              </div>
+              <div>
+                <dt>You</dt>
+                <dd id="who"></dd>
+              </div>
+            </dl>
+            <button id="copyLink" type="button">Copy invite link</button>
+            ${gmControls}
+            <div id="gmTokenMoves" class="play-gm-moves" hidden>
+              <h3 class="play-gm-moves-title">Movement (ft / turn)</h3>
+              <p class="play-gm-moves-lead">D&amp;D 5e SRD default is 30 ft. Override per counter for haste, slow, etc.</p>
+            </div>
+            <p class="play-hint">${hintText()}</p>
           </div>
-          <dl class="play-meta">
-            <div>
-              <dt>Status</dt>
-              <dd id="status"></dd>
-            </div>
-            <div>
-              <dt>Table</dt>
-              <dd>${tableId}</dd>
-            </div>
-            <div>
-              <dt>You</dt>
-              <dd id="who"></dd>
-            </div>
-          </dl>
-          <button id="copyLink" type="button">Copy invite link</button>
-          ${gmControls}
-          <p class="play-hint">${hintText()}</p>
         </div>
       </aside>
-      <main class="play-board"><canvas id="board"></canvas></main>
+      <main class="play-board">
+        <div id="playBoardViewport" class="play-board-viewport">
+          <div class="play-board-canvas-host">
+            <canvas id="board"></canvas>
+          </div>
+        </div>
+      </main>
     </div>`
 
   document.querySelector('#drawerToggle')?.addEventListener('click', () => {
     drawerOpen.value = !drawerOpen.value
   })
 
+  boardViewport = document.querySelector<HTMLDivElement>('#playBoardViewport')
   const element = document.querySelector<HTMLCanvasElement>('#board')
   const context = element?.getContext('2d')
-  if (!element || !context) throw new Error('Canvas unavailable.')
+  if (!element || !context || !boardViewport) throw new Error('Canvas unavailable.')
   canvas = element
   ctx = context
   canvas.addEventListener('pointerdown', onPointerDown)
+  canvas.addEventListener('contextmenu', blockContextMenu)
+  boardViewport.addEventListener('wheel', handleWheel, {passive: false})
+  boardViewport.addEventListener('pointerdown', onPanPointerDown, {capture: true})
+  boardViewport.addEventListener('contextmenu', blockContextMenu)
   wireCopyLink()
   wireDoorControl()
+  wireGmTokenMoves()
   connect()
 }
 
@@ -358,24 +608,34 @@ mount()
 
 effect(() => {
   portraitTick.value
+  mapImage.value
   board.value
+  tokens.value
+  zoom.value
+  drawerOpen.value
+  updateCanvasDisplaySize()
+  syncGmTokenMoves()
   draw()
   const statusEl = document.querySelector('#status')
   if (statusEl) statusEl.textContent = status.value
   const whoEl = document.querySelector('#who')
   if (whoEl) {
     const me = myToken()
+    const active = board.value
     whoEl.textContent = isGm
       ? `GM · ${tokens.value.length} counters`
-      : me
-        ? `You are ${me.label} · ${tokens.value.length} visible`
+      : me && active
+        ? `You are ${me.label} · ${tokenMoveFeet(me, active)} ft move · ${tokens.value.length} visible`
         : ''
   }
 
   const drawer = document.querySelector('.play-drawer')
   const toggle = document.querySelector('#drawerToggle')
   const icon = document.querySelector('.play-drawer-icon')
-  if (drawer) drawer.classList.toggle('open', drawerOpen.value)
+  if (drawer) {
+    drawer.classList.remove('open', 'closed')
+    drawer.classList.add(drawerOpen.value ? 'open' : 'closed')
+  }
   if (toggle) {
     toggle.setAttribute('aria-expanded', String(drawerOpen.value))
     toggle.setAttribute('aria-label', drawerOpen.value ? 'Hide session panel' : 'Show session panel')

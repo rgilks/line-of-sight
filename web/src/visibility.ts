@@ -15,6 +15,7 @@ import {
   tokens
 } from './state'
 import {pushUndoHistory} from './history'
+import {notifyTableBoardChanged} from './publish'
 
 export const doorOccluders = (): DoorOccluder[] =>
   occluders.value.filter((occluder): occluder is DoorOccluder => occluder.type === 'door')
@@ -29,6 +30,7 @@ export const setDoorOpen = (doorId: string, open: boolean): void => {
   pushUndoHistory()
   doorStates.value = {...doorStates.value, [door.id]: {open}}
   markExplored()
+  notifyTableBoardChanged()
   requestCanvasRender()
 }
 

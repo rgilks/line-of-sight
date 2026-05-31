@@ -60,7 +60,7 @@ const page = await browser.newPage({ viewport: { width: 1400, height: 900 } })
 
 try {
   await page.goto(`${baseUrl}/`, { waitUntil: 'networkidle', timeout: 30_000 })
-  await page.locator('#board').waitFor({ state: 'attached', timeout: 10_000 })
+  await page.locator('#boardCanvas').waitFor({ state: 'attached', timeout: 10_000 })
 
   const fileInput = page.locator('input[type="file"]')
   await fileInput.setInputFiles(maps[0])
@@ -68,22 +68,13 @@ try {
   await page.waitForFunction(
     () => {
       const status = document.querySelector('#runtimeStatus')
-      return status && /analyz/i.test(status.textContent ?? '')
-    },
-    { timeout: 120_000 }
-  )
-
-  await page.locator('#analyzeButton').click()
-  await page.waitForFunction(
-    () => {
-      const status = document.querySelector('#runtimeStatus')
-      return status && /occluder|wall|door|ready/i.test(status.textContent ?? '')
+      return status && /Analyzed .* tile\(s\)/i.test(status.textContent ?? '')
     },
     { timeout: 120_000 }
   )
 
   const appShot = join(outDir, 'app-research-deck-canvas.png')
-  await page.locator('#board').screenshot({ path: appShot })
+  await page.locator('#boardCanvas').screenshot({ path: appShot })
   console.log(`App canvas screenshot → ${appShot}`)
 } finally {
   await browser.close()

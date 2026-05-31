@@ -5,6 +5,7 @@
 import type {DurableObjectState} from './cf'
 import {
   COUNTER_KINDS,
+  validateTokenMove,
   visibleTokensFor,
   type Board,
   type Command,
@@ -43,11 +44,14 @@ const seedBoard = (): Board => ({
     {type: 'wall', id: 'seed-wall-bottom', x1: 500, y1: 570, x2: 500, y2: 900}
   ],
   doorStates: {},
-  playerDoorControl: true
+  playerDoorControl: true,
+  feetPerSquare: 5,
+  defaultMoveFeet: 30
 })
 
 export class GameTable {
   private board: Board = seedBoard()
+  private boardSeq = 0
   private readonly tokens = new Map<PlayerId, Token>()
   private readonly connections = new Map<PlayerId, Connection>()
   private readonly log: DomainEvent[] = []
@@ -157,6 +161,16 @@ export class GameTable {
       return null
     }
 
+    if (command.type === 'SetTokenMoveFeet') {
+      if (!connection?.gm) return 'GM only'
+      const target = this.tokens.get(command.playerId)
+      if (!target) return 'Unknown player'
+      const moveFeet = Math.max(0, Math.min(999, Math.round(command.moveFeet)))
+      target.moveFeet = moveFeet
+      this.append({type: 'TokenMoveFeetSet', playerId: command.playerId, moveFeet})
+      return null
+    }
+
     if (command.type === 'ToggleDoor') {
       if (this.board.playerDoorControl === false && !connection?.gm) {
         return 'Doors are locked — GM only'
@@ -170,6 +184,9 @@ export class GameTable {
     if (!token) return 'No token to act on'
 
     if (command.type === 'MoveToken') {
+      const destination = {x: command.x, y: command.y}
+      const moveCheck = validateTokenMove(token, this.board, destination, {gm: connection?.gm})
+      if (!moveCheck.ok) return moveCheck.reason
       token.x = clamp(command.x, 0, this.board.width)
       token.y = clamp(command.y, 0, this.board.height)
       this.append({type: 'TokenMoved', playerId, x: token.x, y: token.y})
@@ -196,10 +213,14 @@ export class GameTable {
       return Response.json({error: 'Invalid board'}, {status: 400})
     }
 
+    this.boardSeq += 1
     this.board = {
       ...board,
+      boardSeq: this.boardSeq,
       doorStates: board.doorStates ?? {},
-      playerDoorControl: board.playerDoorControl ?? true
+      playerDoorControl: board.playerDoorControl ?? true,
+      feetPerSquare: board.feetPerSquare ?? 5,
+      defaultMoveFeet: board.defaultMoveFeet ?? 30
     }
     this.append({type: 'BoardPublished', assetRef: board.assetRef})
     this.projectAll()

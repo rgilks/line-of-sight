@@ -1,5 +1,6 @@
 import type {JSX} from 'preact'
 import type {Occluder, Point} from './los-core'
+import {distanceToOccluder} from './los-core'
 import type {CounterGroupId, EditDrag, EditHandle, Token} from './types'
 import {
   boardSize,
@@ -30,7 +31,7 @@ import {
   activeCounterGroup,
   activeCounterKind
 } from './state'
-import {carveDoorGaps} from './board'
+import {carveDoorGaps, sealDoorWallJunctions} from './board'
 import {pushUndoHistory, redoEditorChange, undoEditorChange} from './history'
 import {
   getPovToken,
@@ -41,6 +42,7 @@ import {
   setPovToken
 } from './visibility'
 import {updateCanvasDisplaySize} from './board'
+import {notifyTableBoardChanged} from './publish'
 
 export const positionFromEvent = (
   event: JSX.TargetedPointerEvent<HTMLCanvasElement>
@@ -92,7 +94,14 @@ const snapPoint = (point: Point, event: JSX.TargetedPointerEvent<HTMLCanvasEleme
   }
 }
 
-const distanceToSegment = (point: Point, segment: Occluder): number => {
+type LineSegment = {
+  x1: number
+  y1: number
+  x2: number
+  y2: number
+}
+
+const distanceToSegment = (point: Point, segment: LineSegment): number => {
   const ax = segment.x1
   const ay = segment.y1
   const bx = segment.x2
@@ -114,7 +123,7 @@ const nearestOccluder = (
   let nearestDistance = screenRadius / zoom.value
   for (const occluder of occluders.value) {
     if (filter && !filter(occluder)) continue
-    const distance = distanceToSegment(point, occluder)
+    const distance = distanceToOccluder(point, occluder)
     if (distance < nearestDistance) {
       nearest = occluder
       nearestDistance = distance
@@ -250,6 +259,7 @@ export const removeOccluder = (id: string, recordHistory = true): void => {
   doorStates.value = nextDoorStates
   if (selectedOccluderId.value === id) selectedOccluderId.value = null
   if (hoveredOccluderId.value === id) hoveredOccluderId.value = null
+  if (recordHistory) notifyTableBoardChanged()
 }
 
 const targetAcceptsMapShortcuts = (target: EventTarget | null): boolean =>
@@ -288,6 +298,20 @@ export const handleMapKeyDown = (event: KeyboardEvent): void => {
     previewPoint.value = null
     requestCanvasRender()
     return
+  }
+
+  if (
+    (shortcutKey === 'o' || shortcutKey === 't') &&
+    selectedOccluderId.value &&
+    !selectedTokenId.value
+  ) {
+    const selected = occluders.value.find((occluder) => occluder.id === selectedOccluderId.value)
+    if (selected?.type === 'door') {
+      event.preventDefault()
+      setDoorOpen(selected.id, !isDoorOpen(selected))
+      requestCanvasRender()
+      return
+    }
   }
 
   if ((event.key === 'Delete' || event.key === 'Backspace') && selectedTokenId.value) {
@@ -349,17 +373,39 @@ export const handlePointerDown = (event: JSX.TargetedPointerEvent<HTMLCanvasElem
     const token = nearestToken(rawPoint)
     if (token) {
       setPovToken(token.id)
+      selectedOccluderId.value = null
+      selectedTokenId.value = null
+      hoveredOccluderId.value = null
+      requestCanvasRender()
       return
     }
 
-    const door = nearestOccluder(rawPoint, (occluder) => occluder.type === 'door', 18)
-    if (door && door.type === 'door') {
-      setDoorOpen(door.id, !isDoorOpen(door))
+    const occluder = nearestOccluder(rawPoint, () => true, 18)
+    if (occluder) {
+      if (occluder.type === 'door' && selectedOccluderId.value === occluder.id) {
+        const opening = !isDoorOpen(occluder)
+        setDoorOpen(occluder.id, opening)
+        setStatus(opening ? 'Door open.' : 'Door closed.')
+        requestCanvasRender()
+        return
+      }
+
+      selectedOccluderId.value = occluder.id
+      selectedTokenId.value = null
+      hoveredOccluderId.value = occluder.id
+      if (occluder.type === 'door') {
+        setStatus('Door selected — click again to open/close, Del to remove.')
+      } else {
+        setStatus('Wall selected — Del to remove, or use Wall/Door tool to reshape.')
+      }
+      requestCanvasRender()
       return
     }
+
     selectedOccluderId.value = null
     selectedTokenId.value = null
-    setStatus('Select a counter to use as the point of view.')
+    hoveredOccluderId.value = null
+    setStatus('Click a counter for POV, or a wall/door line to select it.')
     requestCanvasRender()
     return
   }
@@ -439,7 +485,8 @@ export const handlePointerMove = (event: JSX.TargetedPointerEvent<HTMLCanvasElem
   if (!dragStart.value) {
     if (tool.value === 'token' || tool.value === 'viewer') {
       hoveredTokenId.value = nearestToken(rawPoint)?.id ?? null
-      hoveredOccluderId.value = null
+      hoveredOccluderId.value =
+        tool.value === 'viewer' ? (nearestOccluder(rawPoint, () => true, 18)?.id ?? null) : null
       requestCanvasRender()
       return
     }
@@ -478,12 +525,13 @@ export const handlePointerUp = (event: JSX.TargetedPointerEvent<HTMLCanvasElemen
     const drag = editDrag.value
     applyEditDrag(drag, point)
     editDrag.value = null
-    occluders.value = carveDoorGaps(occluders.value)
+    occluders.value = sealDoorWallJunctions(carveDoorGaps(occluders.value))
     if (!occluders.value.some((occluder) => occluder.id === drag.id)) {
       selectedOccluderId.value = null
     }
     event.currentTarget.releasePointerCapture(event.pointerId)
     markExplored()
+    notifyTableBoardChanged()
     requestCanvasRender()
     return
   }
@@ -517,9 +565,10 @@ export const handlePointerUp = (event: JSX.TargetedPointerEvent<HTMLCanvasElemen
         y2: point.y
       })
     }
-    occluders.value = carveDoorGaps(nextOccluders)
+    occluders.value = sealDoorWallJunctions(carveDoorGaps(nextOccluders))
     selectedOccluderId.value = id
     hoveredOccluderId.value = id
+    notifyTableBoardChanged()
   }
 
   dragStart.value = null

@@ -17,21 +17,17 @@ import {
   gridValue,
   hideUnseen,
   preloadCounterPortraits,
-  redoStack,
   requestCanvasRender,
-  reviewMode,
   runtimeStatus,
   setStatus,
   setView,
   showWalls,
   sightValue,
   tiles,
-  tool,
-  undoStack
+  tool
 } from './state'
 import type {Tool} from './types'
-import {analyzeTiles, arrangeTiles, loadMapFiles, syncCanvasSize} from './board'
-import {redoEditorChange, undoEditorChange} from './history'
+import {analyzeTiles, arrangeTiles, loadMapFiles, reorderTile, syncCanvasSize} from './board'
 import {getPovToken, isDoorOpen, markExplored, setDoorOpen, setPovToken} from './visibility'
 import {renderBoard} from './rendering'
 import {
@@ -47,22 +43,15 @@ import {
 } from './interactions'
 import {
   convertSelectedOccluder,
-  deleteReviewCandidate,
   getBoardStat,
   getDoorStat,
   getPovStat,
-  getReviewStat,
   getSelectedOccluder,
   getSelectedToken,
   handleDragEnter,
   handleDragLeave,
   handleDragOver,
-  handleDrop,
-  keepReviewCandidate,
-  reviewableOccluders,
-  selectAdjacentReviewCandidate,
-  startReview,
-  stopReview
+  handleDrop
 } from './ui-actions'
 import {exportSidecar} from './export'
 import {SessionPanel} from './session-panel'
@@ -125,7 +114,7 @@ const App = (): JSX.Element => {
     void detectWebGpu().then((status) => {
       gpuStatus.value = status
     })
-    setStatus('Ready. Select local map images to start.')
+    setStatus('Ready. Select a local map image to start.')
 
     return () => {
       dispose()
@@ -146,61 +135,64 @@ const App = (): JSX.Element => {
         className={`control-drawer${drawerOpen.value ? ' open' : ' closed'}`}
         aria-label="Line of Sight controls"
       >
-        <button
-          className="drawer-toggle"
-          type="button"
-          aria-expanded={drawerOpen.value}
-          aria-label={drawerOpen.value ? 'Hide controls' : 'Show controls'}
-          onClick={() => {
-            drawerOpen.value = !drawerOpen.value
-          }}
-        >
-          <Icon>
-            {drawerOpen.value ? (
-              <path d="m15 18-6-6 6-6" />
-            ) : (
-              <path d="m9 18 6-6-6-6" />
-            )}
-          </Icon>
-        </button>
-
         <div className="drawer-panel">
-          <a className="brand drawer-brand" href="https://tre.systems/" aria-label="Total Reality Engineering">
-            <svg
-              className="brand-logo"
-              xmlns="http://www.w3.org/2000/svg"
-              viewBox="0 0 512 512"
-              aria-hidden="true"
+          <header className="drawer-header">
+            <a className="brand drawer-brand" href="https://tre.systems/" aria-label="Total Reality Engineering">
+              <svg
+                className="brand-logo"
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 512 512"
+                aria-hidden="true"
+              >
+                <g>
+                  <rect
+                    x="214"
+                    y="288"
+                    width="80"
+                    height="206"
+                    fill="#19C15E"
+                    transform="rotate(22, 262, 295)"
+                  />
+                  <path
+                    d="M256 36 L72 476 L440 476 Z"
+                    fill="none"
+                    stroke="#F5F5F5"
+                    strokeWidth="30"
+                    strokeLinejoin="round"
+                    strokeLinecap="round"
+                  />
+                  <circle cx="256" cy="288" r="40" fill="#F5F5F5" />
+                </g>
+              </svg>
+              <div className="brand-copy">
+                <span className="brand-eyebrow">Total Reality Engineering</span>
+                <h1>Line of Sight</h1>
+                <p id="runtimeStatus" className="drawer-status">
+                  {runtimeStatus.value}
+                </p>
+              </div>
+            </a>
+            <button
+              className="drawer-toggle"
+              type="button"
+              aria-expanded={drawerOpen.value}
+              aria-label={drawerOpen.value ? 'Hide controls' : 'Show controls'}
+              onClick={() => {
+                drawerOpen.value = !drawerOpen.value
+              }}
             >
-              <g>
-                <rect
-                  x="214"
-                  y="288"
-                  width="80"
-                  height="206"
-                  fill="#19C15E"
-                  transform="rotate(22, 262, 295)"
-                />
-                <path
-                  d="M256 36 L72 476 L440 476 Z"
-                  fill="none"
-                  stroke="#F5F5F5"
-                  strokeWidth="30"
-                  strokeLinejoin="round"
-                  strokeLinecap="round"
-                />
-                <circle cx="256" cy="288" r="40" fill="#F5F5F5" />
-              </g>
-            </svg>
-            <div className="brand-copy">
-              <span>Total Reality Engineering</span>
-              <h1>Line of Sight</h1>
-              <p id="runtimeStatus">{runtimeStatus.value}</p>
-            </div>
-          </a>
+              <Icon>
+                {drawerOpen.value ? (
+                  <path d="m15 18-6-6 6-6" />
+                ) : (
+                  <path d="m9 18 6-6-6-6" />
+                )}
+              </Icon>
+            </button>
+          </header>
 
-          <div className="drawer-toolbar" aria-label="Primary map actions">
-            <label className="file-button primary-action">
+          <div className="drawer-actions" aria-label="Primary map actions">
+            <label className="file-button drawer-btn-primary">
               <input
                 id="fileInput"
                 type="file"
@@ -216,77 +208,42 @@ const App = (): JSX.Element => {
                 <path d="m7 8 5-5 5 5" />
                 <path d="M5 15v3a3 3 0 0 0 3 3h8a3 3 0 0 0 3-3v-3" />
               </Icon>
-              <span>Select maps</span>
+              <span>Select map</span>
             </label>
-            <button
-              id="analyzeButton"
-              type="button"
-              className="primary-action"
-              disabled={!activeTileCount}
-              onClick={() => {
-                void analyzeTiles().then(() => {
-                  startReview()
-                })
-              }}
-            >
-              <Icon>
-                <path d="M14 4h6v6" />
-                <path d="M20 4 13 11" />
-                <path d="M4 20 10.5 13.5" />
-                <path d="m8 4 1.5 3L13 8.5 9.5 10 8 13 6.5 10 3 8.5 6.5 7 8 4Z" />
-              </Icon>
-              <span>Analyze & review</span>
-            </button>
-            <button
-              id="undoButton"
-              type="button"
-              disabled={undoStack.value.length === 0}
-              title="Undo map correction"
-              onClick={undoEditorChange}
-            >
-              <Icon>
-                <path d="M9 14 4 9l5-5" />
-                <path d="M4 9h10a6 6 0 0 1 0 12h-1" />
-              </Icon>
-              <span>Undo</span>
-            </button>
-            <button
-              id="redoButton"
-              type="button"
-              disabled={redoStack.value.length === 0}
-              title="Redo map correction"
-              onClick={redoEditorChange}
-            >
-              <Icon>
-                <path d="m15 14 5-5-5-5" />
-                <path d="M20 9H10a6 6 0 0 0 0 12h1" />
-              </Icon>
-              <span>Redo</span>
-            </button>
           </div>
 
           <div className="drawer-content workbench-content">
-            <div className="panel">
-              <div className="panel-heading-row">
+            <section className="drawer-section">
+              <div className="drawer-section-head">
                 <h2>Map</h2>
-                <span>{activeTileCount === 0 ? 'No map' : `${activeTileCount} tile${activeTileCount === 1 ? '' : 's'}`}</span>
+                <span className="drawer-badge">
+                  {activeTileCount === 0 ? 'No map' : `${activeTileCount} tile${activeTileCount === 1 ? '' : 's'}`}
+                </span>
               </div>
-              <div className="drawer-action-grid compact-grid">
-                <label className="number-control">
-                  <span>Columns</span>
-                  <input
-                    id="columnsInput"
-                    type="number"
-                    min="1"
-                    max="12"
-                    value={columnsValue.value}
-                    onInput={(event) => {
-                      columnsValue.value = Math.max(1, Number(event.currentTarget.value) || 1)
-                      arrangeTiles()
-                    }}
-                  />
-                </label>
-                <label className="number-control">
+              <div className="map-settings-row">
+                {activeTileCount > 1 ? (
+                  <label
+                    className="field-inline"
+                    title="How many map images sit side by side before wrapping to the next row"
+                  >
+                    <span>Per row</span>
+                    <input
+                      id="columnsInput"
+                      type="number"
+                      min="1"
+                      max="12"
+                      value={columnsValue.value}
+                      onInput={(event) => {
+                        columnsValue.value = Math.max(1, Number(event.currentTarget.value) || 1)
+                        arrangeTiles()
+                      }}
+                    />
+                  </label>
+                ) : null}
+                <label
+                  className="field-inline"
+                  title="Wall/door detection scale in pixels — lower catches finer detail; re-analyze after changing"
+                >
                   <span>Grid</span>
                   <input
                     id="gridInput"
@@ -301,130 +258,88 @@ const App = (): JSX.Element => {
                     }}
                   />
                 </label>
-              </div>
-              {tiles.value.length === 0 ? (
-                <p className="empty-hint">Drop map images onto the board, or use Select maps.</p>
-              ) : (
-                <div id="tileList" className="tile-list compact">
-                  {tiles.value.map((tile) => (
-                    <div className="tile-item" key={tile.id}>
-                      <img src={tile.url} alt="" />
-                      <span>{`${tile.name} (${tile.width}x${tile.height})`}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className={`panel review-panel${reviewMode.value ? ' active' : ''}`}>
-              <div className="panel-heading-row">
-                <h2>Review detections</h2>
-                <span>{getReviewStat()}</span>
-              </div>
-              <div className="review-action-grid">
                 <button
+                  id="reanalyzeButton"
                   type="button"
-                  className="primary-action"
-                  disabled={reviewableOccluders().length === 0}
-                  onClick={startReview}
-                >
-                  <Icon>
-                    <path d="M3 12h5l2 3 4-6 2 3h5" />
-                    <path d="M4 19h16" />
-                  </Icon>
-                  <span>{reviewMode.value ? 'Restart review' : 'Start review'}</span>
-                </button>
-                <button type="button" disabled={!reviewMode.value} onClick={stopReview}>
-                  <Icon>
-                    <path d="M6 5h4v14H6z" />
-                    <path d="M14 5h4v14h-4z" />
-                  </Icon>
-                  <span>Pause</span>
-                </button>
-                <button
-                  type="button"
-                  disabled={!reviewMode.value || reviewableOccluders().length === 0}
+                  className="drawer-btn-secondary"
+                  disabled={activeTileCount === 0}
+                  title="Re-run wall and door detection after changing grid scale"
                   onClick={() => {
-                    selectAdjacentReviewCandidate(-1)
+                    void analyzeTiles()
                   }}
                 >
                   <Icon>
-                    <path d="m15 18-6-6 6-6" />
+                    <path d="M14 4h6v6" />
+                    <path d="M20 4 13 11" />
+                    <path d="M4 20 10.5 13.5" />
+                    <path d="m8 4 1.5 3L13 8.5 9.5 10 8 13 6.5 10 3 8.5 6.5 7 8 4Z" />
                   </Icon>
-                  <span>Prev</span>
-                </button>
-                <button
-                  type="button"
-                  disabled={!reviewMode.value || reviewableOccluders().length === 0}
-                  onClick={keepReviewCandidate}
-                >
-                  <Icon>
-                    <path d="m9 18 6-6-6-6" />
-                  </Icon>
-                  <span>Keep / next</span>
+                  <span>Re-analyze</span>
                 </button>
               </div>
-              {selectedOccluder ? (
-                <div className="selection-actions" aria-label="Selected map line actions">
-                  <span>
-                    {selectedOccluder.type === 'door' ? 'Door selected' : 'Wall selected'}
-                    {!selectedOccluder.id.startsWith('manual-') ? ' for review' : ''}
-                  </span>
-                  <div className="selection-action-row">
-                    <button
-                      type="button"
-                      aria-pressed={selectedOccluder.type === 'wall'}
-                      onClick={() => {
-                        convertSelectedOccluder('wall')
-                      }}
-                    >
-                      Wall
-                    </button>
-                    <button
-                      type="button"
-                      aria-pressed={selectedOccluder.type === 'door'}
-                      onClick={() => {
-                        convertSelectedOccluder('door')
-                      }}
-                    >
-                      Door
-                    </button>
-                  </div>
-                  <div className="selection-action-row">
-                    {selectedOccluder.type === 'door' ? (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setDoorOpen(selectedOccluder.id, !isDoorOpen(selectedOccluder))
-                        }}
-                      >
-                        {isDoorOpen(selectedOccluder) ? 'Close' : 'Open'}
-                      </button>
-                    ) : null}
-                    <button
-                      type="button"
-                      className="danger-action"
-                      onClick={() => {
-                        if (reviewMode.value && !selectedOccluder.id.startsWith('manual-')) {
-                          deleteReviewCandidate()
-                          return
-                        }
-                        removeOccluder(selectedOccluder.id)
-                        markExplored()
-                        requestCanvasRender()
-                      }}
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </div>
+              {tiles.value.length === 0 ? (
+                <p className="empty-hint">Drop an image on the board or use Select map.</p>
               ) : (
-                <p className="empty-hint">Start review to step through detected walls and doors.</p>
+                <>
+                  {activeTileCount > 1 ? (
+                    <p className="empty-hint tile-layout-hint">
+                      List order is left-to-right, then down. Use Per row for width; ↑↓ to swap
+                      positions.
+                    </p>
+                  ) : null}
+                  <div
+                    id="tileList"
+                    className={`tile-list compact${activeTileCount > 1 ? ' multi' : ''}`}
+                  >
+                    {tiles.value.map((tile, index) => (
+                      <div className="tile-item" key={tile.id}>
+                        <img src={tile.url} alt="" />
+                        <span>{`${tile.name} (${tile.width}×${tile.height})`}</span>
+                        {activeTileCount > 1 ? (
+                          <div className="tile-item-actions" aria-label={`Reorder ${tile.name}`}>
+                            <button
+                              type="button"
+                              className="tile-move-button"
+                              disabled={index === 0}
+                              title="Move earlier in layout (left/up)"
+                              aria-label="Move map earlier"
+                              onClick={() => {
+                                reorderTile(index, index - 1)
+                              }}
+                            >
+                              <Icon>
+                                <path d="m12 19-7-7 7-7" />
+                              </Icon>
+                            </button>
+                            <button
+                              type="button"
+                              className="tile-move-button"
+                              disabled={index === tiles.value.length - 1}
+                              title="Move later in layout (right/down)"
+                              aria-label="Move map later"
+                              onClick={() => {
+                                reorderTile(index, index + 1)
+                              }}
+                            >
+                              <Icon>
+                                <path d="m12 5 7 7-7 7" />
+                              </Icon>
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                </>
               )}
-            </div>
+            </section>
 
-            <div className="panel">
+            <section className="drawer-section">
               <h2>Tools</h2>
+              <p className="empty-hint map-edit-hint">
+                POV: click counters; click walls/doors to select. Wall/Door: drag to add. Erase: click a
+                line. Del removes selection.
+              </p>
               <div className="tool-grid" role="group" aria-label="Map editing tools">
                 <ToolButton
                   value="viewer"
@@ -487,9 +402,57 @@ const App = (): JSX.Element => {
                   Erase
                 </ToolButton>
               </div>
-            </div>
+              {selectedOccluder ? (
+                <div className="selection-actions" aria-label="Selected map line actions">
+                  <span>{selectedOccluder.type === 'door' ? 'Door' : 'Wall'} on map</span>
+                  <div className="selection-action-row">
+                    <button
+                      type="button"
+                      aria-pressed={selectedOccluder.type === 'wall'}
+                      onClick={() => {
+                        convertSelectedOccluder('wall')
+                      }}
+                    >
+                      Wall
+                    </button>
+                    <button
+                      type="button"
+                      aria-pressed={selectedOccluder.type === 'door'}
+                      onClick={() => {
+                        convertSelectedOccluder('door')
+                      }}
+                    >
+                      Door
+                    </button>
+                  </div>
+                  <div className="selection-action-row">
+                    {selectedOccluder.type === 'door' ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDoorOpen(selectedOccluder.id, !isDoorOpen(selectedOccluder))
+                        }}
+                      >
+                        {isDoorOpen(selectedOccluder) ? 'Close' : 'Open'}
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="danger-action"
+                      onClick={() => {
+                        removeOccluder(selectedOccluder.id)
+                        markExplored()
+                        requestCanvasRender()
+                      }}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </section>
 
-            <div className="panel">
+            <section className="drawer-section">
               <h2>Visibility</h2>
               <div className="drawer-action-grid">
                 <label className="sight-control">
@@ -589,9 +552,9 @@ const App = (): JSX.Element => {
                   <dd id="povStat">{getPovStat()}</dd>
                 </div>
               </dl>
-            </div>
+            </section>
 
-            <div className="panel">
+            <section className="drawer-section">
               <h2>Counters</h2>
               <div className="counter-toolbar" aria-label="Counter identifier">
                 <div className="counter-group-picker" role="group" aria-label="Counter letter group">
@@ -673,9 +636,9 @@ const App = (): JSX.Element => {
                   </div>
                 </div>
               ) : null}
-            </div>
+            </section>
 
-            <details className="session-details">
+            <details className="session-details drawer-section">
               <summary>Session sharing</summary>
               <SessionPanel />
             </details>
@@ -694,16 +657,18 @@ const App = (): JSX.Element => {
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
         >
-          <canvas
-            id="boardCanvas"
-            ref={canvasRef}
-            width="1000"
-            height="1000"
-            onPointerDown={handlePointerDown}
-            onPointerMove={handlePointerMove}
-            onPointerUp={handlePointerUp}
-            onPointerCancel={handlePointerCancel}
-          />
+          <div className="board-canvas-host">
+            <canvas
+              id="boardCanvas"
+              ref={canvasRef}
+              width="1000"
+              height="1000"
+              onPointerDown={handlePointerDown}
+              onPointerMove={handlePointerMove}
+              onPointerUp={handlePointerUp}
+              onPointerCancel={handlePointerCancel}
+            />
+          </div>
         </div>
       </section>
       {activeTileCount === 0 ? null : <span className="sr-only">{activeTileCount} map tiles loaded</span>}

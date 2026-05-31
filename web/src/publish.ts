@@ -9,6 +9,7 @@ import {
   hasMap,
   occluders,
   placements,
+  publishTableId,
   setStatus,
   sightRadius,
   tablePublished
@@ -17,6 +18,11 @@ import {gmPlayUrl, playerPlayUrl} from './table-links'
 import {isDoorOpen} from './visibility'
 
 const MAX_DIMENSION = 2048
+const LIVE_SYNC_DELAY_MS = 700
+
+let liveSyncTimer = 0
+let publishInFlight = false
+let pendingLiveSync = false
 
 const composeMapImage = async (): Promise<Blob | null> => {
   const {width, height} = boardSize.value
@@ -33,58 +39,96 @@ const composeMapImage = async (): Promise<Blob | null> => {
   return new Promise((resolve) => scratch.toBlob(resolve, 'image/png'))
 }
 
-export const publishToTable = async (rawTableId: string): Promise<void> => {
+const buildBoardPayload = (assetRef: string) => ({
+  assetRef,
+  width: boardSize.value.width,
+  height: boardSize.value.height,
+  gridScale: gridScale(),
+  sightRadius: sightRadius(),
+  feetPerSquare: 5,
+  defaultMoveFeet: 30,
+  occluders: occluders.value.map((occluder) =>
+    occluder.type === 'door' ? {...occluder, open: isDoorOpen(occluder)} : occluder
+  ),
+  doorStates: doorStates.value
+})
+
+/** Debounced push to connected /play clients after GM edits walls, doors, or map layout. */
+export const notifyTableBoardChanged = (): void => {
+  if (!tablePublished.value || !hasMap()) return
+  if (publishInFlight) {
+    pendingLiveSync = true
+    return
+  }
+  if (liveSyncTimer) window.clearTimeout(liveSyncTimer)
+  liveSyncTimer = window.setTimeout(() => {
+    liveSyncTimer = 0
+    void publishToTable(publishTableId.value, {live: true})
+  }, LIVE_SYNC_DELAY_MS)
+}
+
+export const publishToTable = async (
+  rawTableId: string,
+  options?: {live?: boolean}
+): Promise<void> => {
   const tableId = rawTableId.trim()
   if (!tableId) {
-    setStatus('Enter a table name to publish to.')
+    if (!options?.live) setStatus('Enter a table name to publish to.')
     return
   }
   if (!hasMap()) {
-    setStatus('Load and arrange a map before publishing.')
+    if (!options?.live) setStatus('Load and arrange a map before publishing.')
     return
   }
+  if (publishInFlight) return
+  publishInFlight = true
 
-  setStatus(`Publishing to table "${tableId}"…`)
-  const image = await composeMapImage()
-  if (!image) {
-    setStatus('Could not compose the map image.')
-    return
+  if (!options?.live) {
+    setStatus(`Publishing to table "${tableId}"…`)
+  } else {
+    setStatus(`Syncing map to table "${tableId}"…`)
   }
 
-  const upload = await fetch(`/api/tables/${tableId}/map`, {
-    method: 'POST',
-    headers: {'content-type': 'image/png'},
-    body: image
-  })
-  if (!upload.ok) {
-    setStatus(`Map upload failed (${upload.status}).`)
-    return
-  }
-  const {assetRef} = (await upload.json()) as {assetRef: string}
+  try {
+    const image = await composeMapImage()
+    if (!image) {
+      setStatus('Could not compose the map image.')
+      return
+    }
 
-  const board = {
-    assetRef,
-    width: boardSize.value.width,
-    height: boardSize.value.height,
-    gridScale: gridScale(),
-    sightRadius: sightRadius(),
-    occluders: occluders.value.map((occluder) =>
-      occluder.type === 'door' ? {...occluder, open: isDoorOpen(occluder)} : occluder
-    ),
-    doorStates: doorStates.value
-  }
+    const upload = await fetch(`/api/tables/${tableId}/map`, {
+      method: 'POST',
+      headers: {'content-type': 'image/png'},
+      body: image
+    })
+    if (!upload.ok) {
+      setStatus(`Map upload failed (${upload.status}).`)
+      return
+    }
+    const {assetRef} = (await upload.json()) as {assetRef: string}
 
-  const published = await fetch(`/api/tables/${tableId}/board`, {
-    method: 'POST',
-    headers: {'content-type': 'application/json'},
-    body: JSON.stringify(board)
-  })
-  if (published.ok) {
-    tablePublished.value = true
-    setStatus(`Published to "${tableId}". Share the player invite link — then open GM view to run the table.`)
-    return
+    const published = await fetch(`/api/tables/${tableId}/board`, {
+      method: 'POST',
+      headers: {'content-type': 'application/json'},
+      body: JSON.stringify(buildBoardPayload(assetRef))
+    })
+    if (published.ok) {
+      tablePublished.value = true
+      setStatus(
+        options?.live
+          ? `Table "${tableId}" updated for connected players.`
+          : `Published to "${tableId}". Share the player invite link — then open GM view to run the table.`
+      )
+      return
+    }
+    setStatus(`Publish failed (${published.status}).`)
+  } finally {
+    publishInFlight = false
+    if (pendingLiveSync) {
+      pendingLiveSync = false
+      notifyTableBoardChanged()
+    }
   }
-  setStatus(`Publish failed (${published.status}).`)
 }
 
 export const playLinksFor = (rawTableId: string): {player: string; gm: string} => ({

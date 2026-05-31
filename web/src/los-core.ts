@@ -109,7 +109,8 @@ export const analyzeImageRgba = (
   }
 
   const grid = deriveGridGeometry(width, height, gridScale)
-  const mask = refineDarkMask(width, height, buildDarkMask(width, height, rgba), grid.uniform)
+  const mask = refineDarkMask(width, height, buildDarkMask(width, height, rgba, 58), grid.uniform)
+  const thickMask = refineDarkMask(width, height, buildDarkMask(width, height, rgba, 76), grid.uniform)
   const minRun = Math.floor(Math.max(grid.uniform * 0.45, 18))
   const snap = grid.snap
 
@@ -164,41 +165,72 @@ export const analyzeImageRgba = (
   )
   const obstacleCandidates = extractRectangularObstacleCandidates(width, height, mask, grid, snap)
 
-  const wallCandidates = suppressParallelDuplicates(
-    [
-      ...filterFloorPlanWallCandidates(
-        retainConnectedWallNetwork(
-          refineWallCandidates(
-            [...structuralHorizontal, ...structuralVertical],
-            grid.uniform,
-            snap
-          ),
-          width,
-          height,
-          grid.uniform,
-          snap
-        ),
-        width,
-        height,
-        mask,
-        grid.uniform
-      ),
-      ...obstacleCandidates
-    ],
+  const diagonalCandidates = collectDiagonalWallCandidates(
+    [...structuralHorizontal, ...structuralVertical, ...obstacleCandidates],
+    width,
+    height,
+    mask,
+    thickMask,
+    grid,
     snap
   )
 
-  const walls = wallCandidates
-    .sort((first, second) => second.length - first.length)
-    .slice(0, 500)
-    .map<WallOccluder>((candidate, index) => ({
+  const structuralWalls = filterFloorPlanWallCandidates(
+    retainConnectedWallNetwork(
+      refineWallCandidates(
+        [...structuralHorizontal, ...structuralVertical, ...diagonalCandidates],
+        grid.uniform,
+        snap
+      ),
+      width,
+      height,
+      grid.uniform,
+      snap
+    ),
+    width,
+    height,
+    mask,
+    grid.uniform
+  )
+
+  const thickStrokeWalls = removeRedundantCandidates(
+    mergeCollinearStrokeCandidates(
+      extractThickStrokeWallCandidates(
+        [...structuralWalls, ...obstacleCandidates],
+        width,
+        height,
+        mask,
+        thickMask,
+        grid,
+        snap
+      ),
+      snap,
+      Math.max(grid.uniform * 0.4, 16)
+    ),
+    snap
+  ).filter((candidate) => {
+    const isDiagonal = isDiagonalStroke(candidate)
+    const minLength = isDiagonal ? Math.max(38, grid.uniform * 0.72) : Math.max(12, grid.uniform * 0.22)
+    return candidate.length >= minLength
+  })
+
+  const thickStrokeWallsFiltered = filterDiagonalCrossingNoise(thickStrokeWalls, snap)
+
+  const wallCandidates = [
+    ...suppressParallelDuplicates([...structuralWalls, ...obstacleCandidates], snap),
+    ...thickStrokeWallsFiltered
+  ]
+
+  const walls = selectFinalWallCandidates(wallCandidates, thickStrokeWallsFiltered, snap, 850).map<WallOccluder>(
+    (candidate, index) => ({
       type: 'wall',
       id: `wall-${String(index + 1).padStart(4, '0')}`,
       x1: clamp(candidate.x1, 0, width),
       y1: clamp(candidate.y1, 0, height),
       x2: clamp(candidate.x2, 0, width),
       y2: clamp(candidate.y2, 0, height)
-    }))
+    })
+  )
 
   const doors = doorCandidates.map<DoorOccluder>((candidate, index) => ({
     type: 'door',
@@ -333,9 +365,7 @@ export const hasLineOfSight = (
   doorStates: DoorStateLookup
 ): boolean => {
   const sight = {x1: from.x, y1: from.y, x2: to.x, y2: to.y}
-  return !occluders
-    .filter((occluder) => isBlocking(occluder, doorStates))
-    .some((occluder) => segmentsIntersect(sight, segmentFor(occluder)))
+  return !blockingSegments(occluders, doorStates).some((segment) => segmentsIntersect(sight, segment))
 }
 
 export const visibilityPolygon = (
@@ -356,10 +386,7 @@ export const visibilityPolygon = (
     y: clamp(viewerY, 0, height)
   }
   const maxRadius = Number.isFinite(radius) && radius > 0 ? radius : Math.hypot(width, height)
-  const segments = [
-    ...occluders.filter((occluder) => isBlocking(occluder, doorStates)).map(segmentFor),
-    ...boardSegments(width, height)
-  ]
+  const segments = [...blockingSegments(occluders, doorStates), ...boardSegments(width, height)]
   const angles: number[] = []
 
   for (let step = 0; step < 128; step += 1) {
@@ -393,7 +420,8 @@ export const visibilityPolygon = (
 const buildDarkMask = (
   width: number,
   height: number,
-  rgba: Uint8Array | Uint8ClampedArray
+  rgba: Uint8Array | Uint8ClampedArray,
+  luminanceCutoff = 58
 ): Uint8Array => {
   const mask = new Uint8Array(width * height)
   for (let y = 0; y < height; y += 1) {
@@ -404,7 +432,7 @@ const buildDarkMask = (
       const b = rgba[index + 2]
       const a = rgba[index + 3]
       const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
-      mask[y * width + x] = a > 32 && luminance < 58 ? 1 : 0
+      mask[y * width + x] = a > 32 && luminance < luminanceCutoff ? 1 : 0
     }
   }
   return mask
@@ -588,6 +616,416 @@ const extractRectangularObstacleCandidates = (
   }
 
   return collapseCandidates(candidates, snap)
+}
+
+const extractThickStrokeWallCandidates = (
+  existingWalls: Candidate[],
+  width: number,
+  height: number,
+  mask: Uint8Array,
+  thickMask: Uint8Array,
+  grid: GridGeometry,
+  snap: number
+): Candidate[] => {
+  const bridgedMask = morphDilate(thickMask, width, height, 1)
+  const axisMinRun = Math.max(4, Math.floor(grid.uniform * 0.1))
+  const diagMinRun = Math.max(8, Math.floor(grid.uniform * 0.2))
+  const maxThickness = Math.max(grid.uniform * 0.9, 28)
+  const minLength = Math.max(6, Math.floor(grid.uniform * 0.12))
+  const maxAxisLength = grid.uniform * 8
+  const maxDiagonalLength = grid.uniform * 10
+
+  const scanned = [
+    ...scanHorizontal(width, height, bridgedMask, axisMinRun, snap),
+    ...scanVertical(width, height, bridgedMask, axisMinRun, snap),
+    ...scanHorizontal(width, height, mask, axisMinRun, snap),
+    ...scanVertical(width, height, mask, axisMinRun, snap),
+    ...scanDiagonalDown(width, height, thickMask, diagMinRun, snap),
+    ...scanDiagonalUp(width, height, thickMask, diagMinRun, snap)
+  ]
+
+  const existingKeys = new Set(existingWalls.map((candidate) => candidateKey(candidate, snap)))
+
+  const thick = scanned.filter((candidate) => {
+    if (existingKeys.has(candidateKey(candidate, snap))) return false
+    if (existingWalls.some((wall) => candidatesOverlap(wall, candidate, snap))) return false
+
+    const bandThickness = candidateBandThickness(candidate, width, height, thickMask)
+    const perpendicularSpan = candidatePerpendicularDarkSpan(candidate, width, height, thickMask)
+    const strokeThickness = Math.max(bandThickness, perpendicularSpan)
+    if (strokeThickness < 3 || strokeThickness > maxThickness) return false
+
+    const isDiagonal = isDiagonalStroke(candidate)
+    const maxLength = isDiagonal ? maxDiagonalLength : maxAxisLength
+    if (candidate.length < minLength || candidate.length > maxLength) return false
+
+    if (isDiagonal) {
+      if (strokeThickness < 3) return false
+      if (candidate.length < Math.max(38, grid.uniform * 0.72)) return false
+      if (
+        candidate.length >= grid.uniform * 1.5 &&
+        hasDarkCoreAlongStroke(candidate, width, height, thickMask)
+      ) {
+        return true
+      }
+      if (!hasThickStrokeOpenSide(candidate, width, height, thickMask, grid.uniform)) return false
+      return true
+    }
+
+    if (isFloorPlanWallCandidate(candidate, width, height, mask, grid.uniform)) return true
+    if (strokeThickness >= 5 && hasThickStrokeOpenSide(candidate, width, height, mask, grid.uniform)) {
+      return true
+    }
+
+    if (candidateHasAxis(candidate, candidate.orientation === 'horizontal')) {
+      const lineCoord = candidate.orientation === 'horizontal' ? candidate.y1 : candidate.x1
+      const gridTolerance = Math.max(grid.uniform * 0.35, snap)
+      if (
+        strokeThickness < 5 &&
+        candidate.length > grid.uniform * 3.4 &&
+        nearGridLine(lineCoord, grid.uniform, gridTolerance, grid.dualPhase)
+      ) {
+        return false
+      }
+    }
+
+    return strokeThickness >= 4
+  })
+
+  return collapseCandidates(thick, snap)
+}
+
+const hasDarkCoreAlongStroke = (
+  candidate: Candidate,
+  width: number,
+  height: number,
+  mask: Uint8Array
+): boolean => {
+  const dx = candidate.x2 - candidate.x1
+  const dy = candidate.y2 - candidate.y1
+  const span = Math.hypot(dx, dy)
+  if (span <= 0) return false
+  const steps = Math.max(8, Math.round(span))
+  let dark = 0
+  let samples = 0
+
+  for (let step = 0; step <= steps; step += 1) {
+    const t = step / steps
+    const x = Math.round(candidate.x1 + dx * t)
+    const y = Math.round(candidate.y1 + dy * t)
+    if (x < 0 || x >= width || y < 0 || y >= height) continue
+    samples += 1
+    dark += mask[y * width + x]
+  }
+
+  return samples > 0 && dark / samples >= 0.38
+}
+
+const extractStructuralDiagonalCandidates = (
+  existingWalls: Candidate[],
+  width: number,
+  height: number,
+  mask: Uint8Array,
+  thickMask: Uint8Array,
+  grid: GridGeometry,
+  snap: number
+): Candidate[] => collectDiagonalWallCandidates(existingWalls, width, height, mask, thickMask, grid, snap)
+
+const collectDiagonalWallCandidates = (
+  existingWalls: Candidate[],
+  width: number,
+  height: number,
+  mask: Uint8Array,
+  thickMask: Uint8Array,
+  grid: GridGeometry,
+  snap: number
+): Candidate[] => {
+  const bridgedMask = morphDilate(thickMask, width, height, 1)
+  const minRun = Math.max(5, Math.floor(grid.uniform * 0.12))
+  const mergeGap = Math.max(grid.uniform * 0.38, 14)
+  const existingKeys = new Set(existingWalls.map((candidate) => candidateKey(candidate, snap)))
+
+  const scanned = collapseCandidates(
+    [
+      ...scanDiagonalDown(width, height, bridgedMask, minRun, snap),
+      ...scanDiagonalUp(width, height, bridgedMask, minRun, snap),
+      ...scanDiagonalDown(width, height, thickMask, minRun, snap),
+      ...scanDiagonalUp(width, height, thickMask, minRun, snap)
+    ],
+    snap
+  )
+
+  const plausible = scanned.filter((candidate) => {
+    if (!isDiagonalStroke(candidate)) return false
+    if (existingKeys.has(candidateKey(candidate, snap))) return false
+    if (existingWalls.some((wall) => candidatesOverlap(wall, candidate, snap))) return false
+
+    const bandThickness = candidateBandThickness(candidate, width, height, thickMask)
+    const perpendicularSpan = candidatePerpendicularDarkSpan(candidate, width, height, thickMask)
+    const strokeThickness = Math.max(bandThickness, perpendicularSpan)
+    if (strokeThickness < 3) return false
+    if (candidate.length < Math.max(36, grid.uniform * 0.68)) return false
+    if (candidate.length > Math.hypot(width, height) * 1.05) return false
+
+    if (candidate.length >= grid.uniform * 1.1) {
+      return hasDarkCoreAlongStroke(candidate, width, height, thickMask)
+    }
+
+    return (
+      hasThickStrokeOpenSide(candidate, width, height, thickMask, grid.uniform) &&
+      hasDarkCoreAlongStroke(candidate, width, height, thickMask)
+    )
+  })
+
+  return filterDiagonalCrossingNoise(
+    mergeDiagonalStrokeCandidates(plausible, mergeGap, snap),
+    snap
+  )
+}
+
+const isDiagonalStroke = (candidate: Candidate): boolean =>
+  candidate.orientation === 'diagonal-down' || candidate.orientation === 'diagonal-up'
+
+const hasThickStrokeOpenSide = (
+  candidate: Candidate,
+  width: number,
+  height: number,
+  mask: Uint8Array,
+  gridScale: number
+): boolean => {
+  const margin = Math.max(5, Math.round(gridScale * 0.14))
+  const gap = Math.max(3, Math.round(gridScale * 0.07))
+
+  if (candidate.orientation === 'horizontal') {
+    const y = Math.round(candidate.y1)
+    const [xStart, xEnd] = boundedRange(
+      Math.min(candidate.x1, candidate.x2),
+      Math.max(candidate.x1, candidate.x2),
+      width
+    )
+    const coreDark = 1 - sampleWhiteRatio(mask, width, height, xStart, xEnd, y - 1, y + 2)
+    if (coreDark < 0.28) return false
+    const north = sampleWhiteRatio(mask, width, height, xStart, xEnd, y - margin, y - gap)
+    const south = sampleWhiteRatio(mask, width, height, xStart, xEnd, y + gap, y + margin)
+    return north >= 0.18 || south >= 0.18
+  }
+
+  if (candidate.orientation === 'vertical') {
+    const x = Math.round(candidate.x1)
+    const [yStart, yEnd] = boundedRange(
+      Math.min(candidate.y1, candidate.y2),
+      Math.max(candidate.y1, candidate.y2),
+      height
+    )
+    const coreDark = 1 - sampleWhiteRatio(mask, width, height, x - 1, x + 2, yStart, yEnd)
+    if (coreDark < 0.28) return false
+    const west = sampleWhiteRatio(mask, width, height, x - margin, x - gap, yStart, yEnd)
+    const east = sampleWhiteRatio(mask, width, height, x + gap, x + margin, yStart, yEnd)
+    return west >= 0.18 || east >= 0.18
+  }
+
+  const dx = candidate.x2 - candidate.x1
+  const dy = candidate.y2 - candidate.y1
+  const length = Math.hypot(dx, dy)
+  if (length <= 0) return false
+  const px = -dy / length
+  const py = dx / length
+  const sampleCount = 5
+  let openSides = 0
+
+  for (let index = 0; index < sampleCount; index += 1) {
+    const t = index / (sampleCount - 1)
+    const cx = candidate.x1 + dx * t
+    const cy = candidate.y1 + dy * t
+    const offsets = [margin, margin * 2]
+    for (const sign of [-1, 1]) {
+      let white = 0
+      let samples = 0
+      for (const offset of offsets) {
+        const sx = Math.round(cx + px * offset * sign)
+        const sy = Math.round(cy + py * offset * sign)
+        if (sx < 0 || sx >= width || sy < 0 || sy >= height) continue
+        samples += 1
+        if (mask[sy * width + sx] === 0) white += 1
+      }
+      if (samples > 0 && white / samples >= 0.35) openSides += 1
+    }
+  }
+
+  return openSides >= 2
+}
+
+const candidateToSegment = (candidate: Candidate): Segment => ({
+  x1: candidate.x1,
+  y1: candidate.y1,
+  x2: candidate.x2,
+  y2: candidate.y2
+})
+
+const filterDiagonalCrossingNoise = (candidates: Candidate[], snap: number): Candidate[] => {
+  const diagonals = candidates.filter((candidate) => isDiagonalStroke(candidate))
+  const others = candidates.filter((candidate) => !isDiagonalStroke(candidate))
+  const longThreshold = 75
+
+  const keptDiagonals = diagonals.filter((candidate) => {
+    if (candidate.length >= longThreshold) return true
+    const segment = candidateToSegment(candidate)
+    let crossingShort = 0
+    for (const other of diagonals) {
+      if (candidateKey(other, snap) === candidateKey(candidate, snap)) continue
+      if (other.length >= longThreshold) continue
+      if (segmentsIntersect(segment, candidateToSegment(other))) crossingShort += 1
+    }
+    return crossingShort < 2
+  })
+
+  return [...others, ...keptDiagonals]
+}
+
+const mergeCollinearStrokeCandidates = (
+  candidates: Candidate[],
+  snap: number,
+  mergeGap: number
+): Candidate[] => {
+  const horizontals = candidates.filter((candidate) => candidate.orientation === 'horizontal')
+  const verticals = candidates.filter((candidate) => candidate.orientation === 'vertical')
+  const diagonals = candidates.filter(
+    (candidate) => isDiagonalStroke(candidate)
+  )
+
+  return [
+    ...mergeAxisCandidates(horizontals, true, mergeGap, snap),
+    ...mergeAxisCandidates(verticals, false, mergeGap, snap),
+    ...mergeDiagonalStrokeCandidates(diagonals, mergeGap, snap)
+  ]
+}
+
+const mergeDiagonalStrokeCandidates = (
+  candidates: Candidate[],
+  mergeGap: number,
+  snap: number
+): Candidate[] => {
+  const byLine = new Map<string, Candidate[]>()
+  for (const candidate of candidates) {
+    const key = `${candidate.orientation}:${diagonalLineOffset(candidate, snap)}`
+    byLine.set(key, [...(byLine.get(key) ?? []), candidate])
+  }
+
+  const merged: Candidate[] = []
+  for (const [key, lineCandidates] of byLine.entries()) {
+    const orientation = key.split(':')[0] as CandidateOrientation
+    const offset = Number(key.split(':')[1])
+    const intervals = lineCandidates
+      .map((candidate) => projectOnDiagonal(candidate, orientation))
+      .sort(([firstStart], [secondStart]) => firstStart - secondStart)
+
+    let current: [number, number] | null = null
+    for (const [start, end] of intervals) {
+      if (!current) {
+        current = [start, end]
+        continue
+      }
+      if (start <= current[1] + mergeGap) {
+        current[1] = Math.max(current[1], end)
+        continue
+      }
+      merged.push(diagonalCandidateFromRange(orientation, offset, snap, current[0], current[1]))
+      current = [start, end]
+    }
+
+    if (current) {
+      merged.push(diagonalCandidateFromRange(orientation, offset, snap, current[0], current[1]))
+    }
+  }
+
+  return merged
+}
+
+const diagonalLineOffset = (candidate: Candidate, snap: number): number => {
+  if (candidate.orientation === 'diagonal-down') {
+    return quantize((candidate.y1 + candidate.y2 - candidate.x1 - candidate.x2) / 2, snap)
+  }
+  if (candidate.orientation === 'diagonal-up') {
+    return quantize((candidate.y1 + candidate.y2 + candidate.x1 + candidate.x2) / 2, snap)
+  }
+  return quantize(candidate.y1 - candidate.x2, snap)
+}
+
+const projectOnDiagonal = (
+  candidate: Candidate,
+  orientation: CandidateOrientation
+): [number, number] => {
+  if (orientation === 'diagonal-down') {
+    const first = candidate.x1 + candidate.y1
+    const second = candidate.x2 + candidate.y2
+    return first <= second ? [first, second] : [second, first]
+  }
+  if (orientation === 'diagonal-up') {
+    const first = candidate.x1 - candidate.y1
+    const second = candidate.x2 - candidate.y2
+    return first <= second ? [first, second] : [second, first]
+  }
+  const first = candidate.x1 * 2 + candidate.y1
+  const second = candidate.x2 * 2 + candidate.y2
+  return first <= second ? [first, second] : [second, first]
+}
+
+const diagonalCandidateFromRange = (
+  orientation: CandidateOrientation,
+  offsetQuantized: number,
+  snap: number,
+  rangeStart: number,
+  rangeEnd: number
+): Candidate => {
+  const offset = offsetQuantized * snap
+  let x1 = 0
+  let y1 = 0
+  let x2 = 0
+  let y2 = 0
+
+  if (orientation === 'diagonal-down') {
+    x1 = (rangeStart - offset) / 2
+    y1 = (rangeStart + offset) / 2
+    x2 = (rangeEnd - offset) / 2
+    y2 = (rangeEnd + offset) / 2
+  } else if (orientation === 'diagonal-up') {
+    x1 = (rangeStart + offset) / 2
+    y1 = (offset - rangeStart) / 2
+    x2 = (rangeEnd + offset) / 2
+    y2 = (offset - rangeEnd) / 2
+  } else {
+    x1 = rangeStart / 2
+    y1 = offset
+    x2 = rangeEnd / 2
+    y2 = offset
+  }
+
+  x1 = snapValue(x1, snap)
+  y1 = snapValue(y1, snap)
+  x2 = snapValue(x2, snap)
+  y2 = snapValue(y2, snap)
+  const length = Math.hypot(x2 - x1, y2 - y1)
+  return {orientation, x1, y1, x2, y2, length}
+}
+
+const selectFinalWallCandidates = (
+  wallCandidates: Candidate[],
+  thickStrokeWalls: Candidate[],
+  snap: number,
+  maxWalls: number
+): Candidate[] => {
+  const maxDiagonalWalls = 80
+  const diagonals = wallCandidates.filter((candidate) => isDiagonalStroke(candidate))
+  const nonDiagonals = wallCandidates.filter((candidate) => !isDiagonalStroke(candidate))
+  const keptDiagonals = [...diagonals]
+    .sort((first, second) => second.length - first.length)
+    .slice(0, maxDiagonalWalls)
+  const remainingBudget = Math.max(0, maxWalls - keptDiagonals.length)
+  const keptNonDiagonals = [...nonDiagonals]
+    .sort((first, second) => second.length - first.length)
+    .slice(0, remainingBudget)
+
+  return [...keptNonDiagonals, ...keptDiagonals].sort((first, second) => second.length - first.length)
 }
 
 const connectedComponentBounds = (
@@ -2150,6 +2588,22 @@ const segmentFor = (occluder: Occluder): Segment => ({
   x2: occluder.x2,
   y2: occluder.y2
 })
+
+const blockingSegments = (occluders: Occluder[], doorStates: DoorStateLookup): Segment[] =>
+  occluders.flatMap((occluder) => (isBlocking(occluder, doorStates) ? [segmentFor(occluder)] : []))
+
+export const distanceToOccluder = (point: Point, occluder: Occluder): number => {
+  const ax = occluder.x1
+  const ay = occluder.y1
+  const bx = occluder.x2
+  const by = occluder.y2
+  const dx = bx - ax
+  const dy = by - ay
+  const lengthSquared = dx * dx + dy * dy
+  if (lengthSquared === 0) return Math.hypot(point.x - ax, point.y - ay)
+  const t = Math.max(0, Math.min(1, ((point.x - ax) * dx + (point.y - ay) * dy) / lengthSquared))
+  return Math.hypot(point.x - (ax + t * dx), point.y - (ay + t * dy))
+}
 
 const isOpenDoor = (door: DoorOccluder, doorStates: DoorStateLookup): boolean => {
   const state = doorStates[door.id]

@@ -139,6 +139,33 @@ describe('analyzeImageRgba', () => {
     expect(walls.some((wall) => Math.abs(wall.y1 - 62.5) <= 1)).toBe(true)
     expect(walls.some((wall) => Math.abs(wall.x1 - 62.5) <= 1)).toBe(true)
   })
+
+  it('detects compact thick ink as wall segments', () => {
+    const width = 220
+    const height = 220
+    const rgba = blankRgba(width, height)
+    fillRect(rgba, width, 92, 92, 128, 128)
+
+    const walls = analyzeImageRgba(width, height, rgba, 50).filter(
+      (occluder) => occluder.type === 'wall'
+    )
+
+    expect(walls.length).toBeGreaterThan(0)
+  })
+
+  it('detects thick stroke clusters as wall segments', () => {
+    const width = 220
+    const height = 220
+    const rgba = blankRgba(width, height)
+    fillBand(rgba, width, 96, 104, 70, 150)
+    fillBand(rgba, width, 70, 150, 96, 104)
+
+    const walls = analyzeImageRgba(width, height, rgba, 50).filter(
+      (occluder) => occluder.type === 'wall'
+    )
+
+    expect(walls.length).toBeGreaterThanOrEqual(2)
+  })
 })
 
 describe('hasLineOfSight', () => {

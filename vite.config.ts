@@ -6,6 +6,9 @@ const entry = (name: string): string => new URL(`./web/${name}`, import.meta.url
 
 export default defineConfig({
   root: 'web',
+  test: {
+    include: ['src/**/*.test.ts', '../src/**/*.test.ts']
+  },
   build: {
     outDir: '../dist/client',
     emptyOutDir: true,
