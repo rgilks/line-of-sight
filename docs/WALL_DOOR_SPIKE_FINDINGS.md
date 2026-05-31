@@ -40,23 +40,35 @@ Reviewed ~12 full-res overlays across all three folders plus the contact sheets:
 - **Orthogonal tiles (the majority — Multi-Purpose, Research Deck, Passenger
   Deck, Cargo Bay): clear win.** Walls follow the real structure, doors land in
   real openings, clutter is ignored. Decisively better than the current detector.
-- **Diagonal / curved tiles (Bridge dome, Fuel Refinery chamfers, rounded
-  rooms): the spike currently REGRESSES.** It is axis-only, so angled hull walls
-  and curves are left unbordered — and the current detector *does* have diagonal
-  scans, so on these tiles it does better. This is the main blocker to a clean
-  "better across the board" claim.
 - The **85 tiles with 0 doors** are partly genuine (fuel decks have none) and
   partly the diagonal/curved tiles where the axis-only flank test can't fire.
 
+## Diagonal extraction (added next, verified)
+
+`extractDiagonalSegments` walks the thick-wall mask along both ±45° directions,
+keeps runs that are mostly NOT already on an axis wall (so orthogonal walls
+aren't re-drawn as stairs), and `mergeDiagonals` collapses near-collinear runs.
+Inspected on the tiles that previously regressed:
+
+- **Fuel Refinery: fixed.** The chamfered corners of all four fuel tanks now get
+  diagonal borders; previously those 45° cuts leaked open.
+- **Bridge: improved.** Angled hull walls flanking the dome are now bordered.
+- **Multi-Purpose: no regression** — orthogonal structure and doors unchanged.
+
+So the axis-only regression on diagonal tiles is largely closed. Curved walls
+(the Bridge dome arc) are still only approximated by short diagonal facets, not a
+smooth curve.
+
 ## Honest gaps (still open)
 
-1. **Diagonal & curved walls dropped** — the biggest remaining lever; the next
-   increment (diagonal scan / skeleton-trace, snap to 0/45/90).
-2. **Large tanks/pods get crude bounding-box walls**, with corners leaking on the
-   chamfered ones.
+1. **Curves still approximate** — domes/arcs become short facets, not smooth
+   borders. Acceptable for LOS blocking; not pretty.
+2. **Large tanks/pods get crude bounding-box walls.** Chamfers now bordered, but
+   the whole-tank box is debatable as an LOS occluder.
 3. **Quality is eyeballed, not scored.** No ground-truth labels, so "better" is a
    visual judgement on the corpus, not measured precision/recall.
-4. **Thresholds are reasoned, not swept** against the corpus.
+4. **Thresholds are reasoned, not swept** — including the new diagonal ones
+   (`minDiagLength`, merge tolerance, the 0.6 off-axis ratio).
 
 ## OpenCV question — deferred on purpose, looking unnecessary
 
@@ -68,12 +80,16 @@ expensive primitive (DT) is ~30 lines. Revisit only if diagonal handling
 
 ## Recommended next steps
 
-1. Tune door-gap detection so the seed cases (which have obvious doorways)
-   produce doors; then add optional swing-arc confirmation.
-2. Add a small hand-labeled ground-truth set (a few maps) and a precision/recall
-   score in the A/B harness, so changes are measured not eyeballed.
-3. Add diagonal handling (skeleton + segment trace, or LSD) only after the
-   axis-aligned + door path is solid.
+1. **Scoring, not eyeballing.** Hand-label walls/doors on ~10 representative
+   tiles and add precision/recall to the corpus harness, so further tuning is
+   measured. This is now the highest-value next step.
+2. Tune the door and diagonal thresholds against that labeled set (door gap
+   bounds; `minDiagLength`, merge tolerance, off-axis ratio).
+3. Optional polish: smoother curve handling; reconsider whole-tank bounding
+   boxes as occluders.
 4. If the scored result beats the current detector, promote the spike into the
    deterministic core (it is already pure and core-compatible) and retire the
    bulk of the old scan logic.
+
+Done so far: thickness gate (walls), two-gap door detection, diagonal extraction,
+full-corpus + contact-sheet harness.
