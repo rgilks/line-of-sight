@@ -13,11 +13,12 @@ export default defineConfig({
     outDir: '../dist/client',
     emptyOutDir: true,
     rollupOptions: {
-      // Multi-page: the single-player authoring tool (index) and the
-      // multiplayer client (play).
+      // Multi-page: the single-player authoring tool (index), the multiplayer
+      // client (play), and the synthetic map generator (generate).
       input: {
         index: entry('index.html'),
-        play: entry('play.html')
+        play: entry('play.html'),
+        generate: entry('generate.html')
       }
     }
   },
