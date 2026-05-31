@@ -3,13 +3,20 @@ import type {Occluder} from './los-core'
 import type {Token} from './types'
 import {
   boardSize,
+  boardViewport,
   doorStates,
   dropDepth,
   occluders,
   requestCanvasRender,
+  reviewCursor,
+  reviewMode,
   selectedOccluderId,
   selectedTokenId,
-  tokens
+  setStatus,
+  showWalls,
+  tokens,
+  tool,
+  zoom
 } from './state'
 import {carveDoorGaps, loadMapFiles} from './board'
 import {pushUndoHistory} from './history'
@@ -58,6 +65,95 @@ export const getSelectedOccluder = (): Occluder | null => {
 export const getSelectedToken = (): Token | null => {
   const id = selectedTokenId.value
   return id ? (tokens.value.find((token) => token.id === id) ?? null) : null
+}
+
+export const reviewableOccluders = (): Occluder[] =>
+  occluders.value.filter((occluder) => !occluder.id.startsWith('manual-'))
+
+export const getReviewStat = (): string => {
+  const candidates = reviewableOccluders()
+  if (candidates.length === 0) return '0'
+  const selectedIndex = candidates.findIndex((occluder) => occluder.id === selectedOccluderId.value)
+  return selectedIndex >= 0 ? `${selectedIndex + 1} / ${candidates.length}` : `${candidates.length}`
+}
+
+const centerOccluderInView = (occluder: Occluder): void => {
+  if (!boardViewport) return
+  const midX = (occluder.x1 + occluder.x2) / 2
+  const midY = (occluder.y1 + occluder.y2) / 2
+  boardViewport.scrollLeft = Math.max(0, midX * zoom.value - boardViewport.clientWidth / 2)
+  boardViewport.scrollTop = Math.max(0, midY * zoom.value - boardViewport.clientHeight / 2)
+}
+
+const selectReviewCandidate = (index: number): void => {
+  const candidates = reviewableOccluders()
+  if (candidates.length === 0) {
+    reviewMode.value = false
+    selectedOccluderId.value = null
+    setStatus('No detected wall or door candidates to review.')
+    requestCanvasRender()
+    return
+  }
+
+  const nextIndex = ((index % candidates.length) + candidates.length) % candidates.length
+  const candidate = candidates[nextIndex]
+  reviewMode.value = true
+  reviewCursor.value = nextIndex
+  showWalls.value = true
+  selectedOccluderId.value = candidate.id
+  selectedTokenId.value = null
+  tool.value = candidate.type
+  centerOccluderInView(candidate)
+  setStatus(`Reviewing ${candidate.type} ${nextIndex + 1} of ${candidates.length}.`)
+  requestCanvasRender()
+}
+
+export const startReview = (): void => {
+  selectReviewCandidate(0)
+}
+
+export const stopReview = (): void => {
+  reviewMode.value = false
+  setStatus('Review paused. Corrections remain on the board.')
+  requestCanvasRender()
+}
+
+export const selectAdjacentReviewCandidate = (direction: -1 | 1): void => {
+  const candidates = reviewableOccluders()
+  if (candidates.length === 0) {
+    startReview()
+    return
+  }
+  const selectedIndex = candidates.findIndex((occluder) => occluder.id === selectedOccluderId.value)
+  const baseIndex = selectedIndex >= 0 ? selectedIndex : reviewCursor.value
+  selectReviewCandidate(baseIndex + direction)
+}
+
+export const keepReviewCandidate = (): void => {
+  selectAdjacentReviewCandidate(1)
+}
+
+export const deleteReviewCandidate = (): void => {
+  const selected = getSelectedOccluder()
+  if (!selected) return
+  const candidates = reviewableOccluders()
+  const selectedIndex = candidates.findIndex((occluder) => occluder.id === selected.id)
+  pushUndoHistory()
+  occluders.value = occluders.value.filter((occluder) => occluder.id !== selected.id)
+  const nextDoorStates = {...doorStates.value}
+  delete nextDoorStates[selected.id]
+  doorStates.value = nextDoorStates
+  selectedOccluderId.value = null
+  markExplored()
+
+  const remaining = reviewableOccluders()
+  if (remaining.length > 0) {
+    selectReviewCandidate(Math.min(Math.max(0, selectedIndex), remaining.length - 1))
+  } else {
+    reviewMode.value = false
+    setStatus('Review complete. No detected candidates remain.')
+    requestCanvasRender()
+  }
 }
 
 export const convertSelectedOccluder = (targetType: 'wall' | 'door'): void => {

@@ -1,13 +1,6 @@
 import {useState} from 'preact/hooks'
 import type {JSX} from 'preact'
-import {
-  activeDrawerTab,
-  hasMap,
-  occluders,
-  publishTableId,
-  tablePublished,
-  tiles
-} from './state'
+import {hasMap, occluders, publishTableId, tablePublished, tiles} from './state'
 import {playLinksFor, publishToTable} from './publish'
 import {copyText} from './table-links'
 
@@ -97,39 +90,13 @@ export const SessionPanel = (): JSX.Element => {
             done={mapReady}
             step={1}
             title="Load map tiles"
-            detail="Drag geomorph images onto the board or use Select maps on the Map tab."
-            action={
-              mapReady ? null : (
-                <button
-                  type="button"
-                  className="workflow-action"
-                  onClick={() => {
-                    activeDrawerTab.value = 'map'
-                  }}
-                >
-                  Go to Map
-                </button>
-              )
-            }
+            detail="Drag geomorph images onto the board or use Select maps at the top of the drawer."
           />
           <WorkflowStep
             done={wallsReady}
             step={2}
             title="Detect walls & doors"
-            detail="Run Analyze after loading tiles. Hand-correct on the Edit tab if needed."
-            action={
-              wallsReady || !mapReady ? null : (
-                <button
-                  type="button"
-                  className="workflow-action"
-                  onClick={() => {
-                    activeDrawerTab.value = 'map'
-                  }}
-                >
-                  Analyze on Map tab
-                </button>
-              )
-            }
+            detail="Run Analyze & review, then use the correction tools in the same drawer."
           />
           <WorkflowStep
             done={published}

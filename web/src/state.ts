@@ -5,7 +5,6 @@ import type {
   CounterDefinition,
   CounterGroupId,
   CounterKind,
-  DrawerTab,
   EditDrag,
   EditorSnapshot,
   Placement,
@@ -46,7 +45,8 @@ export const redoStack = signal<EditorSnapshot[]>([])
 export const dropDepth = signal(0)
 export const renderTick = signal(0)
 export const drawerOpen = signal(true)
-export const activeDrawerTab = signal<DrawerTab>('session')
+export const reviewMode = signal(false)
+export const reviewCursor = signal(0)
 export const publishTableId = signal('demo')
 export const tablePublished = signal(false)
 

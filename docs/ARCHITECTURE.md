@@ -189,10 +189,13 @@ it are [signals and rendering](PATTERNS.md#signals-and-rendering) and
 
 ### Layout
 
-A full-bleed canvas with a collapsible **control drawer**. The drawer has four
-tabs (`activeDrawerTab`): **Tools**, **Counters**, **Maps**, **State**. The
-visual language follows the TRE direction in [`AGENTS.md`](../AGENTS.md): black
-background, terminal-green accent (`#39ff14`), JetBrains Mono labels.
+A canvas board beside a collapsible **control drawer**. The drawer participates
+in layout rather than overlaying the board: opening it pushes the board to the
+right, and closing it leaves only a narrow toggle rail. The controls are arranged
+as one scrollable workbench so loading, review, correction, visibility, counters,
+and sharing are reachable without switching tabs. The visual language follows
+the TRE direction in [`AGENTS.md`](../AGENTS.md): black background,
+terminal-green accent (`#39ff14`), JetBrains Mono labels.
 
 ### Tools
 
@@ -209,7 +212,7 @@ The active tool (`tool` signal) decides how canvas pointer input is interpreted:
 Newly drawn walls and doors get `manual-` ids so re-running **Analyze** preserves
 them while replacing the auto-generated ones.
 
-### Maps tab
+### Map workbench
 
 - **Load** local map images via the picker or by dragging files onto the window
   (drag state is tracked so the drop zone can highlight).
@@ -217,10 +220,26 @@ them while replacing the auto-generated ones.
   into a grid; the board is sized to fit.
 - **Grid** (`gridValue`, default 50) is the pixel grid scale passed to analysis
   and used for snapping and door carving.
-- **Analyze** rasterises each placement and runs the core detector, mapping
-  results back into board space and carving door gaps out of overlapping walls.
+- **Analyze & review** rasterises each placement and runs the core detector,
+  mapping results back into board space, carving door gaps out of overlapping
+  walls, then selecting the first generated candidate for review.
 
-### Counters tab
+### Review mode
+
+Review mode is a lightweight candidate stepper driven by `reviewMode` and
+`reviewCursor`. It selects one generated occluder at a time, enables
+`showWalls`, centers the board on the candidate, and reuses the same selection
+overlay and correction actions as normal editing:
+
+- **Keep / next** advances to the next detected candidate.
+- **Wall / Door** converts the selected candidate in place.
+- **Open / Close** toggles selected doors.
+- **Delete** removes a bad generated candidate and advances to the next one.
+
+Manual occluders keep their `manual-` prefix and are not part of the generated
+review queue, so re-running analysis still preserves hand corrections.
+
+### Counters
 
 Twelve counter **kinds** (officer, marine, scout, engineer, medic, scientist,
 trader, security, reptilian, amphibian, insectoid, psion), each with a WebP
@@ -230,7 +249,7 @@ kind and group, then place tokens with the `token` tool. Any token can be electe
 the **point of view** (`povTokenId`); its `visibilityPolygon` drives the live fog
 and the optional sight-range ring.
 
-### State tab
+### Visibility and state
 
 - **Sight** (`sightValue`, default 700) is the POV visibility radius in board
   pixels.
