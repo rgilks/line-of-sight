@@ -92,9 +92,12 @@ Pure, seeded modules under `web/src/synth/`, mirroring `los-core`:
   walls, the thick hull skin, and door/airlock glyphs.
 
 `web/generate.ts` mounts the `/generate` page: seed + 🎲, theme/size/density
-controls, a `required` list, **Generate**, an **LOS overlay** toggle that draws
-the occluders over the art to confirm they match, and **Export sidecar** (the
-same JSON the publish-to-table flow consumes). Registered as a Vite entry.
+controls, a `required` list, **Generate**, a **Labels (GM)** toggle that
+shows/hides the GM-only room-label layer (off = the player view), an **LOS
+overlay** toggle that draws the occluders over the art to confirm they match, and
+**Export sidecar** (occluders plus GM-only room metadata, the same JSON the
+publish-to-table flow consumes). Labels render on a separate stacked canvas, so
+hiding them never alters the map. Registered as a Vite entry.
 
 `generate-map.test.ts` covers determinism, seed variance,
 rooms/corridors/walls/doors/hull/airlocks, honored `required` types,
