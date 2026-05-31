@@ -91,25 +91,31 @@ Pure, seeded modules under `web/src/synth/`, mirroring `los-core`:
 - `render-map.ts` — floor, corridor shading, grid, furniture, labels, interior
   walls, the thick hull skin, and door/airlock glyphs.
 
-`web/generate.ts` mounts the `/generate` page: seed + 🎲, theme/size/density
-controls, a `required` list, **Generate**, a **Labels (GM)** toggle that
-shows/hides the GM-only room-label layer (off = the player view), an **LOS
-overlay** toggle that draws the occluders over the art to confirm they match, and
-**Export sidecar** (occluders plus GM-only room metadata, the same JSON the
-publish-to-table flow consumes). Labels render on a separate stacked canvas, so
-hiding them never alters the map. Registered as a Vite entry.
+The generator is built into the main authoring tool (`index`), not a separate
+page. `web/src/generate-board.ts` bridges synth into the editor: it renders a
+deck to a PNG board tile, installs the deck's **exact occluders directly** (no
+detection pass — generated maps already carry perfect line of sight), seeds door
+states, and stores the room labels. The drawer's **Generate** panel (seed + 🎲,
+theme, size, furniture density, `required` rooms) drives it, and a **Labels: GM**
+toggle shows/hides the room labels. On first load the tool generates a random
+deck instead of showing a blank board; **Import image** still loads your own map
+and auto-runs wall/door detection for manual tracing.
+
+GM room labels render as a board overlay (`rendering.ts` `drawRoomLabels`), not
+baked into the tile image — so hiding them shows the exact player view, and the
+published-to-table map never contains them.
 
 `generate-map.test.ts` covers determinism, seed variance,
 rooms/corridors/walls/doors/hull/airlocks, honored `required` types,
 non-overlapping rooms, full reachability through the corridor/door graph, and
-in-bounds furniture. `scripts/spike-shots.mjs` renders sample seeds to PNGs.
+in-bounds furniture.
 
 ## Current look
 
 The maps read as plausible decks: an octagonal hull with airlocks, a varied
 corridor network with rooms opening off it, chamfered feature-room corners,
-function-specific furniture at geomorph-like density, and an LOS overlay that
-lines up exactly with the walls.
+function-specific furniture at geomorph-like density, and exact line of sight
+that drives the tool's fog and visibility directly.
 
 Built so far:
 
