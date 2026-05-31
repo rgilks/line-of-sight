@@ -83,8 +83,8 @@ const mount = (): void => {
         <select id="theme">${THEMES.map((t) => `<option value="${t}">${t}</option>`).join('')}</select>
       </label>
       <label>size
-        <input id="cols" type="number" min="8" max="40" value="20" /> ×
-        <input id="rows" type="number" min="8" max="40" value="20" />
+        <input id="cols" type="number" min="12" max="48" value="28" /> ×
+        <input id="rows" type="number" min="12" max="48" value="28" />
       </label>
       <label>furniture
         <input id="density" type="range" min="0" max="1" step="0.1" value="0.7" />
@@ -119,8 +119,8 @@ const mount = (): void => {
     spec = {
       ...defaultSpec(Number(seedInput.value) || 1),
       theme: themeSel.value as Theme,
-      cols: Math.max(8, Math.min(40, Number(colsInput.value) || 20)),
-      rows: Math.max(8, Math.min(40, Number(rowsInput.value) || 20)),
+      cols: Math.max(12, Math.min(48, Number(colsInput.value) || 28)),
+      rows: Math.max(12, Math.min(48, Number(rowsInput.value) || 28)),
       furnitureDensity: Number(densityInput.value),
       required
     }

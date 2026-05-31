@@ -1,6 +1,11 @@
 import {describe, expect, it} from 'vitest'
 import {generateMap} from './generate-map'
-import {defaultSpec} from './types'
+import {defaultSpec, type GeneratedMap} from './types'
+
+const walls = (m: GeneratedMap) => m.occluders.filter((o) => o.type === 'wall')
+const doors = (m: GeneratedMap) => m.occluders.filter((o) => o.type === 'door')
+const innerDoors = (m: GeneratedMap) => doors(m).filter((o) => o.id.startsWith('door'))
+const airlocks = (m: GeneratedMap) => doors(m).filter((o) => o.id.startsWith('airlock'))
 
 describe('generateMap', () => {
   it('is deterministic for a given seed', () => {
@@ -8,6 +13,7 @@ describe('generateMap', () => {
     const b = generateMap(defaultSpec(42))
     expect(a.occluders).toEqual(b.occluders)
     expect(a.rooms).toEqual(b.rooms)
+    expect(a.corridors).toEqual(b.corridors)
   })
 
   it('different seeds give different maps', () => {
@@ -16,58 +22,80 @@ describe('generateMap', () => {
     expect(a.occluders).not.toEqual(b.occluders)
   })
 
-  it('produces rooms, walls, and doors', () => {
-    const map = generateMap(defaultSpec(7))
-    expect(map.rooms.length).toBeGreaterThan(1)
-    expect(map.occluders.some((o) => o.type === 'wall')).toBe(true)
-    expect(map.occluders.some((o) => o.type === 'door')).toBe(true)
+  it('produces rooms, corridors, walls, doors, hull and airlocks', () => {
+    const m = generateMap(defaultSpec(7))
+    expect(m.rooms.length).toBeGreaterThan(1)
+    expect(m.corridors.length).toBeGreaterThan(0)
+    expect(walls(m).length).toBeGreaterThan(0)
+    expect(innerDoors(m).length).toBeGreaterThan(0)
+    expect(m.occluders.some((o) => o.id.startsWith('hull'))).toBe(true)
+    expect(airlocks(m).length).toBe(4)
   })
 
   it('honors required room types', () => {
     const spec = {...defaultSpec(3), required: ['bridge', 'cargo'] as const}
-    const map = generateMap({...spec, required: [...spec.required]})
-    const types = new Set(map.rooms.map((r) => r.type))
+    const m = generateMap({...spec, required: [...spec.required]})
+    const types = new Set(m.rooms.map((r) => r.type))
     expect(types.has('bridge')).toBe(true)
     expect(types.has('cargo')).toBe(true)
   })
 
-  it('keeps every room reachable (doors form a connected graph)', () => {
-    const map = generateMap(defaultSpec(99))
-    // Build room adjacency from door positions: a door lies on a shared wall, so
-    // the two rooms whose boundary contains the door segment are connected.
-    const g = map.gridScale
-    const doors = map.occluders.filter((o) => o.type === 'door')
-    const roomAt = (px: number, py: number): number =>
-      map.rooms.findIndex(
-        (r) =>
-          px >= r.x * g && px <= (r.x + r.w) * g && py >= r.y * g && py <= (r.y + r.h) * g
-      )
+  it('rooms do not overlap each other', () => {
+    const m = generateMap(defaultSpec(11))
+    for (let i = 0; i < m.rooms.length; i += 1)
+      for (let j = i + 1; j < m.rooms.length; j += 1) {
+        const a = m.rooms[i]
+        const b = m.rooms[j]
+        const overlap =
+          Math.max(a.x, b.x) < Math.min(a.x + a.w, b.x + b.w) &&
+          Math.max(a.y, b.y) < Math.min(a.y + a.h, b.y + b.h)
+        expect(overlap).toBe(false)
+      }
+  })
 
-    const parent = map.rooms.map((_, i) => i)
+  it('keeps every room reachable through the corridor/door graph', () => {
+    const m = generateMap(defaultSpec(99))
+    const g = m.gridScale
+    // Region of a sampled point: a room index, the corridor super-node, or -1.
+    const CORRIDOR = m.rooms.length
+    const regionAt = (px: number, py: number): number => {
+      const cx = px / g
+      const cy = py / g
+      const ri = m.rooms.findIndex(
+        (r) => cx >= r.x && cx <= r.x + r.w && cy >= r.y && cy <= r.y + r.h
+      )
+      if (ri >= 0) return ri
+      const inCorridor = m.corridors.some(
+        (c) => cx >= c.x && cx <= c.x + c.w && cy >= c.y && cy <= c.y + c.h
+      )
+      return inCorridor ? CORRIDOR : -1
+    }
+
+    const parent = Array.from({length: m.rooms.length + 1}, (_, i) => i)
     const find = (x: number): number => {
       while (parent[x] !== x) x = parent[x] = parent[parent[x]]
       return x
     }
-    for (const d of doors) {
+    for (const d of innerDoors(m)) {
       const midX = (d.x1 + d.x2) / 2
       const midY = (d.y1 + d.y2) / 2
-      // Sample just either side of the door line to find the two rooms it joins.
       const horizontal = d.y1 === d.y2
-      const r1 = horizontal ? roomAt(midX, midY - g * 0.5) : roomAt(midX - g * 0.5, midY)
-      const r2 = horizontal ? roomAt(midX, midY + g * 0.5) : roomAt(midX + g * 0.5, midY)
+      const r1 = horizontal ? regionAt(midX, midY - g * 0.5) : regionAt(midX - g * 0.5, midY)
+      const r2 = horizontal ? regionAt(midX, midY + g * 0.5) : regionAt(midX + g * 0.5, midY)
       if (r1 >= 0 && r2 >= 0) parent[find(r1)] = find(r2)
     }
-    const roots = new Set(map.rooms.map((_, i) => find(i)))
-    expect(roots.size).toBe(1) // all rooms in one connected component
+    // Every room must share a component with the corridor super-node.
+    const corridorRoot = find(CORRIDOR)
+    for (let i = 0; i < m.rooms.length; i += 1) expect(find(i)).toBe(corridorRoot)
   })
 
   it('furniture stays inside the board', () => {
-    const map = generateMap(defaultSpec(5))
-    for (const d of map.decorations) {
+    const m = generateMap(defaultSpec(5))
+    for (const d of m.decorations) {
       expect(d.x).toBeGreaterThanOrEqual(0)
       expect(d.y).toBeGreaterThanOrEqual(0)
-      expect(d.x + d.w).toBeLessThanOrEqual(map.width + 1)
-      expect(d.y + d.h).toBeLessThanOrEqual(map.height + 1)
+      expect(d.x + d.w).toBeLessThanOrEqual(m.width + 1)
+      expect(d.y + d.h).toBeLessThanOrEqual(m.height + 1)
     }
   })
 })

@@ -1,12 +1,10 @@
-// Synthetic map generation — shared types. Pure data, no DOM/Cloudflare.
-//
-// MapSpec is the "brief": the structured description an LLM would emit from a
-// natural-language adventure idea ("a derelict mining vessel with a flooded
-// cargo deck and a sealed bridge"), or that a human sets directly. The generator
-// is a deterministic function of (spec) — same spec ⇒ same map — so the LLM
-// steers WHAT to make while the generator owns HOW, and works with the LLM off.
+// Spec + data model for the synthetic deck generator. These types are the
+// contract between the (future) LLM steering layer, the generator, and the
+// renderer — keep them plain data so they serialise straight to JSON.
 import type {Occluder} from '../los-core'
 
+// A room's function. Drives furniture and labelling; the LLM can target these
+// when steering a layout from a natural-language brief.
 export type RoomType =
   | 'bridge'
   | 'quarters'
@@ -18,58 +16,79 @@ export type RoomType =
   | 'storage'
   | 'airlock'
 
+// Visual/structural theme. Influences palette and room mix.
 export type Theme = 'civilian' | 'military' | 'industrial' | 'derelict'
 
 export type MapSpec = {
   seed: number
-  cols: number // deck width in grid cells
-  rows: number // deck height in grid cells
-  gridScale: number // pixels per cell
+  cols: number
+  rows: number
+  gridScale: number
   theme: Theme
-  minRoom: number // smallest room edge, in cells
-  maxRoom: number // BSP stops subdividing around this size, in cells
-  required: RoomType[] // room types the author specifically wants present
-  furnitureDensity: number // 0..1, how full rooms are
+  minRoom: number
+  maxRoom: number
+  required: RoomType[]
+  furnitureDensity: number
+  // Corridor band width in cells (the connective tissue between rooms).
+  corridorWidth: number
+  // Hull margin in cells: the gap between the room block and the outer skin,
+  // matching the geomorph convention (fuel/conduit space lives here).
+  hullMargin: number
 }
 
-export type Room = {
+// A cell-space rectangle (grid units, not pixels). Rooms and corridor segments
+// are both rectangles of cells; the renderer scales by gridScale.
+export type Rect = {x: number; y: number; w: number; h: number}
+
+// A placed room: grid position + size, plus its function and display label.
+export type Room = Rect & {
   id: string
   type: RoomType
-  x: number // cell coordinates (origin top-left)
-  y: number
-  w: number
-  h: number
   label: string
 }
 
-// A furniture/fixture item — decorative only (NOT an occluder), matching the
-// geomorph convention that furniture does not block line of sight. All in pixels.
+// A decorative item inside a room. NOT an occluder — furniture never blocks
+// line of sight (matches the geomorph convention). Pure pixel-space rectangle.
 export type Decoration = {
-  kind: string // renderer switch: 'bunk' | 'console' | 'crate' | 'bed' | ...
+  kind: string
   x: number
   y: number
   w: number
   h: number
 }
 
+// The generated map: rooms + corridors + decorations + the line-of-sight
+// occluders (walls and doors) the existing pipeline already understands.
+// `occluders` includes the hull skin (ids prefixed `hull`) and airlock doors
+// (ids prefixed `airlock`); the renderer keys off those prefixes.
 export type GeneratedMap = {
   spec: MapSpec
-  width: number // pixels
+  width: number
   height: number
   gridScale: number
   rooms: Room[]
+  corridors: Rect[]
   decorations: Decoration[]
-  occluders: Occluder[] // walls + doors — the line-of-sight source of truth
+  occluders: Occluder[]
 }
 
+// Re-export the occluder shape from the core so the generator and the existing
+// sidecar/LOS pipeline share one definition.
+export type {Occluder} from '../los-core'
+
+// A sensible default deck: a ~28x28 cell grid at 36px/cell (~1000px square, the
+// geomorph tile size), civilian, with a 2-cell corridor cross and 2-cell hull
+// margin. The LLM steering layer will emit specs like this from a brief.
 export const defaultSpec = (seed: number): MapSpec => ({
   seed,
-  cols: 20,
-  rows: 20,
-  gridScale: 50,
+  cols: 28,
+  rows: 28,
+  gridScale: 36,
   theme: 'civilian',
   minRoom: 3,
-  maxRoom: 7,
+  maxRoom: 8,
   required: [],
-  furnitureDensity: 0.7
+  furnitureDensity: 0.7,
+  corridorWidth: 2,
+  hullMargin: 2
 })
