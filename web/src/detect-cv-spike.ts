@@ -214,75 +214,73 @@ const extractAxisRuns = (
   return runs
 }
 
-// Merge runs that share a grid line and overlap/touch, so a thick wall (many
-// adjacent rows/cols of pixels) collapses to one segment per grid line.
-const mergeRuns = (runs: Run[], gridScale: number): Run[] => {
-  const byLine = new Map<string, Run[]>()
-  for (const run of runs) {
-    const line = run.horizontal ? run.y1 : run.x1
-    const key = `${run.horizontal ? 'h' : 'v'}:${line}`
-    const list = byLine.get(key) ?? []
-    list.push(run)
-    byLine.set(key, list)
-  }
+type Segment = {x1: number; y1: number; x2: number; y2: number}
 
-  const merged: Run[] = []
-  for (const list of byLine.values()) {
-    const horizontal = list[0].horizontal
-    list.sort((a, b) => (horizontal ? a.x1 - b.x1 : a.y1 - b.y1))
-    let current = {...list[0]}
-    for (let i = 1; i < list.length; i += 1) {
-      const run = list[i]
-      const curEnd = horizontal ? current.x2 : current.y2
-      const runStart = horizontal ? run.x1 : run.y1
-      if (runStart <= curEnd + gridScale) {
-        if (horizontal) current.x2 = Math.max(current.x2, run.x2)
-        else current.y2 = Math.max(current.y2, run.y2)
-      } else {
-        merged.push(current)
-        current = {...run}
-      }
-    }
-    merged.push(current)
-  }
-  return merged.filter((run) => run.x1 !== run.x2 || run.y1 !== run.y2)
-}
+const lineSegment = (horizontal: boolean, line: number, start: number, end: number): Segment =>
+  horizontal
+    ? {x1: start, y1: line, x2: end, y2: line}
+    : {x1: line, y1: start, x2: line, y2: end}
 
-// Step 6 — doors as grid-aligned gaps between collinear wall runs on the same
-// line. A short gap (roughly one cell) flanked by walls reads as a doorway.
-const detectDoorGaps = (
+// Assemble per-grid-line runs into walls AND doors in one pass. The key fix over
+// a naive merge: use TWO gap scales. Tiny gaps (snapping/anti-alias noise) are
+// unioned into a single wall; a medium gap between two real wall flanks is a
+// DOOR (matching the maps: doors are ~1-cell breaks in a thick wall). A naive
+// merge that bridged up to a full cell swallowed every door, which is why the
+// first spike found none.
+const assembleLines = (
   runs: Run[],
   gridScale: number
-): Array<{x1: number; y1: number; x2: number; y2: number}> => {
-  const doors: Array<{x1: number; y1: number; x2: number; y2: number}> = []
-  const byLine = new Map<string, Run[]>()
+): {walls: Segment[]; doors: Segment[]} => {
+  const joinGap = gridScale * 0.3 // below this, two runs are one continuous wall
+  const minDoorGap = gridScale * 0.4
+  const maxDoorGap = gridScale * 1.7
+  const minFlank = gridScale * 0.6 // a door needs real wall on both sides
+  const minWallLength = gridScale * 0.45
+
+  type Line = {horizontal: boolean; line: number; intervals: Array<[number, number]>}
+  const byLine = new Map<string, Line>()
   for (const run of runs) {
-    const line = run.horizontal ? run.y1 : run.x1
-    const key = `${run.horizontal ? 'h' : 'v'}:${line}`
-    const list = byLine.get(key) ?? []
-    list.push(run)
-    byLine.set(key, list)
+    const horizontal = run.horizontal
+    const line = horizontal ? run.y1 : run.x1
+    const key = `${horizontal ? 'h' : 'v'}:${line}`
+    const entry = byLine.get(key) ?? {horizontal, line, intervals: []}
+    entry.intervals.push(
+      horizontal
+        ? [Math.min(run.x1, run.x2), Math.max(run.x1, run.x2)]
+        : [Math.min(run.y1, run.y2), Math.max(run.y1, run.y2)]
+    )
+    byLine.set(key, entry)
   }
 
-  const minGap = gridScale * 0.5
-  const maxGap = gridScale * 1.5
-  for (const list of byLine.values()) {
-    const horizontal = list[0].horizontal
-    list.sort((a, b) => (horizontal ? a.x1 - b.x1 : a.y1 - b.y1))
-    for (let i = 0; i < list.length - 1; i += 1) {
-      const a = list[i]
-      const b = list[i + 1]
-      const gap = horizontal ? b.x1 - a.x2 : b.y1 - a.y2
-      if (gap >= minGap && gap <= maxGap) {
-        doors.push(
-          horizontal
-            ? {x1: a.x2, y1: a.y1, x2: b.x1, y2: a.y1}
-            : {x1: a.x1, y1: a.y2, x2: a.x1, y2: b.y1}
-        )
+  const walls: Segment[] = []
+  const doors: Segment[] = []
+  for (const {horizontal, line, intervals} of byLine.values()) {
+    intervals.sort((a, b) => a[0] - b[0])
+    // Union intervals separated by less than joinGap into solid wall spans.
+    const spans: Array<[number, number]> = [[...intervals[0]]]
+    for (let i = 1; i < intervals.length; i += 1) {
+      const [s, e] = intervals[i]
+      const cur = spans[spans.length - 1]
+      if (s <= cur[1] + joinGap) cur[1] = Math.max(cur[1], e)
+      else spans.push([s, e])
+    }
+
+    for (const [s, e] of spans) {
+      if (e - s >= minWallLength) walls.push(lineSegment(horizontal, line, s, e))
+    }
+    // A door is a gap, in the door-size range, flanked by real wall on each side.
+    for (let i = 0; i < spans.length - 1; i += 1) {
+      const a = spans[i]
+      const b = spans[i + 1]
+      const gap = b[0] - a[1]
+      const aLen = a[1] - a[0]
+      const bLen = b[1] - b[0]
+      if (gap >= minDoorGap && gap <= maxDoorGap && aLen >= minFlank && bLen >= minFlank) {
+        doors.push(lineSegment(horizontal, line, a[1], b[0]))
       }
     }
   }
-  return doors
+  return {walls, doors}
 }
 
 // Spike entry point — same shape as analyzeImageRgba so the A/B harness swaps it
@@ -309,11 +307,13 @@ export const analyzeImageRgbaSpike = (
   const mask = binarize(width, height, rgba, luminanceMax, alphaMin)
   const dt = distanceTransform(mask)
   const walls = thickWallMask(mask, dt, minWallHalfWidth, minComponentArea)
-  const runs = mergeRuns(extractAxisRuns(walls, grid, minRunLength), grid)
-  const doorGaps = detectDoorGaps(runs, grid)
+  const {walls: wallSegments, doors: doorGaps} = assembleLines(
+    extractAxisRuns(walls, grid, minRunLength),
+    grid
+  )
 
   const occluders: Occluder[] = []
-  runs
+  wallSegments
     .sort((a, b) => Math.hypot(b.x2 - b.x1, b.y2 - b.y1) - Math.hypot(a.x2 - a.x1, a.y2 - a.y1))
     .slice(0, 500)
     .forEach((run, index) => {
