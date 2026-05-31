@@ -1,9 +1,9 @@
 # Synthetic Map Generation — design and current state
 
-A spike on `spike/synthetic-maps`: generate our own tactical deck maps from the
-structural layer (walls + doors) outward, instead of detecting structure from
-existing raster art. The generator and a `/generate` page are implemented; the
-LLM steering/critique layer is not yet.
+Generate our own tactical deck maps from the structural layer (walls + doors)
+outward, instead of detecting structure from existing raster art. The generator
+is built into the main authoring tool, which opens on a generated deck; the LLM
+steering/critique layer is not yet built.
 
 ## The core idea, and why it is strong
 
