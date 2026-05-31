@@ -1,6 +1,8 @@
 // Render a GeneratedMap to a 2D canvas in the TRE aesthetic. Pure draw code: it
 // reads the layout, never mutates it (model/render split — see SYNTHETIC_MAPS.md).
 // Furniture is drawn but is decorative only; walls/doors are the LOS truth.
+// `renderMap` draws the player-visible deck; `renderLabels` draws the GM-only
+// room labels onto a separate layer the GM can toggle.
 import type {DoorOccluder, Occluder} from '../los-core'
 import type {Decoration, GeneratedMap} from './types'
 
@@ -12,7 +14,8 @@ const DOOR = '#ff9f1c'
 const AIRLOCK = '#ffd24a'
 const FURNITURE = 'rgba(180, 196, 188, 0.6)'
 const GRID = 'rgba(255, 255, 255, 0.05)'
-const LABEL = 'rgba(231, 233, 230, 0.45)'
+const LABEL = 'rgba(57, 255, 20, 0.85)' // GM-only; terminal green, readable over furniture
+const LABEL_HALO = 'rgba(5, 5, 5, 0.85)'
 
 const isHull = (o: Occluder): boolean => o.id.startsWith('hull') || o.id.startsWith('stub')
 const isAirlock = (o: Occluder): boolean => o.id.startsWith('airlock')
@@ -48,15 +51,9 @@ export const renderMap = (ctx: CanvasRenderingContext2D, map: GeneratedMap): voi
   // Furniture (under the walls so wall strokes read on top).
   for (const item of map.decorations) drawFurniture(ctx, item)
 
-  // Room labels, centered.
-  ctx.fillStyle = LABEL
-  ctx.textAlign = 'center'
-  ctx.textBaseline = 'middle'
-  for (const room of map.rooms) {
-    const size = Math.max(8, Math.min(15, Math.min(room.w, room.h) * g * 0.18))
-    ctx.font = `600 ${size}px "JetBrains Mono", monospace`
-    ctx.fillText(room.label, (room.x + room.w / 2) * g, (room.y + room.h / 2) * g)
-  }
+  // NOTE: room labels are intentionally NOT drawn here. They are GM-only
+  // knowledge, rendered separately by renderLabels() onto their own layer so the
+  // GM can show/hide them independently of the map the players see.
 
   // Interior walls.
   ctx.strokeStyle = WALL
@@ -86,6 +83,29 @@ const stroke = (ctx: CanvasRenderingContext2D, o: Occluder): void => {
   ctx.moveTo(o.x1, o.y1)
   ctx.lineTo(o.x2, o.y2)
   ctx.stroke()
+}
+
+// Draw the GM-only room labels. Kept separate from renderMap so it can be drawn
+// onto its own canvas layer and toggled without re-rendering the map — the GM
+// sees room functions; players see an unlabelled deck. Clears the target first.
+export const renderLabels = (ctx: CanvasRenderingContext2D, map: GeneratedMap): void => {
+  const {width, height, gridScale: g} = map
+  ctx.clearRect(0, 0, width, height)
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.lineJoin = 'round'
+  for (const room of map.rooms) {
+    const size = Math.max(8, Math.min(15, Math.min(room.w, room.h) * g * 0.18))
+    ctx.font = `600 ${size}px "JetBrains Mono", monospace`
+    const cx = (room.x + room.w / 2) * g
+    const cy = (room.y + room.h / 2) * g
+    // Dark halo first so the label reads over furniture, then the green text.
+    ctx.strokeStyle = LABEL_HALO
+    ctx.lineWidth = Math.max(2, size * 0.28)
+    ctx.strokeText(room.label, cx, cy)
+    ctx.fillStyle = LABEL
+    ctx.fillText(room.label, cx, cy)
+  }
 }
 
 const drawDoor = (ctx: CanvasRenderingContext2D, door: DoorOccluder, g: number, airlock: boolean): void => {
