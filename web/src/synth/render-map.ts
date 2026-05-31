@@ -122,36 +122,80 @@ const drawFurniture = (ctx: CanvasRenderingContext2D, item: Decoration): void =>
   ctx.save()
   ctx.strokeStyle = FURNITURE
   ctx.fillStyle = 'rgba(120, 140, 132, 0.25)'
-  ctx.lineWidth = 2
+  ctx.lineWidth = 1.5
+  const cx = item.x + item.w / 2
+  const cy = item.y + item.h / 2
   const round = (r: number): void => {
     ctx.beginPath()
     ctx.roundRect(item.x, item.y, item.w, item.h, r)
     ctx.fill()
     ctx.stroke()
   }
+  const circle = (r: number, fill = true): void => {
+    ctx.beginPath()
+    ctx.arc(cx, cy, r, 0, Math.PI * 2)
+    if (fill) ctx.fill()
+    ctx.stroke()
+  }
   switch (item.kind) {
     case 'bunk':
-    case 'bed':
-      round(item.h * 0.2)
+    case 'bed': {
+      round(Math.min(item.w, item.h) * 0.18)
+      // pillow line across the short axis at the head
       ctx.beginPath()
-      ctx.moveTo(item.x, item.y + item.h * 0.32)
-      ctx.lineTo(item.x + item.w, item.y + item.h * 0.32)
+      if (item.w >= item.h) {
+        ctx.moveTo(item.x + item.w * 0.7, item.y)
+        ctx.lineTo(item.x + item.w * 0.7, item.y + item.h)
+      } else {
+        ctx.moveTo(item.x, item.y + item.h * 0.7)
+        ctx.lineTo(item.x + item.w, item.y + item.h * 0.7)
+      }
       ctx.stroke()
       break
+    }
     case 'console':
-      round(item.h * 0.3)
+      round(Math.min(item.w, item.h) * 0.35)
       break
     case 'reactor':
+      circle(item.w / 2)
+      circle(item.w * 0.3)
+      circle(item.w * 0.12)
+      break
+    case 'table-round': {
+      // Round table ringed by chair dots.
+      circle(item.w / 2)
+      const seats = 6
+      const rr = item.w * 0.5 + Math.max(2, item.w * 0.16)
+      const cr = Math.max(1.5, item.w * 0.12)
+      for (let i = 0; i < seats; i += 1) {
+        const a = (i / seats) * Math.PI * 2
+        ctx.beginPath()
+        ctx.arc(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr, cr, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.stroke()
+      }
+      break
+    }
+    case 'chair':
+      circle(Math.min(item.w, item.h) / 2)
+      break
+    case 'machine':
+      round(2)
+      // cross-hatch tick to read as machinery
       ctx.beginPath()
-      ctx.arc(item.x + item.w / 2, item.y + item.h / 2, item.w / 2, 0, Math.PI * 2)
-      ctx.fill()
-      ctx.stroke()
-      ctx.beginPath()
-      ctx.arc(item.x + item.w / 2, item.y + item.h / 2, item.w / 4, 0, Math.PI * 2)
+      ctx.moveTo(item.x, item.y)
+      ctx.lineTo(item.x + item.w, item.y + item.h)
       ctx.stroke()
       break
+    case 'crate':
+      round(1.5)
+      break
+    case 'shelf':
+    case 'cabinet':
+    case 'locker':
+    case 'fixture':
     default:
-      round(item.kind === 'crate' ? 2 : item.w * 0.15)
+      round(Math.min(item.w, item.h) * 0.16)
       break
   }
   ctx.restore()

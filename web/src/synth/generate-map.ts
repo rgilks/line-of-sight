@@ -567,63 +567,139 @@ const hullAndAirlocks = (
 
 // ---- Furniture: decorative only, per room type ------------------------------
 
+// The furniture grammar follows the geomorph conventions seen in the source
+// tiles: paired bunk rows with footlockers (barracks), round tables ringed by
+// chairs (mess/common), a reactor core ringed by machinery (engineering), a
+// console horseshoe around a command chair (bridge), bed banks + cabinets
+// (medbay), packed crate grids (cargo), shelf runs (storage). All items are
+// decorative — never occluders — so LOS is unaffected by how dense rooms get.
 const furnishRoom = (rng: Rng, room: Room, g: number, density: number): Decoration[] => {
   const items: Decoration[] = []
-  const inset = g * 0.2
+  const inset = g * 0.22
   const x0 = room.x * g + inset
   const y0 = room.y * g + inset
   const w = room.w * g - inset * 2
   const h = room.h * g - inset * 2
-  if (w <= 0 || h <= 0) return items
+  if (w <= g * 0.5 || h <= g * 0.5) return items
   const add = (kind: string, fx: number, fy: number, fw: number, fh: number): void => {
+    if (fw <= 1 || fh <= 1) return
     items.push({kind, x: x0 + fx, y: y0 + fy, w: fw, h: fh})
   }
+  const cols = Math.max(1, Math.round(w / g))
+  const rows = Math.max(1, Math.round(h / g))
 
   switch (room.type) {
     case 'quarters': {
-      const bunks = Math.max(1, Math.floor((w / g) * density))
-      for (let i = 0; i < bunks; i += 1) {
-        if (!chance(rng, density)) continue
-        add('bunk', (i * w) / bunks, 0, (w / bunks) * 0.8, g * 0.7)
+      // Paired bunk rows down each long wall with a central aisle; a footlocker
+      // at the foot of each bunk. Rows run along the room's longer axis.
+      const horizontal = w >= h
+      const along = horizontal ? rows : cols // bunk count per wall
+      const bunkLen = (horizontal ? h : w) * 0.34
+      const span = horizontal ? w : h
+      const n = Math.max(1, along)
+      for (let i = 0; i < n; i += 1) {
+        const t = (i + 0.5) / n
+        const pos = t * span - bunkLen / 2
+        if (chance(rng, 0.15 + density * 0.8)) {
+          if (horizontal) {
+            add('bunk', pos, 0, bunkLen, g * 0.42)
+            add('locker', pos + bunkLen * 0.3, g * 0.42, bunkLen * 0.4, g * 0.22)
+          } else {
+            add('bunk', 0, pos, g * 0.42, bunkLen)
+            add('locker', g * 0.42, pos + bunkLen * 0.3, g * 0.22, bunkLen * 0.4)
+          }
+        }
+        if (chance(rng, 0.15 + density * 0.8)) {
+          if (horizontal) {
+            add('bunk', pos, h - g * 0.42, bunkLen, g * 0.42)
+            add('locker', pos + bunkLen * 0.3, h - g * 0.64, bunkLen * 0.4, g * 0.22)
+          } else {
+            add('bunk', w - g * 0.42, pos, g * 0.42, bunkLen)
+            add('locker', w - g * 0.64, pos + bunkLen * 0.3, g * 0.22, bunkLen * 0.4)
+          }
+        }
       }
       break
     }
     case 'bridge': {
-      add('console', w / 2 - g * 0.9, 0, g * 1.8, g * 0.5)
-      add('chair', w / 2 - g * 0.3, h * 0.45, g * 0.6, g * 0.6)
+      // Command chair centred, ringed by a horseshoe of consoles facing forward.
+      const cx = w / 2
+      add('chair', cx - g * 0.28, h * 0.52, g * 0.56, g * 0.56)
+      add('console', cx - g * 1.4, 0, g * 2.8, g * 0.5) // forward bank
+      add('console', 0, h * 0.2, g * 0.5, h * 0.5) // port
+      add('console', w - g * 0.5, h * 0.2, g * 0.5, h * 0.5) // starboard
       break
     }
     case 'cargo': {
-      const cols = Math.max(1, Math.floor((w / g) * 0.6))
-      const rows = Math.max(1, Math.floor((h / g) * 0.6))
-      for (let cx = 0; cx < cols; cx += 1)
-        for (let cy = 0; cy < rows; cy += 1) {
-          if (!chance(rng, density * 0.8)) continue
-          add('crate', (cx * w) / cols, (cy * h) / rows, (w / cols) * 0.7, (h / rows) * 0.7)
+      // Densely packed crate grid leaving narrow gaps.
+      const gc = Math.max(1, Math.floor(cols / 1.2))
+      const gr = Math.max(1, Math.floor(rows / 1.2))
+      for (let cx = 0; cx < gc; cx += 1)
+        for (let cy = 0; cy < gr; cy += 1) {
+          if (!chance(rng, 0.35 + density * 0.6)) continue
+          const cw = (w / gc) * 0.82
+          const chh = (h / gr) * 0.82
+          add('crate', (cx * w) / gc + (w / gc - cw) / 2, (cy * h) / gr + (h / gr - chh) / 2, cw, chh)
         }
       break
     }
     case 'medbay': {
-      add('bed', g * 0.2, g * 0.2, g * 1.6, g * 0.7)
-      add('cabinet', w - g * 0.6, 0, g * 0.5, h * 0.5)
+      // A row of beds along the top, a cabinet bank down one side.
+      const beds = Math.max(1, Math.floor(cols / 1.5))
+      for (let i = 0; i < beds; i += 1) {
+        if (!chance(rng, 0.4 + density * 0.5)) continue
+        add('bed', (i * w) / beds + g * 0.08, g * 0.1, (w / beds) * 0.8, g * 0.78)
+      }
+      for (let i = 0; i < Math.max(1, rows - 1); i += 1) add('cabinet', w - g * 0.5, g + (i * (h - g)) / Math.max(1, rows - 1), g * 0.42, (h - g) / Math.max(1, rows - 1) * 0.8)
       break
     }
     case 'engineering': {
-      add('reactor', w / 2 - g * 0.7, h / 2 - g * 0.7, g * 1.4, g * 1.4)
+      // Central reactor core ringed by machinery blocks at the corners.
+      const r = Math.min(w, h) * 0.32
+      add('reactor', w / 2 - r, h / 2 - r, r * 2, r * 2)
+      const mb = Math.min(w, h) * 0.2
+      for (const [fx, fy] of [
+        [0, 0],
+        [w - mb, 0],
+        [0, h - mb],
+        [w - mb, h - mb]
+      ])
+        if (chance(rng, 0.4 + density * 0.5)) add('machine', fx, fy, mb, mb)
       break
     }
     case 'fresher': {
-      add('fixture', 0, 0, g * 0.6, g * 0.6)
-      add('fixture', w - g * 0.6, 0, g * 0.6, g * 0.6)
+      // A short run of stalls/fixtures along the top.
+      const n = Math.max(2, cols)
+      for (let i = 0; i < n; i += 1) {
+        if (!chance(rng, 0.4 + density * 0.5)) continue
+        add('fixture', (i * w) / n + g * 0.06, 0, (w / n) * 0.7, g * 0.55)
+      }
       break
     }
     case 'common': {
-      add('table', w / 2 - g * 0.8, h / 2 - g * 0.5, g * 1.6, g)
+      // Round tables on a grid, each ringed by chairs (drawn by the renderer).
+      const tc = Math.max(1, Math.floor(cols / 2))
+      const tr = Math.max(1, Math.floor(rows / 2))
+      for (let cx = 0; cx < tc; cx += 1)
+        for (let cy = 0; cy < tr; cy += 1) {
+          if (!chance(rng, 0.45 + density * 0.5)) continue
+          const cellW = w / tc
+          const cellH = h / tr
+          const d = Math.min(cellW, cellH) * 0.5
+          add('table-round', cx * cellW + (cellW - d) / 2, cy * cellH + (cellH - d) / 2, d, d)
+        }
       break
     }
     case 'storage': {
-      const shelves = Math.max(1, Math.floor((h / g) * density))
-      for (let i = 0; i < shelves; i += 1) add('shelf', 0, (i * h) / shelves, g * 0.5, g * 0.6)
+      // Shelf runs along both long walls.
+      const horizontal = w >= h
+      const n = Math.max(1, horizontal ? cols : rows)
+      for (let i = 0; i < n; i += 1) {
+        if (chance(rng, 0.4 + density * 0.5))
+          horizontal ? add('shelf', (i * w) / n + g * 0.06, 0, (w / n) * 0.78, g * 0.45) : add('shelf', 0, (i * h) / n + g * 0.06, g * 0.45, (h / n) * 0.78)
+        if (chance(rng, 0.4 + density * 0.5))
+          horizontal ? add('shelf', (i * w) / n + g * 0.06, h - g * 0.45, (w / n) * 0.78, g * 0.45) : add('shelf', w - g * 0.45, (i * h) / n + g * 0.06, g * 0.45, (h / n) * 0.78)
+      }
       break
     }
     default:
