@@ -162,25 +162,29 @@ export const analyzeImageRgba = (
     grid,
     snap
   )
+  const obstacleCandidates = extractRectangularObstacleCandidates(width, height, mask, grid, snap)
 
   const wallCandidates = suppressParallelDuplicates(
-    filterFloorPlanWallCandidates(
-      retainConnectedWallNetwork(
-        refineWallCandidates(
-          [...structuralHorizontal, ...structuralVertical],
+    [
+      ...filterFloorPlanWallCandidates(
+        retainConnectedWallNetwork(
+          refineWallCandidates(
+            [...structuralHorizontal, ...structuralVertical],
+            grid.uniform,
+            snap
+          ),
+          width,
+          height,
           grid.uniform,
           snap
         ),
         width,
         height,
-        grid.uniform,
-        snap
+        mask,
+        grid.uniform
       ),
-      width,
-      height,
-      mask,
-      grid.uniform
-    ),
+      ...obstacleCandidates
+    ],
     snap
   )
 
@@ -536,6 +540,192 @@ const removeSmallComponents = (
   }
 
   return out
+}
+
+type ComponentBounds = {
+  area: number
+  minX: number
+  minY: number
+  maxX: number
+  maxY: number
+}
+
+const extractRectangularObstacleCandidates = (
+  width: number,
+  height: number,
+  mask: Uint8Array,
+  grid: GridGeometry,
+  snap: number
+): Candidate[] => {
+  const candidates: Candidate[] = []
+  const minSide = Math.max(grid.uniform * 0.9, 34)
+  const maxSide = grid.uniform * 7
+  const edgeMargin = Math.max(6, grid.uniform * 0.12)
+
+  for (const component of connectedComponentBounds(width, height, mask)) {
+    const boxWidth = component.maxX - component.minX + 1
+    const boxHeight = component.maxY - component.minY + 1
+    if (boxWidth < minSide || boxHeight < minSide) continue
+    if (boxWidth > maxSide || boxHeight > maxSide) continue
+    if (component.minX <= edgeMargin || component.minY <= edgeMargin) continue
+    if (component.maxX >= width - edgeMargin || component.maxY >= height - edgeMargin) continue
+
+    const aspect = boxWidth / boxHeight
+    if (aspect < 0.28 || aspect > 3.6) continue
+
+    if (!hasDarkRectangleOutline(width, height, mask, component, grid.uniform)) continue
+
+    const x1 = snapValue(component.minX, snap)
+    const y1 = snapValue(component.minY, snap)
+    const x2 = snapValue(component.maxX + 1, snap)
+    const y2 = snapValue(component.maxY + 1, snap)
+    if (Math.abs(x2 - x1) < minSide || Math.abs(y2 - y1) < minSide) continue
+
+    candidates.push(axisCandidate(true, y1, x1, x2))
+    candidates.push(axisCandidate(true, y2, x1, x2))
+    candidates.push(axisCandidate(false, x1, y1, y2))
+    candidates.push(axisCandidate(false, x2, y1, y2))
+  }
+
+  return collapseCandidates(candidates, snap)
+}
+
+const connectedComponentBounds = (
+  width: number,
+  height: number,
+  mask: Uint8Array
+): ComponentBounds[] => {
+  const bounds: ComponentBounds[] = []
+  const visited = new Uint8Array(width * height)
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const start = y * width + x
+      if (visited[start] || mask[start] === 0) continue
+
+      const stack = [start]
+      visited[start] = 1
+      const component: ComponentBounds = {area: 0, minX: x, minY: y, maxX: x, maxY: y}
+
+      while (stack.length > 0) {
+        const index = stack.pop()
+        if (index === undefined) continue
+        const px = index % width
+        const py = Math.floor(index / width)
+        component.area += 1
+        component.minX = Math.min(component.minX, px)
+        component.minY = Math.min(component.minY, py)
+        component.maxX = Math.max(component.maxX, px)
+        component.maxY = Math.max(component.maxY, py)
+
+        for (const [dx, dy] of [
+          [-1, 0],
+          [1, 0],
+          [0, -1],
+          [0, 1]
+        ]) {
+          const nx = px + dx
+          const ny = py + dy
+          if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue
+          const next = ny * width + nx
+          if (visited[next] || mask[next] === 0) continue
+          visited[next] = 1
+          stack.push(next)
+        }
+      }
+
+      bounds.push(component)
+    }
+  }
+
+  return bounds
+}
+
+const hasDarkRectangleOutline = (
+  width: number,
+  height: number,
+  mask: Uint8Array,
+  component: ComponentBounds,
+  gridScale: number
+): boolean => {
+  const band = Math.max(2, Math.round(gridScale * 0.06))
+  const minimumCoverage = 0.52
+  const top = lineCoverage(
+    width,
+    height,
+    mask,
+    true,
+    component.minY,
+    component.minX,
+    component.maxX,
+    band
+  )
+  const bottom = lineCoverage(
+    width,
+    height,
+    mask,
+    true,
+    component.maxY,
+    component.minX,
+    component.maxX,
+    band
+  )
+  const left = lineCoverage(
+    width,
+    height,
+    mask,
+    false,
+    component.minX,
+    component.minY,
+    component.maxY,
+    band
+  )
+  const right = lineCoverage(
+    width,
+    height,
+    mask,
+    false,
+    component.maxX,
+    component.minY,
+    component.maxY,
+    band
+  )
+  return (
+    top >= minimumCoverage &&
+    bottom >= minimumCoverage &&
+    left >= minimumCoverage &&
+    right >= minimumCoverage
+  )
+}
+
+const lineCoverage = (
+  width: number,
+  height: number,
+  mask: Uint8Array,
+  horizontal: boolean,
+  line: number,
+  start: number,
+  end: number,
+  band: number
+): number => {
+  let covered = 0
+  let samples = 0
+  const limit = horizontal ? width - 1 : height - 1
+  for (let axis = Math.max(0, start); axis <= Math.min(limit, end); axis += 1) {
+    samples += 1
+    let dark = 0
+    for (let offset = -band; offset <= band; offset += 1) {
+      const x = horizontal ? axis : line + offset
+      const y = horizontal ? line + offset : axis
+      if (x < 0 || x >= width || y < 0 || y >= height) continue
+      if (mask[y * width + x] === 1) {
+        dark = 1
+        break
+      }
+    }
+    covered += dark
+  }
+  return samples > 0 ? covered / samples : 0
 }
 
 const extractGridAxisWalls = (
