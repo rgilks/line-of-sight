@@ -216,6 +216,82 @@ const extractAxisRuns = (
 
 type Segment = {x1: number; y1: number; x2: number; y2: number}
 
+// Extract DIAGONAL wall segments by walking the thick mask along both ±45°
+// directions (mirrors los-core's diagonal scans). Axis-aligned walls also
+// produce short diagonal runs along their edges, so we keep only runs whose
+// pixels are mostly NOT already on an axis wall — that leaves true angled hull
+// walls and chamfers while avoiding double-drawing orthogonal walls as stairs.
+const extractDiagonalSegments = (
+  mask: Mask,
+  axisCovered: Uint8Array,
+  minDiagLength: number
+): Segment[] => {
+  const {width, height, data} = mask
+  const segments: Segment[] = []
+
+  // dir: +1 = down-right (↘), -1 = down-left (↙). Walk every start cell on the
+  // top row and left/right edge so each diagonal line is covered once.
+  const walk = (sx: number, sy: number, dir: 1 | -1): void => {
+    let x = sx
+    let y = sy
+    while (x >= 0 && x < width && y >= 0 && y < height) {
+      // skip background
+      while (x >= 0 && x < width && y < height && data[y * width + x] === 0) {
+        x += dir
+        y += 1
+      }
+      const rx = x
+      const ry = y
+      let len = 0
+      let offAxis = 0
+      while (x >= 0 && x < width && y < height && data[y * width + x] === 1) {
+        if (axisCovered[y * width + x] === 0) offAxis += 1
+        len += 1
+        x += dir
+        y += 1
+      }
+      // Keep only if long enough AND mostly off the axis-wall set (a real diagonal).
+      if (len >= minDiagLength && offAxis >= len * 0.6) {
+        segments.push({x1: rx, y1: ry, x2: x - dir, y2: y - 1})
+      }
+    }
+  }
+
+  for (let sx = 0; sx < width; sx += 1) {
+    walk(sx, 0, 1) // ↘ from top edge
+    walk(sx, 0, -1) // ↙ from top edge
+  }
+  for (let sy = 1; sy < height; sy += 1) {
+    walk(0, sy, 1) // ↘ from left edge
+    walk(width - 1, sy, -1) // ↙ from right edge
+  }
+  return segments
+}
+
+// Merge diagonal segments that are nearly collinear and adjacent, so a chamfer
+// drawn as many parallel pixel diagonals collapses to one segment.
+const mergeDiagonals = (segments: Segment[], tol: number): Segment[] => {
+  const kept: Segment[] = []
+  for (const seg of segments.sort(
+    (a, b) =>
+      Math.hypot(b.x2 - b.x1, b.y2 - b.y1) - Math.hypot(a.x2 - a.x1, a.y2 - a.y1)
+  )) {
+    const midX = (seg.x1 + seg.x2) / 2
+    const midY = (seg.y1 + seg.y2) / 2
+    const dup = kept.some((k) => {
+      const kdx = k.x2 - k.x1
+      const kdy = k.y2 - k.y1
+      const klen = Math.hypot(kdx, kdy) || 1
+      // perpendicular distance of this segment's midpoint to kept segment's line
+      const dist = Math.abs((midX - k.x1) * kdy - (midY - k.y1) * kdx) / klen
+      const sameDir = Math.sign(seg.x2 - seg.x1) === Math.sign(kdx)
+      return dist <= tol && sameDir
+    })
+    if (!dup) kept.push(seg)
+  }
+  return kept
+}
+
 const lineSegment = (horizontal: boolean, line: number, start: number, end: number): Segment =>
   horizontal
     ? {x1: start, y1: line, x2: end, y2: line}
@@ -312,8 +388,36 @@ export const analyzeImageRgbaSpike = (
     grid
   )
 
+  // Mark pixels covered by an axis wall (within a tolerance band), so diagonal
+  // extraction ignores the stair-step edges of orthogonal walls and keeps only
+  // genuine angled walls.
+  const axisCovered = new Uint8Array(width * height)
+  const band = Math.ceil(Math.max(2, grid * 0.12))
+  for (const seg of wallSegments) {
+    if (seg.y1 === seg.y2) {
+      const y0 = Math.max(0, seg.y1 - band)
+      const y1 = Math.min(height - 1, seg.y1 + band)
+      const xs = Math.max(0, Math.min(seg.x1, seg.x2))
+      const xe = Math.min(width - 1, Math.max(seg.x1, seg.x2))
+      for (let y = y0; y <= y1; y += 1) for (let x = xs; x <= xe; x += 1) axisCovered[y * width + x] = 1
+    } else {
+      const x0 = Math.max(0, seg.x1 - band)
+      const x1 = Math.min(width - 1, seg.x1 + band)
+      const ys = Math.max(0, Math.min(seg.y1, seg.y2))
+      const ye = Math.min(height - 1, Math.max(seg.y1, seg.y2))
+      for (let y = ys; y <= ye; y += 1) for (let x = x0; x <= x1; x += 1) axisCovered[y * width + x] = 1
+    }
+  }
+
+  const minDiagLength = Math.max(grid * 0.7, 22)
+  const diagonals = mergeDiagonals(
+    extractDiagonalSegments(walls, axisCovered, minDiagLength),
+    Math.max(grid * 0.25, 8)
+  )
+
   const occluders: Occluder[] = []
-  wallSegments
+  const allWalls = [...wallSegments, ...diagonals]
+  allWalls
     .sort((a, b) => Math.hypot(b.x2 - b.x1, b.y2 - b.y1) - Math.hypot(a.x2 - a.x1, a.y2 - a.y1))
     .slice(0, 500)
     .forEach((run, index) => {
