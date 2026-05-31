@@ -14,6 +14,9 @@ formats in more depth.
   Discord auth). Forward-looking; not built yet.
 - [CV_REVIEW_PIPELINE.md](CV_REVIEW_PIPELINE.md) — branch experiment for
   improving CV-generated wall/door sidecars through local visual overlay review.
+- [WALL_DOOR_DETECTION.md](WALL_DOOR_DETECTION.md) — research + recommended
+  detector pipeline (stroke-thickness gate, distance transform, LSD).
+  Forward-looking; the primitive to move toward.
 - [diagrams/](diagrams/README.md) — Graphviz/DOT sources + rendered PNGs.
 
 ## Project layout
