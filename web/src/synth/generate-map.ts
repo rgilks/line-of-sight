@@ -6,10 +6,11 @@
 //   - An octagonal HULL skin at the board bounds (chamfered corners).
 //   - A MARGIN gap between the hull and the room block (where the originals put
 //     fuel/conduits) — so rooms never stair-step against the angled hull.
-//   - A CORRIDOR cross through the inner field reaching the four edge midpoints;
-//     AIRLOCKS connect those points out through the margin to the hull.
-//   - ROOMS fill the four quadrants (BSP), each doored ONTO the corridor where
-//     possible (room↔room only as a fallback), so circulation reads like a deck.
+//   - A CORRIDOR network of full-span bands (one per axis = a cross, more = a
+//     ladder/grid, one = a spine), placed off-centre per seed so the macro-layout
+//     varies. Each band reaches the hull at its ends via an AIRLOCK.
+//   - ROOMS fill the rectangular regions between bands (BSP), each doored ONTO a
+//     corridor where possible (room↔room only as a fallback).
 //
 // Walls are extracted from cell-tag boundaries (no duplicate coincident walls).
 // Walls + doors + hull are the line-of-sight occluders; furniture is decorative
@@ -47,14 +48,14 @@ const splitRect = (rng: Rng, rect: Rect, spec: MapSpec): Rect[] => {
 
 // ---- Room typing: honor required types, fill the rest by theme ---------------
 
+type Theme = MapSpec['theme']
+
 const themeFill: Record<Theme, RoomType[]> = {
   civilian: ['quarters', 'common', 'fresher', 'storage', 'medbay'],
   military: ['quarters', 'engineering', 'storage', 'medbay', 'bridge'],
   industrial: ['cargo', 'engineering', 'storage', 'common'],
   derelict: ['storage', 'cargo', 'quarters', 'engineering', 'common']
 }
-
-type Theme = MapSpec['theme']
 
 const roomLabels: Record<RoomType, string> = {
   bridge: 'BRIDGE',
@@ -80,14 +81,67 @@ const assignTypes = (rng: Rng, rects: Rect[], spec: MapSpec): Room[] => {
   })
 }
 
-// ---- Cell-grid layout: hull, margin, corridor cross, quadrant rooms ----------
+// ---- Cell-grid layout: hull, margin, corridor bands, regions, rooms ----------
 
 type Layout = {
   field: Rect // inner room/corridor area, in global cell coords
-  vBand: {x: number; w: number} // vertical corridor band (global cells)
-  hBand: {y: number; h: number} // horizontal corridor band (global cells)
+  vBands: {x: number; w: number}[] // vertical corridor bands (global cells)
+  hBands: {y: number; h: number}[] // horizontal corridor bands (global cells)
   rooms: Room[]
-  tag: number[][] // field-local [y][x] -> CORRIDOR | room tag (1-based room index)
+  corridorRects: Rect[] // band + sliver rects (global cells) for floor shading
+  tag: number[][] // field-local [y][x] -> CORRIDOR | room tag (1-based)
+}
+
+// Corridor archetypes: counts of vertical/horizontal full-span bands. Any axis
+// with >= 2 bands always pairs with >= 1 perpendicular band, so the corridor
+// network is always connected (single-band cases are one connected band).
+const ARCHETYPES: {nV: number; nH: number; weight: number}[] = [
+  {nV: 1, nH: 1, weight: 4}, // cross (off-centre)
+  {nV: 1, nH: 0, weight: 2}, // vertical spine
+  {nV: 0, nH: 1, weight: 2}, // horizontal spine
+  {nV: 2, nH: 1, weight: 2}, // ladder
+  {nV: 1, nH: 2, weight: 2}, // ladder
+  {nV: 2, nH: 2, weight: 1} // grid
+]
+
+const pickArchetype = (rng: Rng): {nV: number; nH: number} => {
+  const total = ARCHETYPES.reduce((s, a) => s + a.weight, 0)
+  let r = rng() * total
+  for (const a of ARCHETYPES) if ((r -= a.weight) < 0) return a
+  return ARCHETYPES[0]
+}
+
+// Place `count` bands of width `w` in [0, length), each gap (including the two
+// ends) at least `minGap`, with the slack distributed randomly so positions are
+// off-centre and asymmetric. Drops a band if there isn't room.
+const bandPositions = (rng: Rng, length: number, count: number, w: number, minGap: number): number[] => {
+  if (count <= 0) return []
+  const need = count * w + (count + 1) * minGap
+  if (length < need) return bandPositions(rng, length, count - 1, w, minGap)
+  let extra = length - need
+  const positions: number[] = []
+  let cursor = 0
+  for (let i = 0; i < count; i += 1) {
+    const share = Math.floor(extra / (count - i + 1))
+    const gap = minGap + randInt(rng, 0, share)
+    extra -= gap - minGap
+    cursor += gap
+    positions.push(cursor)
+    cursor += w
+  }
+  return positions
+}
+
+// Open intervals [start, end) of interior between consecutive bands (and edges).
+const intervals = (length: number, starts: number[], w: number): [number, number][] => {
+  const iv: [number, number][] = []
+  let cursor = 0
+  for (const s of starts) {
+    if (s - cursor >= 1) iv.push([cursor, s])
+    cursor = s + w
+  }
+  if (length - cursor >= 1) iv.push([cursor, length])
+  return iv
 }
 
 const buildLayout = (rng: Rng, spec: MapSpec): Layout => {
@@ -95,32 +149,37 @@ const buildLayout = (rng: Rng, spec: MapSpec): Layout => {
   const field: Rect = {x: m, y: m, w: spec.cols - 2 * m, h: spec.rows - 2 * m}
   const cw = Math.max(1, spec.corridorWidth)
 
-  // Corridor cross, centered in the field (local coords).
-  const vlx = Math.floor((field.w - cw) / 2)
-  const hly = Math.floor((field.h - cw) / 2)
+  const {nV, nH} = pickArchetype(rng)
+  const vStarts = bandPositions(rng, field.w, nV, cw, spec.minRoom)
+  const hStarts = bandPositions(rng, field.h, nH, cw, spec.minRoom)
+  // Guarantee at least one band so there is circulation and an airlock.
+  if (vStarts.length === 0 && hStarts.length === 0) {
+    const v = bandPositions(rng, field.w, 1, cw, spec.minRoom)
+    if (v.length) vStarts.push(...v)
+    else hStarts.push(...bandPositions(rng, field.h, 1, cw, spec.minRoom))
+  }
 
-  const inV = (lx: number): boolean => lx >= vlx && lx < vlx + cw
-  const inH = (ly: number): boolean => ly >= hly && ly < hly + cw
+  const inV = (lx: number): boolean => vStarts.some((s) => lx >= s && lx < s + cw)
+  const inH = (ly: number): boolean => hStarts.some((s) => ly >= s && ly < s + cw)
 
-  // Four quadrant rectangles (local), the field minus the cross.
-  const quadrants: Rect[] = [
-    {x: 0, y: 0, w: vlx, h: hly}, // TL
-    {x: vlx + cw, y: 0, w: field.w - (vlx + cw), h: hly}, // TR
-    {x: 0, y: hly + cw, w: vlx, h: field.h - (hly + cw)}, // BL
-    {x: vlx + cw, y: hly + cw, w: field.w - (vlx + cw), h: field.h - (hly + cw)} // BR
-  ].filter((q) => q.w >= spec.minRoom && q.h >= spec.minRoom)
+  // Rectangular regions = (column interval) x (row interval) between bands.
+  const colsIv = intervals(field.w, vStarts, cw)
+  const rowsIv = intervals(field.h, hStarts, cw)
+  const regions: Rect[] = []
+  for (const [cx0, cx1] of colsIv)
+    for (const [ry0, ry1] of rowsIv) regions.push({x: cx0, y: ry0, w: cx1 - cx0, h: ry1 - ry0})
 
-  const rectsLocal = quadrants.flatMap((q) =>
-    splitRect(rng, q, spec).map((r) => ({x: q.x + (r.x - q.x), y: q.y + (r.y - q.y), w: r.w, h: r.h}))
-  )
-  // splitRect already returns rects in the quadrant's own coords; keep as-is.
+  const roomable = (r: Rect): boolean => r.w >= spec.minRoom && r.h >= spec.minRoom
+  const rectsLocal = regions.filter(roomable).flatMap((r) => splitRect(rng, r, spec))
+  const slivers = regions.filter((r) => !roomable(r))
   const rooms = assignTypes(rng, rectsLocal, spec).map((room) => ({
     ...room,
     x: field.x + room.x,
     y: field.y + room.y
   }))
 
-  // Tag grid (field-local). Corridor first, then stamp room ids.
+  // Tag grid (field-local): corridor bands, then room ids, then fold any leftover
+  // (sliver) cells into corridor so there are never enclosed voids.
   const tag: number[][] = Array.from({length: field.h}, () => Array.from({length: field.w}, () => OUT))
   for (let ly = 0; ly < field.h; ly += 1)
     for (let lx = 0; lx < field.w; lx += 1) if (inV(lx) || inH(ly)) tag[ly][lx] = CORRIDOR
@@ -130,14 +189,18 @@ const buildLayout = (rng: Rng, spec: MapSpec): Layout => {
       for (let lx = room.x - field.x; lx < room.x - field.x + room.w; lx += 1)
         if (tag[ly]?.[lx] === OUT) tag[ly][lx] = id
   })
+  for (let ly = 0; ly < field.h; ly += 1)
+    for (let lx = 0; lx < field.w; lx += 1) if (tag[ly][lx] === OUT) tag[ly][lx] = CORRIDOR
 
-  return {
-    field,
-    vBand: {x: field.x + vlx, w: cw},
-    hBand: {y: field.y + hly, h: cw},
-    rooms,
-    tag
-  }
+  const vBands = vStarts.map((s) => ({x: field.x + s, w: cw}))
+  const hBands = hStarts.map((s) => ({y: field.y + s, h: cw}))
+  const corridorRects: Rect[] = [
+    ...vBands.map((b) => ({x: b.x, y: field.y, w: b.w, h: field.h})),
+    ...hBands.map((b) => ({x: field.x, y: b.y, w: field.w, h: b.h})),
+    ...slivers.map((r) => ({x: field.x + r.x, y: field.y + r.y, w: r.w, h: r.h}))
+  ]
+
+  return {field, vBands, hBands, rooms, corridorRects, tag}
 }
 
 // ---- Doors + connectivity ---------------------------------------------------
@@ -182,7 +245,6 @@ const collectBoundaries = (tag: number[][]): Map<string, Boundary> => {
 const doorEdge = (boundary: Boundary): Edge => {
   const {edges} = boundary
   const horizontal = edges[0].horizontal
-  // group into runs along the shared line
   const sorted = [...edges].sort((p, q) => (horizontal ? p.x - q.x : p.y - q.y))
   let best: Edge[] = []
   let run: Edge[] = []
@@ -197,11 +259,7 @@ const doorEdge = (boundary: Boundary): Edge => {
   return best[Math.floor(best.length / 2)]
 }
 
-const chooseDoors = (
-  rng: Rng,
-  roomCount: number,
-  boundaries: Boundary[]
-): {edge: Edge}[] => {
+const chooseDoors = (rng: Rng, roomCount: number, boundaries: Boundary[]): {edge: Edge}[] => {
   // Nodes: rooms 1..roomCount -> 0..roomCount-1; corridor (tag 0) -> roomCount.
   const corridorNode = roomCount
   const node = (tagValue: number): number => (tagValue === CORRIDOR ? corridorNode : tagValue - 1)
@@ -247,25 +305,20 @@ const extractWalls = (tag: number[][], doorEdges: Set<string>, field: Rect, g: n
   const fw = tag[0].length
   const vSet = new Set<string>()
   const hSet = new Set<string>()
-  // perimeter (interior↔OUT) and interior↔interior both become walls, unless a
-  // door sits on that edge.
   for (let y = 0; y <= fh; y += 1)
     for (let x = 0; x < fw; x += 1) {
       if (tagAt(tag, x, y - 1) === tagAt(tag, x, y)) continue
-      const e: Edge = {x, y, horizontal: true}
-      if (!doorEdges.has(edgeKey(e))) hSet.add(`${x}:${y}`)
+      if (!doorEdges.has(edgeKey({x, y, horizontal: true}))) hSet.add(`${x}:${y}`)
     }
   for (let x = 0; x <= fw; x += 1)
     for (let y = 0; y < fh; y += 1) {
       if (tagAt(tag, x - 1, y) === tagAt(tag, x, y)) continue
-      const e: Edge = {x, y, horizontal: false}
-      if (!doorEdges.has(edgeKey(e))) vSet.add(`${x}:${y}`)
+      if (!doorEdges.has(edgeKey({x, y, horizontal: false}))) vSet.add(`${x}:${y}`)
     }
 
   const walls: Occluder[] = []
   const px = (cx: number, cy: number): [number, number] => [(field.x + cx) * g, (field.y + cy) * g]
   let id = 0
-  // merge horizontal runs (same y, consecutive x)
   for (let y = 0; y <= fh; y += 1) {
     let x = 0
     while (x < fw) {
@@ -281,7 +334,6 @@ const extractWalls = (tag: number[][], doorEdges: Set<string>, field: Rect, g: n
       x = end
     }
   }
-  // merge vertical runs (same x, consecutive y)
   for (let x = 0; x <= fw; x += 1) {
     let y = 0
     while (y < fh) {
@@ -307,17 +359,14 @@ const hullAndAirlocks = (
   layout: Layout
 ): {hull: Occluder[]; airlocks: Occluder[]; stubs: Rect[]; stubWalls: Occluder[]} => {
   const g = spec.gridScale
-  const {cols, rows, hullMargin: m} = spec
+  const {cols, rows} = spec
   const ch = Math.max(2, Math.round(Math.min(cols, rows) * 0.12)) // chamfer in cells
   const W = cols * g
   const H = rows * g
   const c = ch * g
-
-  // Connection spans on each hull side (where the corridor bands reach out).
-  const vx1 = layout.vBand.x * g
-  const vx2 = (layout.vBand.x + layout.vBand.w) * g
-  const hy1 = layout.hBand.y * g
-  const hy2 = (layout.hBand.y + layout.hBand.h) * g
+  const {field} = layout
+  const fx2 = field.x + field.w
+  const fy2 = field.y + field.h
 
   const seg = (id: string, x1: number, y1: number, x2: number, y2: number): Occluder => ({
     type: 'wall',
@@ -327,62 +376,6 @@ const hullAndAirlocks = (
     x2,
     y2
   })
-  // A straight hull side, carved to leave the airlock opening [s,e] (1D).
-  const carvedSide = (
-    id: string,
-    along: 'h' | 'v',
-    fixed: number,
-    from: number,
-    to: number,
-    s: number,
-    e: number
-  ): Occluder[] => {
-    const out: Occluder[] = []
-    const mk = (p1: number, p2: number, n: number): void => {
-      if (p2 - p1 < g * 0.2) return
-      out.push(
-        along === 'h'
-          ? seg(`${id}${n}`, p1, fixed, p2, fixed)
-          : seg(`${id}${n}`, fixed, p1, fixed, p2)
-      )
-    }
-    mk(from, s, 1)
-    mk(e, to, 2)
-    return out
-  }
-
-  const hull: Occluder[] = [
-    // chamfer diagonals
-    seg('tl', c, 0, 0, c),
-    seg('tr', W - c, 0, W, c),
-    seg('br', W, H - c, W - c, H),
-    seg('bl', c, H, 0, H - c),
-    // straight sides, each carved for its airlock opening
-    ...carvedSide('top', 'h', 0, c, W - c, vx1, vx2),
-    ...carvedSide('bottom', 'h', H, c, W - c, vx1, vx2),
-    ...carvedSide('left', 'v', 0, c, H - c, hy1, hy2),
-    ...carvedSide('right', 'v', W, c, H - c, hy1, hy2)
-  ]
-
-  // Airlock doors sit on the hull line across each opening.
-  const airlocks: Occluder[] = [
-    {type: 'door', id: 'airlock-n', x1: vx1, y1: 0, x2: vx2, y2: 0, open: false},
-    {type: 'door', id: 'airlock-s', x1: vx1, y1: H, x2: vx2, y2: H, open: false},
-    {type: 'door', id: 'airlock-w', x1: 0, y1: hy1, x2: 0, y2: hy2, open: false},
-    {type: 'door', id: 'airlock-e', x1: W, y1: hy1, x2: W, y2: hy2, open: false}
-  ]
-
-  // Corridor stubs crossing the margin (for floor shading), in cell coords.
-  const fx2 = layout.field.x + layout.field.w
-  const fy2 = layout.field.y + layout.field.h
-  const stubs: Rect[] = [
-    {x: layout.vBand.x, y: 0, w: layout.vBand.w, h: m},
-    {x: layout.vBand.x, y: fy2, w: layout.vBand.w, h: rows - fy2},
-    {x: 0, y: layout.hBand.y, w: m, h: layout.hBand.h},
-    {x: fx2, y: layout.hBand.y, w: cols - fx2, h: layout.hBand.h}
-  ]
-
-  // Stub side walls bridge the margin from the field edge to the hull.
   const sw = (id: string, x1: number, y1: number, x2: number, y2: number): Occluder => ({
     type: 'wall',
     id: `stub-${id}`,
@@ -391,16 +384,69 @@ const hullAndAirlocks = (
     x2,
     y2
   })
-  const stubWalls: Occluder[] = [
-    sw('n1', vx1, 0, vx1, m * g),
-    sw('n2', vx2, 0, vx2, m * g),
-    sw('s1', vx1, fy2 * g, vx1, H),
-    sw('s2', vx2, fy2 * g, vx2, H),
-    sw('w1', 0, hy1, m * g, hy1),
-    sw('w2', 0, hy2, m * g, hy2),
-    sw('e1', fx2 * g, hy1, W, hy1),
-    sw('e2', fx2 * g, hy2, W, hy2)
+
+  // A straight hull side carved to leave each airlock opening as a gap.
+  const carvedSide = (
+    id: string,
+    along: 'h' | 'v',
+    fixed: number,
+    from: number,
+    to: number,
+    openings: [number, number][]
+  ): Occluder[] => {
+    const out: Occluder[] = []
+    let cursor = from
+    let n = 0
+    const mk = (p1: number, p2: number): void => {
+      if (p2 - p1 < g * 0.2) return
+      n += 1
+      out.push(along === 'h' ? seg(`${id}${n}`, p1, fixed, p2, fixed) : seg(`${id}${n}`, fixed, p1, fixed, p2))
+    }
+    for (const [s, e] of [...openings].sort((a, b) => a[0] - b[0])) {
+      mk(cursor, s)
+      cursor = Math.max(cursor, e)
+    }
+    mk(cursor, to)
+    return out
+  }
+
+  const topBottom = layout.vBands.map((b): [number, number] => [b.x * g, (b.x + b.w) * g])
+  const leftRight = layout.hBands.map((b): [number, number] => [b.y * g, (b.y + b.h) * g])
+
+  const hull: Occluder[] = [
+    seg('tl', c, 0, 0, c),
+    seg('tr', W - c, 0, W, c),
+    seg('br', W, H - c, W - c, H),
+    seg('bl', c, H, 0, H - c),
+    ...carvedSide('top', 'h', 0, c, W - c, topBottom),
+    ...carvedSide('bottom', 'h', H, c, W - c, topBottom),
+    ...carvedSide('left', 'v', 0, c, H - c, leftRight),
+    ...carvedSide('right', 'v', W, c, H - c, leftRight)
   ]
+
+  const airlocks: Occluder[] = []
+  const stubs: Rect[] = []
+  const stubWalls: Occluder[] = []
+  layout.vBands.forEach((b, i) => {
+    const x1 = b.x * g
+    const x2 = (b.x + b.w) * g
+    airlocks.push({type: 'door', id: `airlock-n${i}`, x1, y1: 0, x2, y2: 0, open: false})
+    airlocks.push({type: 'door', id: `airlock-s${i}`, x1, y1: H, x2, y2: H, open: false})
+    stubs.push({x: b.x, y: 0, w: b.w, h: field.y})
+    stubs.push({x: b.x, y: fy2, w: b.w, h: rows - fy2})
+    stubWalls.push(sw(`n${i}a`, x1, 0, x1, field.y * g), sw(`n${i}b`, x2, 0, x2, field.y * g))
+    stubWalls.push(sw(`s${i}a`, x1, fy2 * g, x1, H), sw(`s${i}b`, x2, fy2 * g, x2, H))
+  })
+  layout.hBands.forEach((b, i) => {
+    const y1 = b.y * g
+    const y2 = (b.y + b.h) * g
+    airlocks.push({type: 'door', id: `airlock-w${i}`, x1: 0, y1, x2: 0, y2, open: false})
+    airlocks.push({type: 'door', id: `airlock-e${i}`, x1: W, y1, x2: W, y2, open: false})
+    stubs.push({x: 0, y: b.y, w: field.x, h: b.h})
+    stubs.push({x: fx2, y: b.y, w: cols - fx2, h: b.h})
+    stubWalls.push(sw(`w${i}a`, 0, y1, field.x * g, y1), sw(`w${i}b`, 0, y2, field.x * g, y2))
+    stubWalls.push(sw(`e${i}a`, fx2 * g, y1, W, y1), sw(`e${i}b`, fx2 * g, y2, W, y2))
+  })
 
   return {hull, airlocks, stubs, stubWalls}
 }
@@ -479,15 +525,13 @@ export const generateMap = (spec: MapSpec): GeneratedMap => {
   const g = spec.gridScale
 
   const layout = buildLayout(rng, spec)
+  const {field} = layout
   const boundaries = [...collectBoundaries(layout.tag).values()]
   const doors = chooseDoors(rng, layout.rooms.length, boundaries)
 
   // Door occluders + the set of edges to skip when extracting walls.
   const doorEdges = new Set<string>()
-  const px = (cx: number, cy: number): [number, number] => [
-    (layout.field.x + cx) * g,
-    (layout.field.y + cy) * g
-  ]
+  const px = (cx: number, cy: number): [number, number] => [(field.x + cx) * g, (field.y + cy) * g]
   const doorOccluders: Occluder[] = doors.map(({edge}, index) => {
     doorEdges.add(edgeKey(edge))
     const [x1, y1] = px(edge.x, edge.y)
@@ -495,22 +539,26 @@ export const generateMap = (spec: MapSpec): GeneratedMap => {
     return {type: 'door', id: `door-${String(index + 1).padStart(3, '0')}`, x1, y1, x2, y2, open: false}
   })
 
-  // Open the field perimeter where the corridor bands meet it (airlock inner
-  // openings) so the corridor connects out to the stubs.
-  const fw = layout.field.w
-  const fh = layout.field.h
-  const vlx = layout.vBand.x - layout.field.x
-  const hly = layout.hBand.y - layout.field.y
-  for (let k = 0; k < layout.vBand.w; k += 1) {
-    doorEdges.add(edgeKey({x: vlx + k, y: 0, horizontal: true}))
-    doorEdges.add(edgeKey({x: vlx + k, y: fh, horizontal: true}))
+  // Open the field perimeter where corridor bands meet it (airlock inner
+  // openings) so the corridor connects out through the margin to the stubs.
+  const fw = field.w
+  const fh = field.h
+  for (const b of layout.vBands) {
+    const lx = b.x - field.x
+    for (let k = 0; k < b.w; k += 1) {
+      doorEdges.add(edgeKey({x: lx + k, y: 0, horizontal: true}))
+      doorEdges.add(edgeKey({x: lx + k, y: fh, horizontal: true}))
+    }
   }
-  for (let k = 0; k < layout.hBand.h; k += 1) {
-    doorEdges.add(edgeKey({x: 0, y: hly + k, horizontal: false}))
-    doorEdges.add(edgeKey({x: fw, y: hly + k, horizontal: false}))
+  for (const b of layout.hBands) {
+    const ly = b.y - field.y
+    for (let k = 0; k < b.h; k += 1) {
+      doorEdges.add(edgeKey({x: 0, y: ly + k, horizontal: false}))
+      doorEdges.add(edgeKey({x: fw, y: ly + k, horizontal: false}))
+    }
   }
 
-  const walls = extractWalls(layout.tag, doorEdges, layout.field, g)
+  const walls = extractWalls(layout.tag, doorEdges, field, g)
   const {hull, airlocks, stubs, stubWalls} = hullAndAirlocks(spec, layout)
   const decorations = layout.rooms.flatMap((room) => furnishRoom(rng, room, g, spec.furnitureDensity))
 
@@ -520,11 +568,7 @@ export const generateMap = (spec: MapSpec): GeneratedMap => {
     height: spec.rows * g,
     gridScale: g,
     rooms: layout.rooms,
-    corridors: [
-      {x: layout.vBand.x, y: layout.field.y, w: layout.vBand.w, h: layout.field.h},
-      {x: layout.field.x, y: layout.hBand.y, w: layout.field.w, h: layout.hBand.h},
-      ...stubs
-    ],
+    corridors: [...layout.corridorRects, ...stubs],
     decorations,
     occluders: [...walls, ...stubWalls, ...hull, ...doorOccluders, ...airlocks]
   }
