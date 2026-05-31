@@ -516,9 +516,95 @@ h2 {
   text-align: center;
 }
 
-.field-inline input:focus-visible {
+.field-inline input:focus-visible,
+.field-inline select:focus-visible {
   outline: 2px solid var(--tre-green);
   outline-offset: 0;
+}
+
+/* Generate controls: a compact two-column grid of labelled fields. */
+.gen-grid {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.gen-grid .field-inline {
+  width: 100%;
+  justify-content: space-between;
+}
+
+.gen-grid select {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 24px;
+  border: 0;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--tre-white);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.gen-grid .gen-required {
+  grid-column: 1 / -1;
+}
+
+.gen-required input[type='text'] {
+  flex: 1 1 auto;
+  width: auto;
+  text-align: left;
+  text-transform: none;
+}
+
+.gen-size {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.gen-size input {
+  width: 2.4rem;
+}
+
+.gen-size span {
+  color: var(--tre-muted);
+}
+
+.gen-dice {
+  align-self: stretch;
+  padding: 0 12px;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.drawer-badge-toggle {
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--tre-green);
+  background: rgba(var(--tre-green-rgb), 0.12);
+  border: 1px solid rgba(var(--tre-green-rgb), 0.4);
+  border-radius: 999px;
+  padding: 3px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.drawer-badge-toggle[aria-pressed='false'] {
+  color: var(--tre-muted);
+  background: transparent;
+  border-color: var(--tre-border);
+}
+
+.drawer-badge-toggle:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 .review-toolbar {

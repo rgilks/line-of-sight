@@ -16,8 +16,10 @@ import {
   placements,
   previewPoint,
   renderTick,
+  roomLabels,
   screenPixels,
   selectedOccluderId,
+  showRoomLabels,
   sightRadius,
   tokenDrag,
   tool
@@ -49,8 +51,32 @@ export const renderBoard = (): void => {
   drawPovRange()
   drawTokens()
   drawDebugWalls()
+  drawRoomLabels()
   drawEditOverlay()
   drawPreview()
+}
+
+// GM-only room labels for generated decks — terminal green with a dark halo so
+// they read over furniture. A separate pass gated by showRoomLabels, so the GM
+// can hide them to see exactly the unlabelled map players get.
+const drawRoomLabels = (): void => {
+  if (!showRoomLabels.value || roomLabels.value.length === 0) return
+  ctx.save()
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.lineJoin = 'round'
+  for (const room of roomLabels.value) {
+    const size = Math.max(8, Math.min(15, Math.min(room.w, room.h) * 0.18))
+    ctx.font = `600 ${size}px "JetBrains Mono", monospace`
+    const cx = room.x + room.w / 2
+    const cy = room.y + room.h / 2
+    ctx.strokeStyle = 'rgba(5, 5, 5, 0.85)'
+    ctx.lineWidth = Math.max(2, size * 0.28)
+    ctx.strokeText(room.label, cx, cy)
+    ctx.fillStyle = 'rgba(57, 255, 20, 0.9)' // --tre-green
+    ctx.fillText(room.label, cx, cy)
+  }
+  ctx.restore()
 }
 
 const syncCanvasCursor = (): void => {

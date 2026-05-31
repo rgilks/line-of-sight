@@ -13,19 +13,24 @@ import {
   drawerOpen,
   dropDepth,
   exploredCtx,
+  genSpec,
   gpuStatus,
   gridValue,
   hideUnseen,
   preloadCounterPortraits,
   requestCanvasRender,
+  roomLabels,
   runtimeStatus,
   setStatus,
   setView,
+  showRoomLabels,
   showWalls,
   sightValue,
   tiles,
   tool
 } from './state'
+import type {RoomType, Theme} from './synth/types'
+import {GEN_ROOM_TYPES, GEN_THEMES, loadGeneratedMap, randomizedSpec} from './generate-board'
 import type {Tool} from './types'
 import {analyzeTiles, arrangeTiles, loadMapFiles, reorderTile, syncCanvasSize} from './board'
 import {getPovToken, isDoorOpen, markExplored, setDoorOpen, setPovToken} from './visibility'
@@ -60,6 +65,16 @@ const counterDefinitionFor = (kind: (typeof counterDefinitions)[number]['kind'])
   counterDefinitions.find((definition) => definition.kind === kind) ?? counterDefinitions[0]
 
 preloadCounterPortraits()
+
+const updateGenSpec = (patch: Partial<typeof genSpec.value>): void => {
+  genSpec.value = {...genSpec.value, ...patch}
+}
+
+const parseRequired = (raw: string): RoomType[] =>
+  raw
+    .split(',')
+    .map((entry) => entry.trim().toLowerCase())
+    .filter((entry): entry is RoomType => (GEN_ROOM_TYPES as string[]).includes(entry))
 
 const Icon = ({children}: {children: ComponentChildren}): JSX.Element => (
   <svg className="button-icon" viewBox="0 0 24 24" aria-hidden="true">
@@ -114,7 +129,11 @@ const App = (): JSX.Element => {
     void detectWebGpu().then((status) => {
       gpuStatus.value = status
     })
-    setStatus('Ready. Select a local map image to start.')
+    // Open on a generated deck rather than a blank board. Import still works for
+    // bringing your own map (Select map / drag-drop).
+    const firstSpec = randomizedSpec(genSpec.value)
+    genSpec.value = firstSpec
+    void loadGeneratedMap(firstSpec)
 
     return () => {
       dispose()
@@ -128,6 +147,8 @@ const App = (): JSX.Element => {
   const selectedToken = getSelectedToken()
   const povToken = getPovToken()
   const nextCounterLabel = nextTokenLabel(activeCounterGroup.value)
+  const spec = genSpec.value
+  const hasRoomLabels = roomLabels.value.length > 0
 
   return (
     <main className="app-shell">
@@ -192,7 +213,22 @@ const App = (): JSX.Element => {
           </header>
 
           <div className="drawer-actions" aria-label="Primary map actions">
-            <label className="file-button drawer-btn-primary">
+            <button
+              type="button"
+              className="drawer-btn-primary"
+              title="Generate a new starship deck from the current settings"
+              onClick={() => {
+                void loadGeneratedMap(genSpec.value)
+              }}
+            >
+              <Icon>
+                <path d="M3 7.5 12 3l9 4.5-9 4.5-9-4.5Z" />
+                <path d="m3 12 9 4.5L21 12" />
+                <path d="m3 16.5 9 4.5 9-4.5" />
+              </Icon>
+              <span>Generate map</span>
+            </button>
+            <label className="file-button drawer-btn-secondary" title="Import your own map image to trace walls">
               <input
                 id="fileInput"
                 type="file"
@@ -208,11 +244,123 @@ const App = (): JSX.Element => {
                 <path d="m7 8 5-5 5 5" />
                 <path d="M5 15v3a3 3 0 0 0 3 3h8a3 3 0 0 0 3-3v-3" />
               </Icon>
-              <span>Select map</span>
+              <span>Import image</span>
             </label>
           </div>
 
           <div className="drawer-content workbench-content">
+            <section className="drawer-section">
+              <div className="drawer-section-head">
+                <h2>Generate</h2>
+                <button
+                  type="button"
+                  className="drawer-badge-toggle"
+                  aria-pressed={showRoomLabels.value}
+                  disabled={!hasRoomLabels}
+                  title="Show or hide GM-only room labels (players never see them)"
+                  onClick={() => {
+                    showRoomLabels.value = !showRoomLabels.value
+                    requestCanvasRender()
+                  }}
+                >
+                  {showRoomLabels.value ? 'Labels: GM' : 'Labels: off'}
+                </button>
+              </div>
+              <p className="empty-hint">
+                A random deck loads on start. Tweak the settings and Generate, or 🎲 for a new seed.
+              </p>
+              <div className="gen-grid">
+                <label className="field-inline" title="Map seed — the same seed always makes the same deck">
+                  <span>Seed</span>
+                  <input
+                    type="number"
+                    value={spec.seed}
+                    onInput={(event) => {
+                      updateGenSpec({seed: Math.max(0, Number(event.currentTarget.value) || 0)})
+                    }}
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="drawer-btn-secondary gen-dice"
+                  title="Random seed + theme, then generate"
+                  onClick={() => {
+                    const next = randomizedSpec(genSpec.value)
+                    genSpec.value = next
+                    void loadGeneratedMap(next)
+                  }}
+                >
+                  🎲
+                </button>
+                <label className="field-inline" title="Deck theme — shifts the room mix and palette">
+                  <span>Theme</span>
+                  <select
+                    value={spec.theme}
+                    onChange={(event) => {
+                      updateGenSpec({theme: event.currentTarget.value as Theme})
+                    }}
+                  >
+                    {GEN_THEMES.map((theme) => (
+                      <option key={theme} value={theme}>
+                        {theme}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field-inline" title="Deck size in grid cells (width × height)">
+                  <span>Size</span>
+                  <span className="gen-size">
+                    <input
+                      type="number"
+                      min="12"
+                      max="48"
+                      value={spec.cols}
+                      onInput={(event) => {
+                        updateGenSpec({cols: Math.max(12, Math.min(48, Number(event.currentTarget.value) || 28))})
+                      }}
+                    />
+                    <span aria-hidden="true">×</span>
+                    <input
+                      type="number"
+                      min="12"
+                      max="48"
+                      value={spec.rows}
+                      onInput={(event) => {
+                        updateGenSpec({rows: Math.max(12, Math.min(48, Number(event.currentTarget.value) || 28))})
+                      }}
+                    />
+                  </span>
+                </label>
+                <label className="field-inline" title="How densely rooms are furnished">
+                  <span>Furniture</span>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.1"
+                    value={spec.furnitureDensity}
+                    onInput={(event) => {
+                      updateGenSpec({furnitureDensity: Number(event.currentTarget.value)})
+                    }}
+                  />
+                </label>
+                <label
+                  className="field-inline gen-required"
+                  title="Comma-separated room types to force in, e.g. bridge, cargo"
+                >
+                  <span>Require</span>
+                  <input
+                    type="text"
+                    placeholder="bridge, cargo"
+                    value={spec.required.join(', ')}
+                    onInput={(event) => {
+                      updateGenSpec({required: parseRequired(event.currentTarget.value)})
+                    }}
+                  />
+                </label>
+              </div>
+            </section>
+
             <section className="drawer-section">
               <div className="drawer-section-head">
                 <h2>Map</h2>
@@ -278,7 +426,7 @@ const App = (): JSX.Element => {
                 </button>
               </div>
               {tiles.value.length === 0 ? (
-                <p className="empty-hint">Drop an image on the board or use Select map.</p>
+                <p className="empty-hint">Generate a deck, or drop/Import an image to trace walls.</p>
               ) : (
                 <>
                   {activeTileCount > 1 ? (

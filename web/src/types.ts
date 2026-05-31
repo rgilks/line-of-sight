@@ -17,6 +17,17 @@ export type Placement = {
   y: number
 }
 
+// A GM-only room label for a generated deck, in board pixels. Drawn as a
+// toggleable overlay on the board — never baked into the map image, so players
+// (and the published map) never see it.
+export type RoomLabel = {
+  label: string
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
 export type BoardSize = {
   width: number
   height: number

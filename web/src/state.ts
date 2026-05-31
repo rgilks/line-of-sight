@@ -8,11 +8,13 @@ import type {
   EditDrag,
   EditorSnapshot,
   Placement,
+  RoomLabel,
   Tile,
   Token,
   TokenDrag,
   Tool
 } from './types'
+import {defaultSpec, type MapSpec} from './synth/types'
 
 export const tool = signal<Tool>('viewer')
 export const tiles = signal<Tile[]>([])
@@ -47,6 +49,12 @@ export const renderTick = signal(0)
 export const drawerOpen = signal(true)
 export const publishTableId = signal('demo')
 export const tablePublished = signal(false)
+
+// Synthetic map generation: the current spec the Generate controls edit, the
+// GM-only room labels for the active generated deck, and whether they show.
+export const genSpec = signal<MapSpec>(defaultSpec(1))
+export const roomLabels = signal<RoomLabel[]>([])
+export const showRoomLabels = signal(true)
 
 // Live bindings for the mounted canvas/viewport, set once from App via setView.
 // Exported `let` so every module reads the current value after the UI mounts.

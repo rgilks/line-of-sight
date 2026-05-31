@@ -20,6 +20,7 @@ import {
   occluders,
   placements,
   povTokenId,
+  roomLabels,
   selectedOccluderId,
   selectedTokenId,
   setStatus,
@@ -85,6 +86,7 @@ export const loadMapFiles = async (files: Iterable<File>): Promise<void> => {
   occluders.value = []
   doorStates.value = {}
   tokens.value = []
+  roomLabels.value = [] // imported maps have no generated room labels
   selectedOccluderId.value = null
   hoveredOccluderId.value = null
   selectedTokenId.value = null
