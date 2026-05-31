@@ -17,6 +17,10 @@ formats in more depth.
 - [WALL_DOOR_DETECTION.md](WALL_DOOR_DETECTION.md) — research + recommended
   detector pipeline (stroke-thickness gate, distance transform, LSD).
   Forward-looking; the primitive to move toward.
+- [SYNTHETIC_MAPS.md](SYNTHETIC_MAPS.md) — design + feasibility for generating
+  our own maps from the structural layer outward (walls/doors first), instead of
+  detecting structure from raster art. Forward-looking; the `spike/synthetic-maps`
+  direction.
 - [diagrams/](diagrams/README.md) — Graphviz/DOT sources + rendered PNGs.
 
 ## Project layout
