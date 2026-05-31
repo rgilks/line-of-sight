@@ -101,22 +101,38 @@ rooms/corridors/walls/doors/hull/airlocks, honored `required` types,
 non-overlapping rooms, full reachability through the corridor/door graph, and
 in-bounds furniture. `scripts/spike-shots.mjs` renders sample seeds to PNGs.
 
-## Current look, and what is left
+## Current look
 
-The maps read as plausible decks: an octagonal hull with airlocks, a corridor
-cross with rooms opening off it, furniture per function, and an LOS overlay that
-lines up exactly with the walls. The gaps from the hand-drawn geomorph aesthetic,
-in rough order of leverage:
+The maps read as plausible decks: an octagonal hull with airlocks, a varied
+corridor network with rooms opening off it, chamfered feature-room corners,
+function-specific furniture at geomorph-like density, and an LOS overlay that
+lines up exactly with the walls.
 
-1. **Corridor-topology variety.** Every deck is currently a single centered
-   cross with four symmetric quadrants, so the macro-layout repeats across seeds.
-   Needs offset/branching/looping corridors and asymmetric partitions.
-2. **Room-shape vocabulary.** Rooms are axis-aligned rectangles; the originals
-   use octagons, circles, and chamfers (engineering reactors, hangars).
-3. **Decoration grammar.** Furniture is simple glyphs and sparse; the originals
-   are densely, specifically furnished.
-4. **Hull margin detail.** The margin is empty; the originals fill it with fuel
+Built so far:
+
+- **Corridor-topology variety.** Per-seed choice of full-span corridor bands
+  placed off-centre — spine, off-centre cross, ladder, grid — with asymmetric
+  regions between them, so the macro-layout differs across seeds.
+- **Singular focal rooms.** Bridge and medbay appear at most once per deck (on the
+  largest rooms); other rooms fill from a weighted per-theme palette.
+- **Chamfered corners.** Corridor-facing room corners clip into 45° diagonals
+  where the geometry allows, with LOS sealed by construction (the diagonal always
+  lands on a real wall; otherwise the corner stays square).
+- **Furniture grammar.** Paired bunk rows with lockers (quarters), round tables
+  ringed by chairs (common), reactor core plus machinery (engineering), a console
+  horseshoe (bridge), bed bank plus cabinets (medbay), packed crates (cargo),
+  shelf runs (storage). Decorative only — never occluders.
+
+## What is left
+
+In rough order of leverage:
+
+1. **Whole-room shapes.** Beyond corner chamfers, the originals use octagonal and
+   circular feature rooms (reactor halls, hangars).
+2. **Hull margin detail.** The margin is empty; the originals fill it with fuel
    tanks, conduits, escape pods.
+3. **Furniture polish.** Bunks read a little large in big quarters, and furniture
+   can visually overlap a chamfered corner (cosmetic only — not an occluder).
 
 ## The LLM loop (next, kept off the critical path)
 
@@ -127,7 +143,6 @@ truth — and the generator must produce valid maps with it switched off:
   adjacency hints).
 - **Critic.** Render → critique ("too sterile", "rooms too uniform") → adjust
   spec → regenerate.
-- **Decorator.** Richer per-room furniture, toward the geomorph density.
 
 ## Relationship to the detection work
 
