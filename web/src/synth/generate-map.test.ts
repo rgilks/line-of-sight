@@ -108,4 +108,45 @@ describe('generateMap', () => {
       expect(d.y + d.h).toBeLessThanOrEqual(m.height + 1)
     }
   })
+
+  it('every chamfer diagonal seals to straight walls (exact LOS)', () => {
+    // Each chamfer endpoint must lie ON some axis-aligned wall segment — not
+    // merely coincide with a wall endpoint, since merged runs put a valid seal
+    // mid-segment. If an endpoint is on no wall, sight leaks through the corner.
+    const eps = 0.001
+    const onSegment = (px: number, py: number, w: {x1: number; y1: number; x2: number; y2: number}): boolean => {
+      if (Math.abs(w.y1 - w.y2) < eps) {
+        // horizontal
+        return (
+          Math.abs(py - w.y1) < eps &&
+          px >= Math.min(w.x1, w.x2) - eps &&
+          px <= Math.max(w.x1, w.x2) + eps
+        )
+      }
+      if (Math.abs(w.x1 - w.x2) < eps) {
+        // vertical
+        return (
+          Math.abs(px - w.x1) < eps &&
+          py >= Math.min(w.y1, w.y2) - eps &&
+          py <= Math.max(w.y1, w.y2) + eps
+        )
+      }
+      return false // diagonal wall — not an axis-aligned sealer
+    }
+
+    let chamferTotal = 0
+    for (let seed = 1; seed <= 60; seed += 1) {
+      const m = generateMap({...defaultSpec(seed), cols: 30, rows: 30})
+      const straight = walls(m).filter((w) => !w.id.startsWith('cham'))
+      const chamfers = walls(m).filter((w) => w.id.startsWith('cham'))
+      chamferTotal += chamfers.length
+      for (const c of chamfers) {
+        const a = straight.some((w) => onSegment(c.x1, c.y1, w))
+        const b = straight.some((w) => onSegment(c.x2, c.y2, w))
+        expect(a, `cham ${c.id} seed ${seed} end1 unsealed`).toBe(true)
+        expect(b, `cham ${c.id} seed ${seed} end2 unsealed`).toBe(true)
+      }
+    }
+    expect(chamferTotal).toBeGreaterThan(0) // the feature actually fires
+  })
 })

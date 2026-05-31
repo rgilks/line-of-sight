@@ -368,6 +368,104 @@ const extractWalls = (tag: number[][], doorEdges: Set<string>, field: Rect, g: n
   return walls
 }
 
+// ---- Chamfered room corners (the geomorph angled-corner look) ----------------
+
+// Clip corridor-facing room corners into 45° diagonals. For each clipped corner
+// the two OUTER wall cells of that corner are suppressed (added to `skip`) and a
+// single diagonal occluder spans between where they end, replacing the square
+// step with an angle.
+//
+// LOS is sealed by construction. This runs AFTER doors are fixed and only clips a
+// corner when ALL of:
+//   - both outward neighbours are corridor (so the corner faces open space and no
+//     wall nub is left behind),
+//   - the two "sealing" walls the diagonal lands on are real walls and carry no
+//     door (so each diagonal endpoint sits exactly on a straight wall),
+//   - none of this corner's edges collide with another already-clipped corner
+//     (greedy, so two chamfers never fight over one wall).
+// A corner that fails any check is left square. One cell deep is the only depth
+// where the diagonal aligns to the grid without leaving a half-cell gap. The tag
+// grid is NOT mutated — only wall occluders change.
+const chamferCorners = (
+  rng: Rng,
+  rooms: Room[],
+  tag: number[][],
+  field: Rect,
+  g: number,
+  doorEdges: Set<string>
+): {walls: Occluder[]; skip: Set<string>} => {
+  const walls: Occluder[] = []
+  const skip = new Set<string>()
+  const protectedSet = new Set<string>()
+  let id = 0
+  const px = (cx: number, cy: number): [number, number] => [(field.x + cx) * g, (field.y + cy) * g]
+
+  type Corner = {
+    out: [number, number][] // outward neighbour cells (must be corridor)
+    skip: Edge[] // the corner's two outer wall cells, suppressed
+    protect: Edge[] // the two walls the diagonal lands on (must stay walls)
+    a: [number, number] // diagonal endpoints (grid-corner coords)
+    b: [number, number]
+  }
+
+  for (const room of rooms) {
+    const rx = room.x - field.x
+    const ry = room.y - field.y
+    const {w: rw, h: rh} = room
+    if (Math.min(rw, rh) < 3) continue
+    const X = rx + rw
+    const Y = ry + rh
+
+    const corners: Corner[] = [
+      {
+        out: [[rx, ry - 1], [rx - 1, ry]],
+        skip: [{x: rx, y: ry, horizontal: true}, {x: rx, y: ry, horizontal: false}],
+        protect: [{x: rx + 1, y: ry, horizontal: true}, {x: rx, y: ry + 1, horizontal: false}],
+        a: [rx + 1, ry],
+        b: [rx, ry + 1]
+      },
+      {
+        out: [[X - 1, ry - 1], [X, ry]],
+        skip: [{x: X - 1, y: ry, horizontal: true}, {x: X, y: ry, horizontal: false}],
+        protect: [{x: X - 2, y: ry, horizontal: true}, {x: X, y: ry + 1, horizontal: false}],
+        a: [X - 1, ry],
+        b: [X, ry + 1]
+      },
+      {
+        out: [[rx, Y], [rx - 1, Y - 1]],
+        skip: [{x: rx, y: Y, horizontal: true}, {x: rx, y: Y - 1, horizontal: false}],
+        protect: [{x: rx + 1, y: Y, horizontal: true}, {x: rx, y: Y - 2, horizontal: false}],
+        a: [rx + 1, Y],
+        b: [rx, Y - 1]
+      },
+      {
+        out: [[X - 1, Y], [X, Y - 1]],
+        skip: [{x: X - 1, y: Y, horizontal: true}, {x: X, y: Y - 1, horizontal: false}],
+        protect: [{x: X - 2, y: Y, horizontal: true}, {x: X, y: Y - 2, horizontal: false}],
+        a: [X - 1, Y],
+        b: [X, Y - 1]
+      }
+    ]
+
+    for (const c of corners) {
+      if (!chance(rng, 0.5)) continue
+      if (c.out.some(([nx, ny]) => tagAt(tag, nx, ny) !== CORRIDOR)) continue
+      const skipKeys = c.skip.map(edgeKey)
+      const protectKeys = c.protect.map(edgeKey)
+      // Don't suppress a doorway, don't land a diagonal on a door or opening, and
+      // don't collide with an already-committed chamfer.
+      if (skipKeys.some((k) => doorEdges.has(k) || protectedSet.has(k))) continue
+      if (protectKeys.some((k) => doorEdges.has(k) || skip.has(k))) continue
+      skipKeys.forEach((k) => skip.add(k))
+      protectKeys.forEach((k) => protectedSet.add(k))
+      const [ax, ay] = px(c.a[0], c.a[1])
+      const [bx, by] = px(c.b[0], c.b[1])
+      walls.push({type: 'wall', id: `cham-${(id += 1)}`, x1: ax, y1: ay, x2: bx, y2: by})
+    }
+  }
+  return {walls, skip}
+}
+
 // ---- Hull octagon + airlocks ------------------------------------------------
 
 const hullAndAirlocks = (
@@ -542,6 +640,7 @@ export const generateMap = (spec: MapSpec): GeneratedMap => {
 
   const layout = buildLayout(rng, spec)
   const {field} = layout
+
   const boundaries = [...collectBoundaries(layout.tag).values()]
   const doors = chooseDoors(rng, layout.rooms.length, boundaries)
 
@@ -574,6 +673,12 @@ export const generateMap = (spec: MapSpec): GeneratedMap => {
     }
   }
 
+  // Chamfer corridor-facing room corners now that doors are fixed: the chamfer
+  // needs to know which walls carry doors so its diagonals never land on one.
+  // Its suppressed corner-cells join doorEdges so wall extraction omits them.
+  const chamfer = chamferCorners(rng, layout.rooms, layout.tag, field, g, doorEdges)
+  for (const k of chamfer.skip) doorEdges.add(k)
+
   const walls = extractWalls(layout.tag, doorEdges, field, g)
   const {hull, airlocks, stubs, stubWalls} = hullAndAirlocks(spec, layout)
   const decorations = layout.rooms.flatMap((room) => furnishRoom(rng, room, g, spec.furnitureDensity))
@@ -586,6 +691,6 @@ export const generateMap = (spec: MapSpec): GeneratedMap => {
     rooms: layout.rooms,
     corridors: [...layout.corridorRects, ...stubs],
     decorations,
-    occluders: [...walls, ...stubWalls, ...hull, ...doorOccluders, ...airlocks]
+    occluders: [...walls, ...chamfer.walls, ...stubWalls, ...hull, ...doorOccluders, ...airlocks]
   }
 }
