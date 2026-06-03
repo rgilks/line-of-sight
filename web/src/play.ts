@@ -92,6 +92,15 @@ const anim = new Map<string, Anim>()
 let rafId = 0
 let dirty = false
 
+// Player fog memory: an offscreen mask of everywhere this player's POV has ever
+// seen. Never-seen areas are fully hidden (opaque); explored-but-not-currently-
+// visible areas are greyed (remembered); the current visibility polygon is clear.
+// Reset when the board geometry changes (a new deck means old memory is stale).
+const exploredCanvas = document.createElement('canvas')
+const exploredCtx = exploredCanvas.getContext('2d')
+const fogScratch = document.createElement('canvas')
+const fogScratchCtx = fogScratch.getContext('2d')
+let exploredKey = ''
 
 let canvas: HTMLCanvasElement
 let ctx: CanvasRenderingContext2D
@@ -623,10 +632,13 @@ const tracePolygon = (target: CanvasRenderingContext2D, polygon: Point[]): void 
   target.closePath()
 }
 
-// Player fog: a player sees ONLY what is currently within line of sight. The
-// whole board is filled fully opaque, then the current visibility polygon is cut
-// out — so anywhere not currently visible (whether previously explored or never
-// seen) shows nothing at all.
+// Three-tier player fog:
+//   - currently visible (inside the POV polygon) — clear,
+//   - explored but not currently visible — a translucent grey veil (memory),
+//   - never seen — FULLY opaque dark (nothing shows through).
+// An accumulating offscreen mask records everywhere this player has ever seen, so
+// moving permanently reveals visited rooms as grey memory without exposing the
+// rest. The mask resets when the board geometry changes.
 const drawFog = (active: Board, me: Token): void => {
   const polygon = visibilityPolygon(
     me.x,
@@ -638,8 +650,28 @@ const drawFog = (active: Board, me: Token): void => {
     active.doorStates
   )
 
+  // Reset and resize the explored mask when the board changes.
+  const key = `${active.assetRef}:${active.boardSeq ?? 0}:${active.width}x${active.height}`
+  if (exploredCtx && (exploredKey !== key || exploredCanvas.width !== active.width)) {
+    exploredKey = key
+    exploredCanvas.width = active.width
+    exploredCanvas.height = active.height
+    fogScratch.width = active.width
+    fogScratch.height = active.height
+    exploredCtx.clearRect(0, 0, active.width, active.height)
+  }
+  // Accumulate the current view into the explored (ever-seen) mask.
+  if (exploredCtx && polygon.length > 2) {
+    exploredCtx.fillStyle = '#fff'
+    exploredCtx.beginPath()
+    tracePolygon(exploredCtx, polygon)
+    exploredCtx.fill()
+  }
+
+  // Tier 2 — translucent grey veil over everything OUTSIDE the current view (this
+  // is what makes already-visited rooms read as dim "memory").
   ctx.save()
-  ctx.fillStyle = '#050606' // opaque — no map bleed-through outside the current view
+  ctx.fillStyle = 'rgba(8, 11, 10, 0.62)'
   ctx.beginPath()
   ctx.rect(0, 0, active.width, active.height)
   if (polygon.length > 2) {
@@ -649,6 +681,20 @@ const drawFog = (active: Board, me: Token): void => {
     ctx.fill()
   }
   ctx.restore()
+
+  // Tier 3 — FULLY opaque dark wherever NEVER explored: build solid opaque on a
+  // scratch canvas, punch out the ever-seen mask, then stamp it on. So never-seen
+  // cells are completely hidden while explored cells keep only the grey veil.
+  if (exploredCtx && fogScratchCtx) {
+    fogScratchCtx.globalCompositeOperation = 'source-over'
+    fogScratchCtx.clearRect(0, 0, active.width, active.height)
+    fogScratchCtx.fillStyle = '#050606' // opaque (alpha 1) — no bleed-through
+    fogScratchCtx.fillRect(0, 0, active.width, active.height)
+    fogScratchCtx.globalCompositeOperation = 'destination-out'
+    fogScratchCtx.drawImage(exploredCanvas, 0, 0)
+    fogScratchCtx.globalCompositeOperation = 'source-over'
+    ctx.drawImage(fogScratch, 0, 0)
+  }
 
   // Sight ring around the player.
   ctx.strokeStyle = 'rgba(74, 163, 255, 0.35)'
