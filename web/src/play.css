@@ -216,6 +216,28 @@ body {
   background: rgba(var(--green-rgb), 0.1);
 }
 
+.play-secondary {
+  width: 100%;
+  font: inherit;
+  font-size: 0.82rem;
+  color: var(--tre-white, #f5f5f5);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  margin-top: 0.4rem;
+  cursor: pointer;
+}
+
+.play-secondary:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.play-secondary:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .gm-door-lock {
   display: flex;
   align-items: center;

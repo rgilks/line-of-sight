@@ -1,5 +1,7 @@
 import {describe, expect, it} from 'vitest'
 import {
+  canToggleDoorFrom,
+  doorReach,
   moveRadiusPixels,
   SRD_DEFAULT_MOVE_FEET,
   SRD_FEET_PER_SQUARE,
@@ -79,5 +81,42 @@ describe('validateTokenMove', () => {
     const board = {...seedBoard(), occluders: []}
     const me = viewer(100, 100)
     expect(validateTokenMove(me, board, {x: 900, y: 900}, {gm: true}).ok).toBe(true)
+  })
+})
+
+describe('canToggleDoorFrom', () => {
+  const door = (): Board['occluders'][number] => ({
+    type: 'door',
+    id: 'seed-door',
+    x1: 500,
+    y1: 430,
+    x2: 500,
+    y2: 570,
+    open: false
+  })
+
+  it('lets an adjacent player toggle the door', () => {
+    const board = seedBoard() // gridScale 50 ⇒ reach 75px
+    expect(doorReach(board)).toBe(75)
+    // Standing 60px to the left of the door segment, beside its mid-span.
+    expect(canToggleDoorFrom(viewer(440, 500), board, door())).toBe(true)
+  })
+
+  it('blocks a player too far from the door', () => {
+    const board = seedBoard()
+    // 250px away — across the room.
+    expect(canToggleDoorFrom(viewer(250, 500), board, door())).toBe(false)
+  })
+
+  it('always lets the GM toggle, even with no token', () => {
+    const board = seedBoard()
+    expect(canToggleDoorFrom(null, board, door(), {gm: true})).toBe(true)
+    expect(canToggleDoorFrom(viewer(0, 0), board, door(), {gm: true})).toBe(true)
+  })
+
+  it('returns false for a non-door occluder', () => {
+    const board = seedBoard()
+    const wall = board.occluders[0]
+    expect(canToggleDoorFrom(viewer(500, 100), board, wall)).toBe(false)
   })
 })

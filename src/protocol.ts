@@ -1,7 +1,13 @@
 // Shared multiplayer protocol: command/event/view shapes plus the pure
 // per-viewer visibility gate. No Cloudflare or DOM dependencies — it reuses the
 // deterministic core, so the gate is identical to what the single-player UI draws.
-import {hasLineOfSight, visibilityPolygon, type Occluder, type Point} from '../web/src/los-core'
+import {
+  distanceToOccluder,
+  hasLineOfSight,
+  visibilityPolygon,
+  type Occluder,
+  type Point
+} from '../web/src/los-core'
 
 export type PlayerId = string
 
@@ -69,6 +75,11 @@ export type Board = {
    * humanoids). Individual tokens may override via `moveFeet`.
    */
   defaultMoveFeet?: number
+  /**
+   * Suggested join positions in board pixels (e.g. room centers of a generated
+   * deck). The table assigns joining players to these; absent ⇒ legacy spawn.
+   */
+  spawnPoints?: Point[]
 }
 
 // Client -> server intent. The caller's playerId travels in the POST envelope,
@@ -183,6 +194,25 @@ export const canMoveTokenTo = (
   destination: Point,
   options?: {gm?: boolean}
 ): boolean => validateTokenMove(viewer, board, destination, options).ok
+
+/** How close (in board pixels) a player's token must be to a door to toggle it. */
+export const doorReach = (board: Board): number => 1.5 * board.gridScale
+
+/**
+ * Whether a player may open/close a door from where their token stands. The GM
+ * always may. A player must be within `doorReach` of the door segment — the same
+ * rule the client uses for its hint, so UX and the server gate never disagree.
+ */
+export const canToggleDoorFrom = (
+  token: Token | null,
+  board: Board,
+  door: Occluder,
+  options?: {gm?: boolean}
+): boolean => {
+  if (options?.gm) return true
+  if (!token || door.type !== 'door') return false
+  return distanceToOccluder({x: token.x, y: token.y}, door) <= doorReach(board)
+}
 
 // Tokens a given viewer is allowed to see: always their own, plus others within
 // sight radius and not blocked by a wall or closed door. This is the entire

@@ -15,6 +15,28 @@ Multiple players join a shared board. Each owns a counter and sees the map from
 (or hidden NPCs') counters are unless their own POV can actually see them.
 A GM/referee sees everything and authors the board.
 
+## The front door (`/`) — host a table
+
+Visiting `/` is the **GM hosting view** (`web/index.html` → `web/src/play.ts`,
+`location.pathname === '/'`). On first load it generates a random starship deck,
+renders it to a PNG, and publishes it to a freshly-minted table
+(`web/src/host.ts` `publishGeneratedDeck` — generate → render → `POST /map` →
+`POST /board`), then connects as the GM. The minted table id is reflected into
+the URL (`history.replaceState`), so a host reload rejoins the same table and
+map rather than orphaning connected players. The host panel offers **Copy player
+link** (`/play?table=<id>`) and **New map** (regenerate + republish to the same
+id; the DO hot-swaps the board for everyone). The routes:
+
+| Route | Page | Role |
+| --- | --- | --- |
+| `/` | `play.ts` (host) | GM hosting a generated deck, sees all |
+| `/play?table=<id>` | `play.ts` | Player — own POV, fog, validated moves |
+| `/play?table=<id>&gm=1` | `play.ts` | GM spectator on an existing table |
+| `/edit` | `main.tsx` | Authoring tool — generate / import / trace walls |
+
+Generated decks carry **exact occluders**, so the host publishes them directly
+with no wall-detection pass; only `/edit` imports run detection.
+
 ## What is actually secret (the crux)
 
 Each client loads its **own local copy** of the map art (see
@@ -67,6 +89,24 @@ Defaults on publish: `feetPerSquare: 5`, `defaultMoveFeet: 30`. Board pixels use
 The **GM** can override any counter’s budget with `SetTokenMoveFeet` (haste,
 slow, monsters with different speeds, etc.). Overrides are stored on the token as
 `moveFeet` and validated server-side on every `MoveToken`.
+
+Moves are **animated** for every viewer: the client eases each token from its
+previous drawn position to the new one over ~350 ms (ease-out cubic), so counters
+glide rather than teleport. The fog polygon and move ring follow the eased
+position. A single `requestAnimationFrame` loop owns drawing and stops once all
+tokens settle; a joining or fog-re-entering token snaps to place (no glide).
+
+### Spawns and doors
+
+- **Spawns.** A published board may carry `spawnPoints` (room centers of a
+  generated deck). Joining players are assigned these in a per-table shuffled
+  order — successive joiners land in different rooms — falling back to the legacy
+  seed-wall placement when absent (`game-table.ts` `spawn()`).
+- **Door adjacency.** A player may only open/close a door their token is next to:
+  `canToggleDoorFrom` (in `protocol.ts`) requires the token within `1.5 ×
+  gridScale` of the door segment (`distanceToOccluder`). The **GM always may**.
+  The rule is shared by the client (for the hint) and the server gate, so they
+  never disagree.
 
 ## Architecture overview
 

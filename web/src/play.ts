@@ -13,6 +13,7 @@ import {drawCounterToken} from './counter-render'
 import {distanceToOccluder, visibilityPolygon, type Occluder, type Point} from './los-core'
 import {counterDefinitions, counterPortraits, preloadCounterPortraits} from './state'
 import {
+  canToggleDoorFrom,
   moveRadiusPixels,
   tokenMoveFeet,
   validateTokenMove,
@@ -21,6 +22,8 @@ import {
   type Token,
   type ViewMessage
 } from '../../src/protocol'
+import {publishGeneratedDeck, randomSeed} from './host'
+import {playerPlayUrl} from './table-links'
 import './play.css'
 
 preloadCounterPortraits()
@@ -34,9 +37,32 @@ for (const image of counterPortraits.values()) {
   image.addEventListener('load', bumpPortraitTick)
 }
 
+// Mode is derived from the path: `/` is the GM host front door (auto-generates a
+// deck, publishes it, and runs the table); `/play` is a player (or GM spectator
+// with ?gm=1). The host renders as a GM (sees all, no fog) plus a hosting panel.
 const params = new URLSearchParams(location.search)
-const tableId = params.get('table') ?? 'demo'
-const isGm = params.get('gm') === '1'
+const isHost = location.pathname === '/' || location.pathname === '/host'
+
+// A host keeps a stable table id across reloads: reuse ?table= if present,
+// otherwise mint one and reflect it into the URL so F5 rejoins the same table
+// (players are not orphaned) and the map is not regenerated.
+const resolveTableId = (): string => {
+  const fromUrl = params.get('table')
+  if (fromUrl) return fromUrl
+  if (!isHost) return 'demo'
+  const minted = crypto.randomUUID().slice(0, 8)
+  const url = new URL(location.href)
+  url.searchParams.set('table', minted)
+  history.replaceState(null, '', url)
+  return minted
+}
+
+const tableId = resolveTableId()
+// A host minted a fresh id this load ⇒ it owns the table and should publish a
+// deck. A host arriving with an id already in the URL is a reload ⇒ reconnect
+// without republishing so connected players keep the same map.
+const hostShouldPublish = isHost && !params.get('table')
+const isGm = isHost || params.get('gm') === '1'
 
 const you = signal<string | null>(null)
 const board = signal<Board | null>(null)
@@ -48,6 +74,16 @@ const zoom = signal(1)
 const minZoom = 0.08
 const maxZoom = 4
 let loadedMapKey = ''
+
+// Movement animation: renderPos is each token's currently-drawn position; anim
+// holds in-flight eases. The rAF loop (rafId/dirty) is the sole owner of draw()
+// — see requestDraw/frame below. Kept distinct from fitFrame.
+const MOVE_EASE_MS = 350
+type Anim = {fromX: number; fromY: number; toX: number; toY: number; start: number}
+const renderPos = new Map<string, Point>()
+const anim = new Map<string, Anim>()
+let rafId = 0
+let dirty = false
 
 let canvas: HTMLCanvasElement
 let ctx: CanvasRenderingContext2D
@@ -115,6 +151,7 @@ const boardGeometryChanged = (previous: Board | null, next: Board): boolean => {
 const applyView = (next: Board, nextTokens: Token[]): void => {
   const previous = board.value
   const geometryChanged = boardGeometryChanged(previous, next)
+  reconcileRenderPos(nextTokens, geometryChanged)
   board.value = next
   tokens.value = nextTokens
   ensureMap(next)
@@ -139,6 +176,86 @@ const updateCanvasDisplaySize = (): void => {
   if (!active || !canvas) return
   canvas.style.width = `${active.width * zoom.value}px`
   canvas.style.height = `${active.height * zoom.value}px`
+}
+
+// ---- Movement animation -----------------------------------------------------
+
+const now = (): number => performance.now()
+
+const positionOf = (token: Token): Point => renderPos.get(token.id) ?? {x: token.x, y: token.y}
+
+// Reconcile drawn positions against an incoming token set. New/returning tokens
+// snap to their target (joining and fog re-entry must not glide across the map);
+// moved tokens start an ease; departed tokens are forgotten. On a map republish
+// everything snaps. The local player's own token is special-cased so the
+// authoritative SSE echo confirms an in-flight ease instead of restarting it.
+const reconcileRenderPos = (nextTokens: Token[], geometryChanged: boolean): void => {
+  const seen = new Set<string>()
+  for (const token of nextTokens) {
+    seen.add(token.id)
+    const target = {x: token.x, y: token.y}
+    const current = renderPos.get(token.id)
+    if (!current || geometryChanged) {
+      renderPos.set(token.id, target)
+      anim.delete(token.id)
+      continue
+    }
+    const active = anim.get(token.id)
+    const targetUnchanged =
+      active && Math.hypot(active.toX - target.x, active.toY - target.y) <= 1
+    if (targetUnchanged) continue // echo of a move already animating — let it finish
+    if (Math.hypot(current.x - target.x, current.y - target.y) <= 1) {
+      renderPos.set(token.id, target)
+      anim.delete(token.id)
+      continue
+    }
+    startEase(token.id, current, target)
+  }
+  for (const id of [...renderPos.keys()]) {
+    if (!seen.has(id)) {
+      renderPos.delete(id)
+      anim.delete(id)
+    }
+  }
+  requestDraw()
+}
+
+const startEase = (id: string, from: Point, to: Point): void => {
+  anim.set(id, {fromX: from.x, fromY: from.y, toX: to.x, toY: to.y, start: now()})
+  ensureRaf()
+}
+
+// Advance every in-flight ease to time `t`. Returns whether any remain unsettled.
+const stepRenderPos = (t: number): boolean => {
+  let moving = false
+  for (const [id, a] of anim) {
+    const progress = Math.min(1, (t - a.start) / MOVE_EASE_MS)
+    const eased = 1 - (1 - progress) ** 3 // ease-out cubic
+    renderPos.set(id, {
+      x: a.fromX + (a.toX - a.fromX) * eased,
+      y: a.fromY + (a.toY - a.fromY) * eased
+    })
+    if (progress >= 1) anim.delete(id)
+    else moving = true
+  }
+  return moving
+}
+
+const requestDraw = (): void => {
+  dirty = true
+  ensureRaf()
+}
+
+const ensureRaf = (): void => {
+  if (rafId === 0) rafId = requestAnimationFrame(frame)
+}
+
+const frame = (t: number): void => {
+  rafId = 0
+  const moving = stepRenderPos(t)
+  draw()
+  dirty = false
+  if (moving) ensureRaf()
 }
 
 const fitBoardToViewport = (): void => {
@@ -305,9 +422,15 @@ const onPointerDown = (event: PointerEvent): void => {
 
   const door = nearestDoor(point, active)
   if (door) {
-    if (canToggleDoors()) {
-      post({type: 'ToggleDoor', doorId: door.id, open: !doorOpen(active, door)})
+    if (!canToggleDoors()) {
+      status.value = 'Doors are locked — GM only.'
+      return
     }
+    if (!canToggleDoorFrom(myToken(), active, door, {gm: isGm})) {
+      status.value = 'Move next to the door to open it.'
+      return
+    }
+    post({type: 'ToggleDoor', doorId: door.id, open: !doorOpen(active, door)})
     return
   }
 
@@ -318,6 +441,9 @@ const onPointerDown = (event: PointerEvent): void => {
     status.value = moveCheck.reason
     return
   }
+  // Optimistically glide from the current drawn position to the destination,
+  // then post. The authoritative echo confirms the ease (reconcileRenderPos).
+  startEase(me.id, positionOf(me), point)
   tokens.value = tokens.value.map((token) =>
     token.id === me.id ? {...token, x: point.x, y: point.y} : token
   )
@@ -376,9 +502,10 @@ const drawToken = (token: Token): void => {
   const active = board.value
   if (!active) return
   const mine = token.ownerId === you.value
+  const at = positionOf(token)
   drawCounterToken(
     ctx,
-    {kind: token.kind, label: token.label, x: token.x, y: token.y},
+    {kind: token.kind, label: token.label, x: at.x, y: at.y},
     {
       gridScale: active.gridScale,
       portraits: counterPortraits,
@@ -402,8 +529,11 @@ const draw = (): void => {
   drawOccluders(active)
   const me = myToken()
   if (me) {
-    drawFog(active, me)
-    if (!isGm) drawMoveRadius(active, me)
+    // Fog and the move ring follow the animated position so they glide with the
+    // counter rather than snapping ahead of it.
+    const animated = {...me, ...positionOf(me)}
+    drawFog(active, animated)
+    if (!isGm) drawMoveRadius(active, animated)
   }
   for (const token of tokens.value) drawToken(token)
 }
@@ -518,7 +648,7 @@ const mount = (): void => {
           <header class="play-drawer-header">
             <div class="play-brand">
               <strong>Line of Sight</strong>
-              <span>Multiplayer</span>
+              <span>${isHost ? 'GM — hosting' : 'Multiplayer'}</span>
             </div>
             <button
               id="drawerToggle"
@@ -547,7 +677,8 @@ const mount = (): void => {
                 <dd id="who"></dd>
               </div>
             </dl>
-            <button id="copyLink" type="button">Copy invite link</button>
+            <button id="copyLink" type="button">Copy player link</button>
+            ${isHost ? '<button id="newMap" class="play-secondary" type="button">New map</button>' : ''}
             ${gmControls}
             <div id="gmTokenMoves" class="play-gm-moves" hidden>
               <h3 class="play-gm-moves-title">Movement (ft / turn)</h3>
@@ -584,23 +715,62 @@ const mount = (): void => {
   wireCopyLink()
   wireDoorControl()
   wireGmTokenMoves()
+  wireNewMap()
+  void startSession()
+}
+
+// Host: publish a generated deck (first load only) before connecting, so the GM
+// never flashes the seed board. Player/GM-spectator: connect straight away.
+const startSession = async (): Promise<void> => {
+  if (hostShouldPublish) {
+    status.value = 'Generating a deck…'
+    try {
+      const {rooms} = await publishGeneratedDeck(tableId, randomSeed())
+      status.value = `Hosting · ${rooms} rooms · share the player link`
+    } catch (error) {
+      status.value = error instanceof Error ? error.message : 'Could not generate a deck.'
+      return
+    }
+  }
   connect()
 }
 
 const wireCopyLink = (): void => {
   const button = document.querySelector<HTMLButtonElement>('#copyLink')
   if (!button) return
-  const inviteUrl = `${location.origin}/play?table=${encodeURIComponent(tableId)}`
+  const inviteUrl = playerPlayUrl(tableId)
+  const label = button.textContent ?? 'Copy player link'
   button.addEventListener('click', () => {
     void navigator.clipboard.writeText(inviteUrl).then(
       () => {
         button.textContent = 'Copied!'
-        window.setTimeout(() => (button.textContent = 'Copy invite link'), 1500)
+        window.setTimeout(() => (button.textContent = label), 1500)
       },
       () => {
         button.textContent = inviteUrl
       }
     )
+  })
+}
+
+// Host "New map": regenerate and republish to the SAME table id. Connected
+// players hot-swap to the new deck (the DO bumps boardSeq and re-projects).
+const wireNewMap = (): void => {
+  const button = document.querySelector<HTMLButtonElement>('#newMap')
+  if (!button || !isHost) return
+  button.addEventListener('click', () => {
+    button.disabled = true
+    status.value = 'Generating a new deck…'
+    void publishGeneratedDeck(tableId, randomSeed())
+      .then(({rooms}) => {
+        status.value = `New deck · ${rooms} rooms`
+      })
+      .catch((error: unknown) => {
+        status.value = error instanceof Error ? error.message : 'Could not generate a deck.'
+      })
+      .finally(() => {
+        button.disabled = false
+      })
   })
 }
 
@@ -615,7 +785,7 @@ effect(() => {
   drawerOpen.value
   updateCanvasDisplaySize()
   syncGmTokenMoves()
-  draw()
+  requestDraw() // the rAF loop owns pixels; this also services token eases
   const statusEl = document.querySelector('#status')
   if (statusEl) statusEl.textContent = status.value
   const whoEl = document.querySelector('#who')

@@ -4,6 +4,7 @@
 // persistence is a later phase (see docs/MULTIPLAYER.md).
 import type {DurableObjectState} from './cf'
 import {
+  canToggleDoorFrom,
   COUNTER_KINDS,
   validateTokenMove,
   visibleTokensFor,
@@ -56,6 +57,9 @@ export class GameTable {
   private readonly connections = new Map<PlayerId, Connection>()
   private readonly log: DomainEvent[] = []
   private seq = 0
+  // Per-table salt so the spawn-point shuffle is stable within a table but
+  // differs between tables. Derived once from the (random) DO id name.
+  private readonly spawnSalt = Math.floor(Math.random() * 1e9)
 
   constructor(_state: DurableObjectState, _env: unknown) {}
 
@@ -74,8 +78,23 @@ export class GameTable {
 
   private spawn(): {x: number; y: number} {
     const index = this.tokens.size
-    // Alternate sides of the seed wall, aligned with the door's y so opening it
-    // immediately reveals the player opposite.
+    const points = this.board.spawnPoints
+    if (points && points.length > 0) {
+      // Generated decks supply room centers. Assign them in a seed-shuffled order
+      // (stable per table) so successive joiners land in different rooms; wrap and
+      // jitter within the cell once we exceed the room count.
+      const order = shuffleIndices(points.length, this.spawnSalt)
+      const point = points[order[index % points.length]]
+      const jitter = index < points.length ? 0 : this.board.gridScale * 0.4
+      const jx = jitter === 0 ? 0 : (hashFloat(this.spawnSalt + index * 2) - 0.5) * 2 * jitter
+      const jy = jitter === 0 ? 0 : (hashFloat(this.spawnSalt + index * 2 + 1) - 0.5) * 2 * jitter
+      return {
+        x: clamp(point.x + jx, 0, this.board.width),
+        y: clamp(point.y + jy, 0, this.board.height)
+      }
+    }
+    // Legacy seed board: alternate sides of the central wall, aligned with the
+    // door's y so opening it immediately reveals the player opposite.
     const x = index % 2 === 0 ? 250 : 750
     const y = 500 + Math.floor(index / 2) * 90
     return {x, y: Math.min(y, this.board.height - 80)}
@@ -175,6 +194,14 @@ export class GameTable {
       if (this.board.playerDoorControl === false && !connection?.gm) {
         return 'Doors are locked — GM only'
       }
+      const door = this.board.occluders.find(
+        (occluder) => occluder.type === 'door' && occluder.id === command.doorId
+      )
+      if (!door) return 'Unknown door'
+      const actor = this.tokens.get(playerId) ?? null
+      if (!canToggleDoorFrom(actor, this.board, door, {gm: connection?.gm})) {
+        return 'Move next to the door to open it'
+      }
       this.board.doorStates = {...this.board.doorStates, [command.doorId]: {open: command.open}}
       this.append({type: 'DoorToggled', doorId: command.doorId, open: command.open})
       return null
@@ -267,3 +294,17 @@ export class GameTable {
 
 const clamp = (value: number, min: number, max: number): number =>
   Math.min(max, Math.max(min, value))
+
+// Deterministic [0,1) hash for seeded jitter — keeps spawns reproducible per
+// table without pulling in a PRNG dependency.
+const hashFloat = (n: number): number => {
+  const x = Math.sin(n * 12.9898) * 43758.5453
+  return x - Math.floor(x)
+}
+
+// A seed-stable shuffle of [0..count) via sort by hash — small n, so simplicity
+// over Fisher-Yates. Same (count, salt) ⇒ same order.
+const shuffleIndices = (count: number, salt: number): number[] =>
+  Array.from({length: count}, (_, i) => i).sort(
+    (a, b) => hashFloat(salt + a * 7.13) - hashFloat(salt + b * 7.13)
+  )
