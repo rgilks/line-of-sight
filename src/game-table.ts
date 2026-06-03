@@ -115,6 +115,15 @@ export class GameTable {
     return this.connections.get(playerId)?.gm ? all : visibleTokensFor(playerId, all, this.board)
   }
 
+  // Board this connection may see. Room labels are GM-only knowledge, so they are
+  // stripped for players at the server — never sent over the wire, not merely
+  // hidden client-side.
+  private boardFor(playerId: PlayerId): Board {
+    if (this.connections.get(playerId)?.gm) return this.board
+    const {rooms: _rooms, ...playerBoard} = this.board
+    return playerBoard
+  }
+
   private openStream(request: Request): Response {
     const gm = new URL(request.url).searchParams.get('gm') === '1'
     const playerId = crypto.randomUUID().slice(0, 8)
@@ -134,7 +143,7 @@ export class GameTable {
     const snapshot: ViewMessage = {
       type: 'snapshot',
       you: playerId,
-      board: this.board,
+      board: this.boardFor(playerId),
       tokens: this.tokensFor(playerId)
     }
     void this.send(playerId, snapshot)
@@ -258,7 +267,7 @@ export class GameTable {
     for (const playerId of this.connections.keys()) {
       const update: ViewMessage = {
         type: 'update',
-        board: this.board,
+        board: this.boardFor(playerId),
         tokens: this.tokensFor(playerId)
       }
       void this.send(playerId, update)

@@ -80,7 +80,15 @@ export type Board = {
    * deck). The table assigns joining players to these; absent ⇒ legacy spawn.
    */
   spawnPoints?: Point[]
+  /**
+   * GM-only room labels (function + bounds, in board pixels). Drawn as an overlay
+   * the GM sees and players never do — the map image itself carries no labels.
+   */
+  rooms?: RoomLabel[]
 }
+
+/** A GM-only room label: its text and bounds in board pixels. */
+export type RoomLabel = {label: string; x: number; y: number; w: number; h: number}
 
 // Client -> server intent. The caller's playerId travels in the POST envelope,
 // so a command never needs to name its own token.

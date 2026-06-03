@@ -85,6 +85,16 @@ const anim = new Map<string, Anim>()
 let rafId = 0
 let dirty = false
 
+// Player fog memory: an offscreen mask of everywhere this player's POV has ever
+// seen. Areas never seen are fully hidden; explored-but-not-currently-visible
+// areas are greyed; the current visibility polygon is clear. Reset when the
+// board geometry changes (a new deck means old memory is meaningless).
+const exploredCanvas = document.createElement('canvas')
+const exploredCtx = exploredCanvas.getContext('2d')
+const fogScratch = document.createElement('canvas')
+const fogScratchCtx = fogScratch.getContext('2d')
+let exploredKey = ''
+
 let canvas: HTMLCanvasElement
 let ctx: CanvasRenderingContext2D
 let boardViewport: HTMLDivElement | null = null
@@ -165,7 +175,8 @@ const applyView = (next: Board, nextTokens: Token[]): void => {
     previous.height !== next.height ||
     previous.assetRef !== next.assetRef
   if (boardLayoutChanged) {
-    scheduleFitBoardToViewport()
+    // Player: open zoomed-in centered on their token. GM: fit the whole board.
+    scheduleInitialView()
   } else {
     updateCanvasDisplaySize()
   }
@@ -272,6 +283,47 @@ const fitBoardToViewport = (): void => {
   updateCanvasDisplaySize()
   boardViewport.scrollLeft = 0
   boardViewport.scrollTop = 0
+}
+
+// Players start zoomed in with their token centered, so they open on "their
+// surroundings" rather than a tiny whole-ship view. Zoom is chosen so the move
+// ring (roughly) fills the viewport. The GM keeps the fit-to-board overview.
+const centerOnToken = (): void => {
+  const active = board.value
+  const me = myToken()
+  if (!boardViewport || !active || !me) {
+    fitBoardToViewport()
+    return
+  }
+  const at = positionOf(me)
+  const ringPx = moveRadiusPixels(me, active)
+  const avail = Math.min(boardViewport.clientWidth, boardViewport.clientHeight)
+  if (avail <= 0) {
+    fitBoardToViewport()
+    return
+  }
+  // Fit ~2.6 move-rings across the smaller viewport dimension — close, but with
+  // room to see adjacent space.
+  const desired = avail / Math.max(1, ringPx * 2.6)
+  zoom.value = Math.min(maxZoom, Math.max(minZoom, desired))
+  updateCanvasDisplaySize()
+  boardViewport.scrollLeft = at.x * zoom.value - boardViewport.clientWidth / 2
+  boardViewport.scrollTop = at.y * zoom.value - boardViewport.clientHeight / 2
+}
+
+const scheduleInitialView = (): void => {
+  const run = isGm ? fitBoardToViewport : centerOnToken
+  if (typeof window === 'undefined') {
+    run()
+    return
+  }
+  if (fitFrame !== 0) cancelAnimationFrame(fitFrame)
+  fitFrame = requestAnimationFrame(() => {
+    fitFrame = requestAnimationFrame(() => {
+      fitFrame = 0
+      run()
+    })
+  })
 }
 
 const scheduleFitBoardToViewport = (): void => {
@@ -467,6 +519,20 @@ const drawOccluders = (active: Board): void => {
   }
 }
 
+const tracePolygon = (target: CanvasRenderingContext2D, polygon: Point[]): void => {
+  target.moveTo(polygon[0].x, polygon[0].y)
+  for (const point of polygon.slice(1)) target.lineTo(point.x, point.y)
+  target.closePath()
+}
+
+// Three-tier player fog:
+//   - currently visible (inside the POV polygon) — clear,
+//   - explored but not visible — a translucent grey veil (memory),
+//   - never seen — additionally blacked out.
+// Layer 1 veils everything outside the current view; layer 2 adds opaque dark
+// only over never-explored cells, so explored memory shows through as grey. The
+// explored mask accumulates every frame, so moving permanently reveals visited
+// areas as memory without exposing the rest. Memory resets on a board change.
 const drawFog = (active: Board, me: Token): void => {
   const polygon = visibilityPolygon(
     me.x,
@@ -477,20 +543,50 @@ const drawFog = (active: Board, me: Token): void => {
     active.occluders,
     active.doorStates
   )
+
+  const key = `${active.assetRef}:${active.boardSeq ?? 0}:${active.width}x${active.height}`
+  if (exploredCtx && (exploredKey !== key || exploredCanvas.width !== active.width)) {
+    exploredKey = key
+    exploredCanvas.width = active.width
+    exploredCanvas.height = active.height
+    fogScratch.width = active.width
+    fogScratch.height = active.height
+    exploredCtx.clearRect(0, 0, active.width, active.height)
+  }
+  if (exploredCtx && polygon.length > 2) {
+    exploredCtx.fillStyle = '#fff'
+    exploredCtx.beginPath()
+    tracePolygon(exploredCtx, polygon)
+    exploredCtx.fill()
+  }
+
+  // Layer 1 — translucent veil over everything OUTSIDE the current view.
   ctx.save()
-  ctx.fillStyle = 'rgba(5, 7, 6, 0.72)'
+  ctx.fillStyle = 'rgba(8, 11, 10, 0.6)'
   ctx.beginPath()
   ctx.rect(0, 0, active.width, active.height)
   if (polygon.length > 2) {
-    ctx.moveTo(polygon[0].x, polygon[0].y)
-    for (const point of polygon.slice(1)) ctx.lineTo(point.x, point.y)
-    ctx.closePath()
+    tracePolygon(ctx, polygon)
     ctx.fill('evenodd')
   } else {
     ctx.fill()
   }
   ctx.restore()
 
+  // Layer 2 — opaque dark only where NEVER explored. Build it on a scratch canvas:
+  // fill solid dark, then punch out the explored mask, then stamp onto the board.
+  if (exploredCtx && fogScratchCtx) {
+    fogScratchCtx.globalCompositeOperation = 'source-over'
+    fogScratchCtx.clearRect(0, 0, active.width, active.height)
+    fogScratchCtx.fillStyle = 'rgba(4, 5, 5, 0.93)'
+    fogScratchCtx.fillRect(0, 0, active.width, active.height)
+    fogScratchCtx.globalCompositeOperation = 'destination-out'
+    fogScratchCtx.drawImage(exploredCanvas, 0, 0)
+    fogScratchCtx.globalCompositeOperation = 'source-over'
+    ctx.drawImage(fogScratch, 0, 0)
+  }
+
+  // Sight ring around the player.
   ctx.strokeStyle = 'rgba(74, 163, 255, 0.35)'
   ctx.lineWidth = 2
   ctx.beginPath()
@@ -528,14 +624,16 @@ const draw = (): void => {
 
   drawOccluders(active)
   const me = myToken()
-  if (me) {
+  if (me && !isGm) {
     // Fog and the move ring follow the animated position so they glide with the
     // counter rather than snapping ahead of it.
     const animated = {...me, ...positionOf(me)}
     drawFog(active, animated)
-    if (!isGm) drawMoveRadius(active, animated)
+    drawMoveRadius(active, animated)
   }
   for (const token of tokens.value) drawToken(token)
+  // GM-only room labels, drawn on top of everything (the GM has no fog).
+  if (isGm) drawRoomLabels(active)
 }
 
 const drawMoveRadius = (active: Board, me: Token): void => {
@@ -547,6 +645,29 @@ const drawMoveRadius = (active: Board, me: Token): void => {
   ctx.beginPath()
   ctx.arc(me.x, me.y, radius, 0, Math.PI * 2)
   ctx.stroke()
+  ctx.restore()
+}
+
+// GM-only room labels (terminal green with a dark halo so they read over the
+// map). The server only sends `rooms` to the GM connection, so this never shows
+// for players even though the same draw() runs for both.
+const drawRoomLabels = (active: Board): void => {
+  if (!active.rooms || active.rooms.length === 0) return
+  ctx.save()
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.lineJoin = 'round'
+  for (const room of active.rooms) {
+    const size = Math.max(11, Math.min(20, Math.min(room.w, room.h) * 0.18))
+    ctx.font = `600 ${size}px "JetBrains Mono", monospace`
+    const cx = room.x + room.w / 2
+    const cy = room.y + room.h / 2
+    ctx.strokeStyle = 'rgba(5, 5, 5, 0.85)'
+    ctx.lineWidth = Math.max(2, size * 0.28)
+    ctx.strokeText(room.label, cx, cy)
+    ctx.fillStyle = 'rgba(57, 255, 20, 0.9)'
+    ctx.fillText(room.label, cx, cy)
+  }
   ctx.restore()
 }
 

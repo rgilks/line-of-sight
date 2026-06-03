@@ -52,6 +52,14 @@ export const publishGeneratedDeck = async (
     x: (room.x + room.w / 2) * map.gridScale,
     y: (room.y + room.h / 2) * map.gridScale
   }))
+  // GM-only room labels, in board pixels — the published map image has none.
+  const rooms = map.rooms.map((room) => ({
+    label: room.label,
+    x: room.x * map.gridScale,
+    y: room.y * map.gridScale,
+    w: room.w * map.gridScale,
+    h: room.h * map.gridScale
+  }))
 
   const board: Board = {
     assetRef,
@@ -64,7 +72,8 @@ export const publishGeneratedDeck = async (
     playerDoorControl: true,
     feetPerSquare: FEET_PER_SQUARE,
     defaultMoveFeet: DEFAULT_MOVE_FEET,
-    spawnPoints
+    spawnPoints,
+    rooms
   }
 
   const published = await fetch(`/api/tables/${tableId}/board`, {

@@ -52,8 +52,28 @@ Therefore the security boundary is **dynamic entity state, not terrain**:
 | Map art, board size, grid | No (client has the art) | Client-local, keyed by `assetRef` |
 | Occluders (walls/doors), door open/closed | No (art reveals walls) | Shared to all clients |
 | **Other players' / NPC token positions** | **Yes** | **Server-gated per viewer** |
+| **Room labels / descriptions** | **Yes — GM only** | **Server: `boardFor` strips `rooms` for players** |
 | A player's own token(s) | Always visible to that player | Server |
 | "Explored / never-seen" fog overlay | No — cosmetic | Client-local |
+
+Room labels are GM knowledge, so the table sends `board.rooms` only to the GM
+connection (`game-table.ts` `boardFor`); a player's board payload never contains
+them. The GM draws them as an overlay; the map image itself is unlabelled, so
+players see a bare deck.
+
+### Player view (fog + framing)
+
+A player sees three tiers of the board, not the whole map:
+
+- **Currently visible** — inside their POV visibility polygon — drawn clear.
+- **Explored** — anywhere their POV has previously covered — a translucent grey
+  veil (memory). The client accumulates this in an offscreen mask each frame and
+  resets it when the board geometry changes.
+- **Never seen** — additionally blacked out.
+
+The player view opens **zoomed in and centered on their own token** (roughly a
+couple of move-rings across the viewport) rather than the whole-ship overview;
+the GM keeps the fit-to-board overview.
 
 The server's job: for each viewer, send only the tokens that viewer's POV can
 see. That gate is exactly `hasLineOfSight` from the existing core:
