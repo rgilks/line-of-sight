@@ -584,12 +584,14 @@ const drawFog = (active: Board, me: Token): void => {
   }
   ctx.restore()
 
-  // Layer 2 — opaque dark only where NEVER explored. Build it on a scratch canvas:
-  // fill solid dark, then punch out the explored mask, then stamp onto the board.
+  // Layer 2 — FULLY opaque dark wherever NEVER explored: a player must see nothing
+  // at all in places they have not visited and have no line of sight to. Build it
+  // on a scratch canvas: fill solid opaque, punch out the explored mask, then
+  // stamp onto the board so never-seen cells are completely hidden.
   if (exploredCtx && fogScratchCtx) {
     fogScratchCtx.globalCompositeOperation = 'source-over'
     fogScratchCtx.clearRect(0, 0, active.width, active.height)
-    fogScratchCtx.fillStyle = 'rgba(4, 5, 5, 0.93)'
+    fogScratchCtx.fillStyle = '#050606' // opaque (alpha 1) — no map bleed-through
     fogScratchCtx.fillRect(0, 0, active.width, active.height)
     fogScratchCtx.globalCompositeOperation = 'destination-out'
     fogScratchCtx.drawImage(exploredCanvas, 0, 0)
