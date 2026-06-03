@@ -92,15 +92,6 @@ const anim = new Map<string, Anim>()
 let rafId = 0
 let dirty = false
 
-// Player fog memory: an offscreen mask of everywhere this player's POV has ever
-// seen. Areas never seen are fully hidden; explored-but-not-currently-visible
-// areas are greyed; the current visibility polygon is clear. Reset when the
-// board geometry changes (a new deck means old memory is meaningless).
-const exploredCanvas = document.createElement('canvas')
-const exploredCtx = exploredCanvas.getContext('2d')
-const fogScratch = document.createElement('canvas')
-const fogScratchCtx = fogScratch.getContext('2d')
-let exploredKey = ''
 
 let canvas: HTMLCanvasElement
 let ctx: CanvasRenderingContext2D
@@ -113,6 +104,14 @@ let panPointer: {
   scrollLeft: number
   scrollTop: number
 } | null = null
+
+// Touch gesture state: one finger pans, two fingers pinch-zoom. Tracked
+// separately from the desktop pointer-pan so a tap still falls through to a
+// move/door action.
+type TouchPoint = {id: number; x: number; y: number}
+let touchPan: {x: number; y: number; scrollLeft: number; scrollTop: number} | null = null
+let pinch: {startDist: number; startZoom: number; boardX: number; boardY: number} | null = null
+let touchMoved = false
 
 let fitFrame = 0
 
@@ -477,11 +476,99 @@ const blockContextMenu = (event: Event): void => {
   event.preventDefault()
 }
 
+// ---- Touch: one-finger pan, two-finger pinch-zoom ---------------------------
+
+const touchList = (event: TouchEvent): TouchPoint[] =>
+  Array.from(event.touches).map((t) => ({id: t.identifier, x: t.clientX, y: t.clientY}))
+
+const onTouchStart = (event: TouchEvent): void => {
+  if (!boardViewport) return
+  const touches = touchList(event)
+  touchMoved = false
+  if (touches.length === 1) {
+    touchPan = {
+      x: touches[0].x,
+      y: touches[0].y,
+      scrollLeft: boardViewport.scrollLeft,
+      scrollTop: boardViewport.scrollTop
+    }
+    pinch = null
+  } else if (touches.length >= 2) {
+    // Begin a pinch anchored at the midpoint, in board coordinates.
+    const active = board.value
+    const rect = canvas?.getBoundingClientRect()
+    if (!active || !rect) return
+    const midX = (touches[0].x + touches[1].x) / 2
+    const midY = (touches[0].y + touches[1].y) / 2
+    pinch = {
+      startDist: Math.hypot(touches[0].x - touches[1].x, touches[0].y - touches[1].y),
+      startZoom: zoom.value,
+      boardX: ((midX - rect.left) / rect.width) * active.width,
+      boardY: ((midY - rect.top) / rect.height) * active.height
+    }
+    touchPan = null
+  }
+}
+
+const onTouchMove = (event: TouchEvent): void => {
+  if (!boardViewport) return
+  const touches = touchList(event)
+  if (pinch && touches.length >= 2) {
+    event.preventDefault()
+    touchMoved = true
+    const viewportRect = boardViewport.getBoundingClientRect()
+    const midX = (touches[0].x + touches[1].x) / 2
+    const midY = (touches[0].y + touches[1].y) / 2
+    const dist = Math.hypot(touches[0].x - touches[1].x, touches[0].y - touches[1].y)
+    const factor = dist / Math.max(1, pinch.startDist)
+    setZoom(pinch.startZoom * factor, {
+      boardX: pinch.boardX,
+      boardY: pinch.boardY,
+      viewportX: midX - viewportRect.left,
+      viewportY: midY - viewportRect.top
+    })
+  } else if (touchPan && touches.length === 1) {
+    const dx = touches[0].x - touchPan.x
+    const dy = touches[0].y - touchPan.y
+    if (Math.hypot(dx, dy) > 6) touchMoved = true
+    if (touchMoved) {
+      event.preventDefault()
+      boardViewport.scrollLeft = touchPan.scrollLeft - dx
+      boardViewport.scrollTop = touchPan.scrollTop - dy
+    }
+  }
+}
+
+const onTouchEnd = (event: TouchEvent): void => {
+  // A clean single-finger tap (no drag/pinch) becomes a board action.
+  if (!touchMoved && !pinch && event.changedTouches.length === 1 && board.value) {
+    const t = event.changedTouches[0]
+    handleBoardTap(t.clientX, t.clientY)
+  }
+  if (event.touches.length === 0) {
+    touchPan = null
+    pinch = null
+  }
+}
+
 const onPointerDown = (event: PointerEvent): void => {
+  // Touch is handled by the dedicated touch listeners (pan/pinch/tap).
+  if (event.pointerType === 'touch') return
   if (event.button !== 0 || event.metaKey) return
-  const point = pointerToBoard(event)
+  handleBoardTap(event.clientX, event.clientY)
+}
+
+// Map a screen point to the board, then act: toggle a nearby door, or move the
+// player's own token. Shared by mouse pointer-down and a single-finger touch tap.
+const handleBoardTap = (clientX: number, clientY: number): void => {
   const active = board.value
-  if (!point || !active) return
+  if (!active || !canvas) return
+  const rect = canvas.getBoundingClientRect()
+  if (rect.width <= 0 || rect.height <= 0) return
+  const point: Point = {
+    x: ((clientX - rect.left) / rect.width) * active.width,
+    y: ((clientY - rect.top) / rect.height) * active.height
+  }
 
   const door = nearestDoor(point, active)
   if (door) {
@@ -536,14 +623,10 @@ const tracePolygon = (target: CanvasRenderingContext2D, polygon: Point[]): void 
   target.closePath()
 }
 
-// Three-tier player fog:
-//   - currently visible (inside the POV polygon) — clear,
-//   - explored but not visible — a translucent grey veil (memory),
-//   - never seen — additionally blacked out.
-// Layer 1 veils everything outside the current view; layer 2 adds opaque dark
-// only over never-explored cells, so explored memory shows through as grey. The
-// explored mask accumulates every frame, so moving permanently reveals visited
-// areas as memory without exposing the rest. Memory resets on a board change.
+// Player fog: a player sees ONLY what is currently within line of sight. The
+// whole board is filled fully opaque, then the current visibility polygon is cut
+// out — so anywhere not currently visible (whether previously explored or never
+// seen) shows nothing at all.
 const drawFog = (active: Board, me: Token): void => {
   const polygon = visibilityPolygon(
     me.x,
@@ -555,25 +638,8 @@ const drawFog = (active: Board, me: Token): void => {
     active.doorStates
   )
 
-  const key = `${active.assetRef}:${active.boardSeq ?? 0}:${active.width}x${active.height}`
-  if (exploredCtx && (exploredKey !== key || exploredCanvas.width !== active.width)) {
-    exploredKey = key
-    exploredCanvas.width = active.width
-    exploredCanvas.height = active.height
-    fogScratch.width = active.width
-    fogScratch.height = active.height
-    exploredCtx.clearRect(0, 0, active.width, active.height)
-  }
-  if (exploredCtx && polygon.length > 2) {
-    exploredCtx.fillStyle = '#fff'
-    exploredCtx.beginPath()
-    tracePolygon(exploredCtx, polygon)
-    exploredCtx.fill()
-  }
-
-  // Layer 1 — translucent veil over everything OUTSIDE the current view.
   ctx.save()
-  ctx.fillStyle = 'rgba(8, 11, 10, 0.6)'
+  ctx.fillStyle = '#050606' // opaque — no map bleed-through outside the current view
   ctx.beginPath()
   ctx.rect(0, 0, active.width, active.height)
   if (polygon.length > 2) {
@@ -583,21 +649,6 @@ const drawFog = (active: Board, me: Token): void => {
     ctx.fill()
   }
   ctx.restore()
-
-  // Layer 2 — FULLY opaque dark wherever NEVER explored: a player must see nothing
-  // at all in places they have not visited and have no line of sight to. Build it
-  // on a scratch canvas: fill solid opaque, punch out the explored mask, then
-  // stamp onto the board so never-seen cells are completely hidden.
-  if (exploredCtx && fogScratchCtx) {
-    fogScratchCtx.globalCompositeOperation = 'source-over'
-    fogScratchCtx.clearRect(0, 0, active.width, active.height)
-    fogScratchCtx.fillStyle = '#050606' // opaque (alpha 1) — no map bleed-through
-    fogScratchCtx.fillRect(0, 0, active.width, active.height)
-    fogScratchCtx.globalCompositeOperation = 'destination-out'
-    fogScratchCtx.drawImage(exploredCanvas, 0, 0)
-    fogScratchCtx.globalCompositeOperation = 'source-over'
-    ctx.drawImage(fogScratch, 0, 0)
-  }
 
   // Sight ring around the player.
   ctx.strokeStyle = 'rgba(74, 163, 255, 0.35)'
@@ -831,6 +882,34 @@ const wireDoorControl = (): void => {
   })
 }
 
+// The collapsed-drawer rail: a vertical column of portraits for the characters
+// currently visible to this viewer (own token first). Shown only when the drawer
+// is minimised. (Later this column will carry initiative order.)
+const portraitForKind = (kind: string): string =>
+  counterDefinitions.find((d) => d.kind === kind)?.portrait ??
+  counterDefinitions[0].portrait
+
+const syncPortraitRail = (): void => {
+  const rail = document.querySelector<HTMLDivElement>('#portraitRail')
+  if (!rail) return
+  const mine = you.value
+  const ordered = [...tokens.value].sort((a, b) => {
+    if (a.ownerId === mine) return -1
+    if (b.ownerId === mine) return 1
+    return a.label.localeCompare(b.label)
+  })
+  const html = ordered
+    .map((token) => {
+      const isMe = token.ownerId === mine
+      return `<div class="play-portrait${isMe ? ' is-me' : ''}" title="${token.label}">
+        <img src="${portraitForKind(token.kind)}" alt="${token.label}" loading="lazy" />
+        <span>${token.label}</span>
+      </div>`
+    })
+    .join('')
+  if (rail.innerHTML !== html) rail.innerHTML = html
+}
+
 const syncGmTokenMoves = (): void => {
   const container = document.querySelector<HTMLDivElement>('#gmTokenMoves')
   if (!container) return
@@ -914,6 +993,7 @@ const mount = (): void => {
               </svg>
             </button>
           </header>
+          <div id="portraitRail" class="play-portrait-rail" aria-label="Visible characters"></div>
           <div class="play-drawer-content">
             <dl class="play-meta">
               <div>
@@ -974,6 +1054,11 @@ const mount = (): void => {
   boardViewport.addEventListener('wheel', handleWheel, {passive: false})
   boardViewport.addEventListener('pointerdown', onPanPointerDown, {capture: true})
   boardViewport.addEventListener('contextmenu', blockContextMenu)
+  // Touch gestures: one-finger pan, two-finger pinch-zoom, tap = board action.
+  boardViewport.addEventListener('touchstart', onTouchStart, {passive: false})
+  boardViewport.addEventListener('touchmove', onTouchMove, {passive: false})
+  boardViewport.addEventListener('touchend', onTouchEnd)
+  boardViewport.addEventListener('touchcancel', onTouchEnd)
   wireCopyLink()
   wireDoorControl()
   wireGmTokenMoves()
@@ -1052,6 +1137,16 @@ const wireChat = (): void => {
 
 mount()
 
+// Register the service worker so the app is installable as a PWA (home-screen on
+// iOS/iPad, standalone window). The SW never caches the live game API.
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    void navigator.serviceWorker.register('/sw.js').catch(() => {
+      /* SW is a progressive enhancement; ignore registration failures */
+    })
+  })
+}
+
 effect(() => {
   portraitTick.value
   mapImage.value
@@ -1062,6 +1157,7 @@ effect(() => {
   drawerOpen.value
   updateCanvasDisplaySize()
   syncGmTokenMoves()
+  syncPortraitRail()
   requestDraw() // the rAF loop owns pixels; this also services token eases
   const statusEl = document.querySelector('#status')
   if (statusEl) statusEl.textContent = status.value
