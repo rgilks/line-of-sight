@@ -275,6 +275,15 @@ Flow:
    bytes from the private bucket (`Cache-Control: private`). A client without the
    asset can still play on a blank board with the occluder overlay.
 
+Only the **newest** map per table is ever served, so each upload prunes the
+table's older objects (`pruneOldMaps` in `worker.ts`, best-effort after the
+`put`). Every host visit and **New map** uploads a fresh image, so without this
+R2 would grow unbounded; pruning bounds it to ~one image per active table. (DOs
+are in-memory and self-clean when idle, but R2 objects persist, so the image
+store is the one place that needs explicit cleanup.) An idle table's last image
+is left behind — acceptable for a prototype; a later phase can expire those via
+an R2 lifecycle rule or a delete on table teardown.
+
 Privacy, honestly stated for a prototype: the bucket is private and bytes are
 only reachable through the Worker route, so maps are not "just shared on the
 internet." With **no auth yet**, anyone who knows `tableId` + the `uuid` assetRef

@@ -34,6 +34,12 @@ export interface R2ObjectBody extends R2Object {
   readonly body: ReadableStream
 }
 
+export interface R2Objects {
+  readonly objects: {key: string}[]
+  readonly truncated: boolean
+  readonly cursor?: string
+}
+
 export interface R2Bucket {
   get(key: string): Promise<R2ObjectBody | null>
   put(
@@ -41,5 +47,6 @@ export interface R2Bucket {
     value: ArrayBuffer | ReadableStream | string,
     options?: {httpMetadata?: {contentType?: string}}
   ): Promise<R2Object>
-  delete(key: string): Promise<void>
+  delete(key: string | string[]): Promise<void>
+  list(options?: {prefix?: string; cursor?: string}): Promise<R2Objects>
 }

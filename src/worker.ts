@@ -64,8 +64,27 @@ const uploadMap = async (request: Request, env: Env, tableId: string): Promise<R
   }
 
   const assetRef = crypto.randomUUID()
-  await env.MAPS.put(`${tableId}/${assetRef}`, bytes, {httpMetadata: {contentType}})
+  const key = `${tableId}/${assetRef}`
+  await env.MAPS.put(key, bytes, {httpMetadata: {contentType}})
+  // Only the newest map per table is ever served, so prune the rest: this bounds
+  // R2 growth to ~one image per active table even though every host visit and
+  // "New map" uploads a fresh one. Best-effort — never fail the upload over it.
+  await pruneOldMaps(env, tableId, key).catch(() => {})
   return Response.json({assetRef})
+}
+
+// Delete every stored map for a table except `keepKey` (the one just written).
+const pruneOldMaps = async (env: Env, tableId: string, keepKey: string): Promise<void> => {
+  const stale: string[] = []
+  let cursor: string | undefined
+  do {
+    const page = await env.MAPS.list({prefix: `${tableId}/`, cursor})
+    for (const object of page.objects) {
+      if (object.key !== keepKey) stale.push(object.key)
+    }
+    cursor = page.truncated ? page.cursor : undefined
+  } while (cursor)
+  if (stale.length > 0) await env.MAPS.delete(stale)
 }
 
 // Stream a stored map. Private caching only; not a public/crawlable URL. Once
