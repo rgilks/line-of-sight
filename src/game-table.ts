@@ -6,9 +6,11 @@ import type {DurableObjectState} from './cf'
 import {
   canToggleDoorFrom,
   COUNTER_KINDS,
+  hasLineOfSight,
   validateTokenMove,
   visibleTokensFor,
   type Board,
+  type ChatSay,
   type Command,
   type CommandEnvelope,
   type CounterKind,
@@ -17,6 +19,11 @@ import {
   type Token,
   type ViewMessage
 } from './protocol'
+
+// How long a chat say stays attached for new/lagging viewers; the client fades
+// each bubble out over its own (shorter) lifetime.
+const SAY_TTL_MS = 8000
+const SAY_MAX = 40
 
 const encoder = new TextEncoder()
 
@@ -46,8 +53,8 @@ const seedBoard = (): Board => ({
   ],
   doorStates: {},
   playerDoorControl: true,
-  feetPerSquare: 5,
-  defaultMoveFeet: 30
+  metersPerSquare: 1.5,
+  defaultMoveMeters: 6
 })
 
 export class GameTable {
@@ -56,6 +63,7 @@ export class GameTable {
   private readonly tokens = new Map<PlayerId, Token>()
   private readonly connections = new Map<PlayerId, Connection>()
   private readonly log: DomainEvent[] = []
+  private says: ChatSay[] = []
   private seq = 0
   // Per-table salt so the spawn-point shuffle is stable within a table but
   // differs between tables. Derived once from the (random) DO id name.
@@ -124,6 +132,32 @@ export class GameTable {
     return playerBoard
   }
 
+  private pruneSays(): void {
+    const cutoff = Date.now() - SAY_TTL_MS
+    this.says = this.says.filter((say) => say.sentAt >= cutoff)
+    if (this.says.length > SAY_MAX) this.says = this.says.slice(-SAY_MAX)
+  }
+
+  // Chat says this connection may see: the GM and GM-authored says reach everyone;
+  // a player's say reaches another player only if that recipient can currently see
+  // the speaker's token (same line-of-sight gate as tokens, so a bubble never
+  // leaks a hidden position).
+  private saysFor(playerId: PlayerId): ChatSay[] {
+    this.pruneSays()
+    const gm = this.connections.get(playerId)?.gm === true
+    if (gm) return this.says
+    const viewer = this.tokens.get(playerId)
+    return this.says.filter((say) => {
+      if (say.fromGm) return true
+      if (say.fromId === playerId) return true
+      if (!viewer) return false
+      const speaker = this.tokens.get(say.fromId)
+      const at = speaker ? {x: speaker.x, y: speaker.y} : say.at
+      if (Math.hypot(at.x - viewer.x, at.y - viewer.y) > this.board.sightRadius) return false
+      return hasLineOfSight({x: viewer.x, y: viewer.y}, at, this.board.occluders, this.board.doorStates)
+    })
+  }
+
   private openStream(request: Request): Response {
     const gm = new URL(request.url).searchParams.get('gm') === '1'
     const playerId = crypto.randomUUID().slice(0, 8)
@@ -144,7 +178,8 @@ export class GameTable {
       type: 'snapshot',
       you: playerId,
       board: this.boardFor(playerId),
-      tokens: this.tokensFor(playerId)
+      tokens: this.tokensFor(playerId),
+      says: this.saysFor(playerId)
     }
     void this.send(playerId, snapshot)
     this.projectAll()
@@ -189,13 +224,34 @@ export class GameTable {
       return null
     }
 
-    if (command.type === 'SetTokenMoveFeet') {
+    if (command.type === 'SetTokenMoveMeters') {
       if (!connection?.gm) return 'GM only'
       const target = this.tokens.get(command.playerId)
       if (!target) return 'Unknown player'
-      const moveFeet = Math.max(0, Math.min(999, Math.round(command.moveFeet)))
-      target.moveFeet = moveFeet
-      this.append({type: 'TokenMoveFeetSet', playerId: command.playerId, moveFeet})
+      const moveMeters = Math.max(0, Math.min(999, Math.round(command.moveMeters)))
+      target.moveMeters = moveMeters
+      this.append({type: 'TokenMoveMetersSet', playerId: command.playerId, moveMeters})
+      return null
+    }
+
+    if (command.type === 'Say') {
+      const text = command.text.trim().slice(0, 200)
+      if (!text) return null
+      const speaker = this.tokens.get(playerId)
+      const gm = connection?.gm === true
+      // A player without a token and not the GM can't speak (shouldn't happen).
+      if (!speaker && !gm) return 'No token to speak from'
+      this.says.push({
+        id: `say-${playerId}-${this.seq + 1}`,
+        fromId: playerId,
+        label: gm ? 'GM' : (speaker?.label ?? '?'),
+        text,
+        at: speaker ? {x: speaker.x, y: speaker.y} : {x: 0, y: 0},
+        fromGm: gm,
+        sentAt: Date.now()
+      })
+      this.pruneSays()
+      this.seq += 1 // says aren't domain events, but bump seq so clients see a change
       return null
     }
 
@@ -255,8 +311,8 @@ export class GameTable {
       boardSeq: this.boardSeq,
       doorStates: board.doorStates ?? {},
       playerDoorControl: board.playerDoorControl ?? true,
-      feetPerSquare: board.feetPerSquare ?? 5,
-      defaultMoveFeet: board.defaultMoveFeet ?? 30
+      metersPerSquare: board.metersPerSquare ?? 1.5,
+      defaultMoveMeters: board.defaultMoveMeters ?? 6
     }
     this.append({type: 'BoardPublished', assetRef: board.assetRef})
     this.projectAll()
@@ -268,7 +324,8 @@ export class GameTable {
       const update: ViewMessage = {
         type: 'update',
         board: this.boardFor(playerId),
-        tokens: this.tokensFor(playerId)
+        tokens: this.tokensFor(playerId),
+        says: this.saysFor(playerId)
       }
       void this.send(playerId, update)
     }

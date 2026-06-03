@@ -15,9 +15,11 @@ import {counterDefinitions, counterPortraits, preloadCounterPortraits} from './s
 import {
   canToggleDoorFrom,
   moveRadiusPixels,
-  tokenMoveFeet,
+  tokenMoveMeters,
+  tokenMoveSquares,
   validateTokenMove,
   type Board,
+  type ChatSay,
   type CommandEnvelope,
   type Token,
   type ViewMessage
@@ -67,9 +69,14 @@ const isGm = isHost || params.get('gm') === '1'
 const you = signal<string | null>(null)
 const board = signal<Board | null>(null)
 const tokens = signal<Token[]>([])
+const says = signal<ChatSay[]>([])
 const status = signal('Connecting…')
 const mapImage = signal<HTMLImageElement | null>(null)
 const drawerOpen = signal(true)
+
+// A chat bubble shows for this long, fading over its final stretch.
+const SAY_VISIBLE_MS = 6000
+const SAY_FADE_MS = 1200
 const zoom = signal(1)
 const minZoom = 0.08
 const maxZoom = 4
@@ -158,10 +165,11 @@ const boardGeometryChanged = (previous: Board | null, next: Board): boolean => {
   return JSON.stringify(previous.occluders) !== JSON.stringify(next.occluders)
 }
 
-const applyView = (next: Board, nextTokens: Token[]): void => {
+const applyView = (next: Board, nextTokens: Token[], nextSays: ChatSay[]): void => {
   const previous = board.value
   const geometryChanged = boardGeometryChanged(previous, next)
   reconcileRenderPos(nextTokens, geometryChanged)
+  says.value = nextSays
   board.value = next
   tokens.value = nextTokens
   ensureMap(next)
@@ -192,6 +200,8 @@ const updateCanvasDisplaySize = (): void => {
 // ---- Movement animation -----------------------------------------------------
 
 const now = (): number => performance.now()
+// Wall-clock epoch ms, to compare against a say's server `sentAt`.
+const nowEpoch = (): number => Date.now()
 
 const positionOf = (token: Token): Point => renderPos.get(token.id) ?? {x: token.x, y: token.y}
 
@@ -266,7 +276,8 @@ const frame = (t: number): void => {
   const moving = stepRenderPos(t)
   draw()
   dirty = false
-  if (moving) ensureRaf()
+  // Keep ticking while tokens glide OR while a chat bubble is still fading.
+  if (moving || bubblesActive(nowEpoch())) ensureRaf()
 }
 
 const fitBoardToViewport = (): void => {
@@ -383,7 +394,7 @@ const connect = (): void => {
   source.onmessage = (event) => {
     const message = JSON.parse(event.data) as ViewMessage
     if (message.type === 'snapshot') you.value = message.you
-    applyView(message.board, message.tokens)
+    applyView(message.board, message.tokens, message.says)
   }
   window.addEventListener('beforeunload', () => source.close())
 }
@@ -634,6 +645,124 @@ const draw = (): void => {
   for (const token of tokens.value) drawToken(token)
   // GM-only room labels, drawn on top of everything (the GM has no fog).
   if (isGm) drawRoomLabels(active)
+  drawSpeechBubbles(active)
+}
+
+// True while any chat bubble is still within its visible+fade lifetime — used to
+// keep the rAF loop ticking so bubbles fade out smoothly and then disappear.
+const bubblesActive = (t: number): boolean =>
+  says.value.some((say) => t - say.sentAt < SAY_VISIBLE_MS + SAY_FADE_MS)
+
+const bubbleAlpha = (say: ChatSay, t: number): number => {
+  const age = t - say.sentAt
+  if (age < 0) return 1
+  if (age < SAY_VISIBLE_MS) return 1
+  if (age < SAY_VISIBLE_MS + SAY_FADE_MS) return 1 - (age - SAY_VISIBLE_MS) / SAY_FADE_MS
+  return 0
+}
+
+// Draw chat bubbles: a player's bubble points at their token's current (animated)
+// position; a GM bubble shows as a banner near the top of the board, centred on
+// the current view. Bubbles fade out over their final stretch.
+const drawSpeechBubbles = (active: Board): void => {
+  const t = nowEpoch()
+  // Only the most recent bubble per speaker, so rapid messages don't stack.
+  const latest = new Map<string, ChatSay>()
+  for (const say of says.value) latest.set(say.fromId, say)
+  for (const say of latest.values()) {
+    const alpha = bubbleAlpha(say, t)
+    if (alpha <= 0) continue
+    if (say.fromGm) {
+      drawGmBanner(active, say, alpha)
+      continue
+    }
+    const token = tokens.value.find((tk) => tk.id === `token-${say.fromId}` || tk.ownerId === say.fromId)
+    const at = token ? positionOf(token) : say.at
+    drawBubble(active, say.text, at.x, at.y - active.gridScale * 0.9, alpha, false)
+  }
+}
+
+const drawGmBanner = (active: Board, say: ChatSay, alpha: number): void => {
+  // Centre the banner on the visible part of the board (account for scroll/zoom).
+  let cx = active.width / 2
+  let topY = active.gridScale
+  if (boardViewport) {
+    cx = (boardViewport.scrollLeft + boardViewport.clientWidth / 2) / zoom.value
+    topY = boardViewport.scrollTop / zoom.value + active.gridScale * 0.8
+  }
+  drawBubble(active, `GM: ${say.text}`, cx, topY, alpha, true)
+}
+
+const drawBubble = (
+  active: Board,
+  text: string,
+  anchorX: number,
+  anchorY: number,
+  alpha: number,
+  gm: boolean
+): void => {
+  const fontSize = Math.max(13, active.gridScale * 0.34)
+  ctx.save()
+  ctx.font = `600 ${fontSize}px Inter, system-ui, sans-serif`
+  ctx.textBaseline = 'middle'
+  ctx.textAlign = 'center'
+  const padX = fontSize * 0.7
+  const padY = fontSize * 0.5
+  const maxW = Math.min(active.width * 0.6, fontSize * 22)
+  const lines = wrapText(text, maxW)
+  const lineH = fontSize * 1.25
+  const boxW = Math.min(maxW, Math.max(...lines.map((l) => ctx.measureText(l).width))) + padX * 2
+  const boxH = lines.length * lineH + padY * 2
+  // Keep the bubble on the board.
+  const bx = Math.max(boxW / 2 + 4, Math.min(active.width - boxW / 2 - 4, anchorX))
+  const by = Math.max(boxH / 2 + 4, anchorY - boxH / 2)
+
+  ctx.globalAlpha = alpha
+  roundRect(bx - boxW / 2, by - boxH / 2, boxW, boxH, fontSize * 0.5)
+  ctx.fillStyle = gm ? 'rgba(57, 255, 20, 0.92)' : 'rgba(244, 246, 243, 0.95)'
+  ctx.fill()
+  // Little tail toward the speaker (players only).
+  if (!gm) {
+    ctx.beginPath()
+    ctx.moveTo(bx - 6, by + boxH / 2 - 1)
+    ctx.lineTo(bx + 6, by + boxH / 2 - 1)
+    ctx.lineTo(bx, by + boxH / 2 + 9)
+    ctx.closePath()
+    ctx.fill()
+  }
+  ctx.fillStyle = gm ? '#05140a' : '#0c0e0d'
+  lines.forEach((line, i) => {
+    ctx.fillText(line, bx, by - boxH / 2 + padY + lineH * (i + 0.5))
+  })
+  ctx.restore()
+}
+
+const wrapText = (text: string, maxWidth: number): string[] => {
+  const words = text.split(/\s+/)
+  const lines: string[] = []
+  let line = ''
+  for (const word of words) {
+    const candidate = line ? `${line} ${word}` : word
+    if (ctx.measureText(candidate).width > maxWidth && line) {
+      lines.push(line)
+      line = word
+    } else {
+      line = candidate
+    }
+  }
+  if (line) lines.push(line)
+  return lines.slice(0, 4)
+}
+
+const roundRect = (x: number, y: number, w: number, h: number, r: number): void => {
+  const rad = Math.min(r, w / 2, h / 2)
+  ctx.beginPath()
+  ctx.moveTo(x + rad, y)
+  ctx.arcTo(x + w, y, x + w, y + h, rad)
+  ctx.arcTo(x + w, y + h, x, y + h, rad)
+  ctx.arcTo(x, y + h, x, y, rad)
+  ctx.arcTo(x, y, x + w, y, rad)
+  ctx.closePath()
 }
 
 const drawMoveRadius = (active: Board, me: Token): void => {
@@ -680,9 +809,9 @@ const hintText = (): string => {
       : 'GM view — wheel to zoom; ⌘-drag or right-drag to pan. Click doors to toggle.'
   }
   if (active && !playerDoorControl(active)) {
-    return 'Move within the green ring (30 ft by default). Wheel to zoom; ⌘-drag or right-drag to pan. Doors are GM-only.'
+    return 'Move within the green ring (6 m / 4 squares by default). Wheel to zoom; ⌘-drag or right-drag to pan. Doors are GM-only.'
   }
-  return 'Move within the green ring (30 ft by default). Click doors to toggle. Wheel to zoom; ⌘-drag or right-drag to pan.'
+  return 'Move within the green ring (6 m / 4 squares by default). Click doors to toggle. Wheel to zoom; ⌘-drag or right-drag to pan.'
 }
 
 const syncDoorControlUi = (active: Board): void => {
@@ -732,7 +861,7 @@ const syncGmTokenMoves = (): void => {
             min="0"
             max="999"
             step="5"
-            value="${tokenMoveFeet(token, active)}"
+            value="${tokenMoveMeters(token, active)}"
             data-player-id="${token.ownerId}"
             aria-label="Move feet for ${token.label}"
           />
@@ -749,7 +878,7 @@ const wireGmTokenMoves = (): void => {
     if (!input) return
     const playerId = input.dataset.playerId
     if (!playerId) return
-    post({type: 'SetTokenMoveFeet', playerId, moveFeet: Math.max(0, Number(input.value) || 0)})
+    post({type: 'SetTokenMoveMeters', playerId, moveMeters: Math.max(0, Number(input.value) || 0)})
   })
 }
 
@@ -798,14 +927,24 @@ const mount = (): void => {
                 <dd id="who"></dd>
               </div>
             </dl>
-            <button id="copyLink" type="button">Copy player link</button>
+            ${isHost ? '<button id="copyLink" type="button">Copy player link</button>' : ''}
             ${isHost ? '<button id="newMap" class="play-secondary" type="button">New map</button>' : ''}
             ${gmControls}
             <div id="gmTokenMoves" class="play-gm-moves" hidden>
-              <h3 class="play-gm-moves-title">Movement (ft / turn)</h3>
-              <p class="play-gm-moves-lead">D&amp;D 5e SRD default is 30 ft. Override per counter for haste, slow, etc.</p>
+              <h3 class="play-gm-moves-title">Movement (m / round)</h3>
+              <p class="play-gm-moves-lead">Cepheus Engine default is 6 m (≈ 4 squares of 1.5 m). Override per counter.</p>
             </div>
             <p class="play-hint">${hintText()}</p>
+            <form id="chatForm" class="play-chat" autocomplete="off">
+              <input
+                id="chatInput"
+                type="text"
+                maxlength="200"
+                placeholder="Say something…"
+                aria-label="Chat message"
+              />
+              <button type="submit" aria-label="Send">Say</button>
+            </form>
           </div>
         </div>
       </aside>
@@ -837,6 +976,7 @@ const mount = (): void => {
   wireDoorControl()
   wireGmTokenMoves()
   wireNewMap()
+  wireChat()
   void startSession()
 }
 
@@ -895,6 +1035,19 @@ const wireNewMap = (): void => {
   })
 }
 
+const wireChat = (): void => {
+  const form = document.querySelector<HTMLFormElement>('#chatForm')
+  const input = document.querySelector<HTMLInputElement>('#chatInput')
+  if (!form || !input) return
+  form.addEventListener('submit', (event) => {
+    event.preventDefault()
+    const text = input.value.trim()
+    if (!text) return
+    post({type: 'Say', text})
+    input.value = ''
+  })
+}
+
 mount()
 
 effect(() => {
@@ -902,6 +1055,7 @@ effect(() => {
   mapImage.value
   board.value
   tokens.value
+  says.value
   zoom.value
   drawerOpen.value
   updateCanvasDisplaySize()
@@ -916,7 +1070,7 @@ effect(() => {
     whoEl.textContent = isGm
       ? `GM · ${tokens.value.length} counters`
       : me && active
-        ? `You are ${me.label} · ${tokenMoveFeet(me, active)} ft move · ${tokens.value.length} visible`
+        ? `You are ${me.label} · ${tokenMoveMeters(me, active)} m / ${tokenMoveSquares(me, active)} sq · ${tokens.value.length} visible`
         : ''
   }
 

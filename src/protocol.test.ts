@@ -1,10 +1,10 @@
 import {describe, expect, it} from 'vitest'
 import {
   canToggleDoorFrom,
+  CEPHEUS_DEFAULT_MOVE_METERS,
+  CEPHEUS_METERS_PER_SQUARE,
   doorReach,
   moveRadiusPixels,
-  SRD_DEFAULT_MOVE_FEET,
-  SRD_FEET_PER_SQUARE,
   validateTokenMove,
   type Board,
   type Token
@@ -23,34 +23,34 @@ const seedBoard = (): Board => ({
   ],
   doorStates: {},
   playerDoorControl: true,
-  feetPerSquare: SRD_FEET_PER_SQUARE,
-  defaultMoveFeet: SRD_DEFAULT_MOVE_FEET
+  metersPerSquare: CEPHEUS_METERS_PER_SQUARE,
+  defaultMoveMeters: CEPHEUS_DEFAULT_MOVE_METERS
 })
 
-const viewer = (x: number, y: number, moveFeet?: number): Token => ({
+const viewer = (x: number, y: number, moveMeters?: number): Token => ({
   id: 'token-p1',
   ownerId: 'p1',
   label: 'P1',
   kind: 'officer',
   x,
   y,
-  moveFeet
+  moveMeters
 })
 
 describe('moveRadiusPixels', () => {
-  it('maps 30 ft at 5 ft/square and 50 px grid to 300 board pixels', () => {
+  it('maps 6 m at 1.5 m/square and 50 px grid to 200 board pixels (4 squares)', () => {
     const board = seedBoard()
-    expect(moveRadiusPixels(viewer(0, 0), board)).toBe(300)
+    expect(moveRadiusPixels(viewer(0, 0), board)).toBe(200)
   })
 
-  it('honours per-token move feet override', () => {
+  it('honours per-token move metres override', () => {
     const board = seedBoard()
-    expect(moveRadiusPixels(viewer(0, 0, 60), board)).toBe(600)
+    expect(moveRadiusPixels(viewer(0, 0, 9), board)).toBe(300)
   })
 })
 
 describe('validateTokenMove', () => {
-  it('allows movement within sight and within 30 ft', () => {
+  it('allows movement within sight and within the move budget', () => {
     const board = seedBoard()
     const me = viewer(250, 500)
     expect(validateTokenMove(me, board, {x: 300, y: 520}).ok).toBe(true)
@@ -74,7 +74,7 @@ describe('validateTokenMove', () => {
     const tooFar = {x: 100 + moveRadiusPixels(me, board) + 40, y: 100}
     const result = validateTokenMove(me, board, tooFar)
     expect(result.ok).toBe(false)
-    if (!result.ok) expect(result.reason).toContain('30 ft')
+    if (!result.ok) expect(result.reason).toContain('6 m')
   })
 
   it('allows a GM to ignore movement limits', () => {

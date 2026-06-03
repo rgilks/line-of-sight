@@ -9,8 +9,8 @@ import {defaultSpec} from './synth/types'
 import type {Board} from '../../src/protocol'
 
 const SIGHT_RADIUS = 700
-const FEET_PER_SQUARE = 5
-const DEFAULT_MOVE_FEET = 30
+const METERS_PER_SQUARE = 1.5 // Cepheus Engine tactical square
+const DEFAULT_MOVE_METERS = 6 // Cepheus Engine per-round movement (≈ 4 squares)
 
 const renderDeckImage = (map: ReturnType<typeof generateMap>): Promise<Blob> => {
   const canvas = document.createElement('canvas')
@@ -70,8 +70,8 @@ export const publishGeneratedDeck = async (
     occluders: map.occluders,
     doorStates: {},
     playerDoorControl: true,
-    feetPerSquare: FEET_PER_SQUARE,
-    defaultMoveFeet: DEFAULT_MOVE_FEET,
+    metersPerSquare: METERS_PER_SQUARE,
+    defaultMoveMeters: DEFAULT_MOVE_METERS,
     spawnPoints,
     rooms
   }

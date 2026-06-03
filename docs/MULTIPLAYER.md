@@ -91,30 +91,41 @@ No new geometry code — `hasLineOfSight` / `visibilityPolygon` already exist an
 are pure, so they run unchanged in a Worker / Durable Object. This is the main
 reason the rest of the design is cheap.
 
-### Movement (D&D 5e SRD)
+### Movement (Cepheus Engine)
 
-Per [SRD movement rules](https://5e.d20srd.org/srd/combat/movementandPosition.htm),
-on your turn you can move up to your **speed** (walking speed is **30 feet** for
-most humanoids). Battle maps treat each square as **5 feet**.
+Per the Cepheus Engine personal-combat rules, a character moves up to **6 metres**
+per round, and a tactical square is **1.5 metres** — so the default is **4
+squares** per turn.
 
 The play client enforces both:
 
 1. **Line of sight** — destination must be inside your current visibility polygon.
 2. **Per-turn distance** — destination must be within your movement budget.
 
-Defaults on publish: `feetPerSquare: 5`, `defaultMoveFeet: 30`. Board pixels use
-`gridScale` (pixels per square), so 30 ft → 6 squares → `6 × gridScale` pixels
-(e.g. 300 px when `gridScale` is 50).
+Defaults on publish: `metersPerSquare: 1.5`, `defaultMoveMeters: 6`. Board pixels
+use `gridScale` (pixels per square), so 6 m → 4 squares → `4 × gridScale` pixels
+(e.g. 200 px when `gridScale` is 50).
 
-The **GM** can override any counter’s budget with `SetTokenMoveFeet` (haste,
-slow, monsters with different speeds, etc.). Overrides are stored on the token as
-`moveFeet` and validated server-side on every `MoveToken`.
+The **GM** can override any counter’s budget with `SetTokenMoveMeters` (different
+species, vacc-suit encumbrance, etc.). Overrides are stored on the token as
+`moveMeters` and validated server-side on every `MoveToken`.
 
 Moves are **animated** for every viewer: the client eases each token from its
 previous drawn position to the new one over ~350 ms (ease-out cubic), so counters
 glide rather than teleport. The fog polygon and move ring follow the eased
 position. A single `requestAnimationFrame` loop owns drawing and stops once all
 tokens settle; a joining or fog-re-entering token snaps to place (no glide).
+
+### Chat (speech bubbles)
+
+Anyone can type a message (the `Say` command). It appears as a **speech bubble**
+next to the speaker's counter, fading after a few seconds. Chat is
+**visibility-gated** like tokens: you only see another player's bubble if your POV
+can currently see their counter (`saysFor` reuses the same line-of-sight gate, so
+a bubble never leaks a hidden position). The **GM has no counter**, so the GM's
+messages show as a **banner** at the top of the board, seen by everyone. The
+server keeps only recent says (TTL) and the bubble follows the speaker's animated
+position so it tracks a moving counter.
 
 ### Spawns and doors
 
@@ -192,12 +203,16 @@ sequenceDiagram
 
 Example shapes (illustrative, not final):
 
+This is the illustrative shape; the authoritative command/event set lives in
+`src/protocol.ts` (e.g. `MoveToken`, `ToggleDoor`, `SetTokenMoveMeters`, `Say`).
+
 ```ts
 type Command =
   | {type: 'JoinTable'; name: string}
   | {type: 'ClaimToken'; tokenId: string}
   | {type: 'MoveToken'; tokenId: string; x: number; y: number}
   | {type: 'ToggleDoor'; doorId: string; open: boolean}
+  | {type: 'Say'; text: string}
   | {type: 'SetPov'; tokenId: string}
   | {type: 'PublishBoard'; sidecar: Sidecar} // GM
 

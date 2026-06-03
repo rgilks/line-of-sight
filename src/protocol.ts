@@ -9,6 +9,9 @@ import {
   type Point
 } from '../web/src/los-core'
 
+// Re-exported so the table DO imports the LOS gate from one place (this module).
+export {hasLineOfSight}
+
 export type PlayerId = string
 
 // The counter portraits available at /token-portraits/<kind>.webp (shared with
@@ -49,8 +52,8 @@ export type Token = {
   kind: CounterKind
   x: number
   y: number
-  /** Per-turn movement budget in feet; GM override. Falls back to board default. */
-  moveFeet?: number
+  /** Per-turn movement budget in metres; GM override. Falls back to board default. */
+  moveMeters?: number
 }
 
 export type Board = {
@@ -66,15 +69,15 @@ export type Board = {
   /** When false, only the GM connection may toggle doors. Defaults to true. */
   playerDoorControl?: boolean
   /**
-   * Map squares are this many feet on a side (D&D 5e SRD: 5 ft per square).
-   * Used with `gridScale` to convert movement feet to board pixels.
+   * Map squares are this many metres on a side (Cepheus Engine: 1.5 m per
+   * square). Used with `gridScale` to convert movement metres to board pixels.
    */
-  feetPerSquare?: number
+  metersPerSquare?: number
   /**
-   * Default per-turn walking speed in feet (D&D 5e SRD: 30 ft for most
-   * humanoids). Individual tokens may override via `moveFeet`.
+   * Default per-turn movement in metres (Cepheus Engine: 6 m ≈ 4 squares).
+   * Individual tokens may override via `moveMeters`.
    */
-  defaultMoveFeet?: number
+  defaultMoveMeters?: number
   /**
    * Suggested join positions in board pixels (e.g. room centers of a generated
    * deck). The table assigns joining players to these; absent ⇒ legacy spawn.
@@ -97,7 +100,23 @@ export type Command =
   | {type: 'MoveToken'; x: number; y: number}
   | {type: 'ToggleDoor'; doorId: string; open: boolean}
   | {type: 'SetPlayerDoorControl'; enabled: boolean}
-  | {type: 'SetTokenMoveFeet'; playerId: PlayerId; moveFeet: number}
+  | {type: 'SetTokenMoveMeters'; playerId: PlayerId; moveMeters: number}
+  | {type: 'Say'; text: string}
+
+// A chat message, shown as a speech bubble. A player's bubble attaches to their
+// token; the GM (no token) speaks via `fromGm`, shown as a board banner. `at` is
+// the speaker's board position when sent (so a bubble has somewhere to point even
+// if its token later moves out of the recipient's sight). Visibility-gated like
+// tokens: a recipient only receives a say from someone they can currently see.
+export type ChatSay = {
+  id: string
+  fromId: PlayerId
+  label: string
+  text: string
+  at: Point
+  fromGm: boolean
+  sentAt: number
+}
 
 export type CommandEnvelope = {playerId: PlayerId; command: Command}
 
@@ -109,37 +128,43 @@ export type DomainEvent = {seq: number} & (
   | {type: 'TokenMoved'; playerId: PlayerId; x: number; y: number}
   | {type: 'DoorToggled'; doorId: string; open: boolean}
   | {type: 'PlayerDoorControlSet'; enabled: boolean}
-  | {type: 'TokenMoveFeetSet'; playerId: PlayerId; moveFeet: number}
+  | {type: 'TokenMoveMetersSet'; playerId: PlayerId; moveMeters: number}
   | {type: 'BoardPublished'; assetRef: string}
 )
 
-// Server -> client read model. `tokens` is ALREADY fog-gated for the recipient,
-// and `board` is included so a freshly published board (new map + occluders)
-// reaches already-connected clients without a reconnect.
+// Server -> client read model. `tokens` and `says` are ALREADY visibility-gated
+// for the recipient, and `board` is included so a freshly published board (new
+// map + occluders) reaches already-connected clients without a reconnect.
 export type ViewMessage =
-  | {type: 'snapshot'; you: PlayerId; board: Board; tokens: Token[]}
-  | {type: 'update'; board: Board; tokens: Token[]}
+  | {type: 'snapshot'; you: PlayerId; board: Board; tokens: Token[]; says: ChatSay[]}
+  | {type: 'update'; board: Board; tokens: Token[]; says: ChatSay[]}
 
-/** D&D 5e SRD: one grid square on the battle map is 5 feet. */
-export const SRD_FEET_PER_SQUARE = 5
+/** Cepheus Engine: one tactical grid square is 1.5 metres. */
+export const CEPHEUS_METERS_PER_SQUARE = 1.5
 
-/** D&D 5e SRD: default walking speed per turn for most humanoids (feet). */
-export const SRD_DEFAULT_MOVE_FEET = 30
+/** Cepheus Engine: default per-round movement is 6 metres (≈ 4 squares). */
+export const CEPHEUS_DEFAULT_MOVE_METERS = 6
 
 const isDoorOpen = (board: Board, doorId: string, fallback: boolean): boolean =>
   board.doorStates[doorId]?.open ?? fallback
 
-export const feetPerSquare = (board: Board): number =>
-  board.feetPerSquare && board.feetPerSquare > 0 ? board.feetPerSquare : SRD_FEET_PER_SQUARE
+export const metersPerSquare = (board: Board): number =>
+  board.metersPerSquare && board.metersPerSquare > 0
+    ? board.metersPerSquare
+    : CEPHEUS_METERS_PER_SQUARE
 
-export const tokenMoveFeet = (token: Token, board: Board): number => {
-  const feet = token.moveFeet ?? board.defaultMoveFeet ?? SRD_DEFAULT_MOVE_FEET
-  return Math.max(0, feet)
+export const tokenMoveMeters = (token: Token, board: Board): number => {
+  const meters = token.moveMeters ?? board.defaultMoveMeters ?? CEPHEUS_DEFAULT_MOVE_METERS
+  return Math.max(0, meters)
 }
+
+/** How many whole squares a token may move in one turn (for UI hints). */
+export const tokenMoveSquares = (token: Token, board: Board): number =>
+  Math.round(tokenMoveMeters(token, board) / metersPerSquare(board))
 
 /** Maximum distance a token may travel in one turn, in board pixels. */
 export const moveRadiusPixels = (token: Token, board: Board): number => {
-  const squares = tokenMoveFeet(token, board) / feetPerSquare(board)
+  const squares = tokenMoveMeters(token, board) / metersPerSquare(board)
   return squares * board.gridScale
 }
 
@@ -186,10 +211,10 @@ export const validateTokenMove = (
   const maxMove = moveRadiusPixels(viewer, board)
   const distance = Math.hypot(destination.x - viewer.x, destination.y - viewer.y)
   if (distance > maxMove + 0.5) {
-    const feet = tokenMoveFeet(viewer, board)
+    const meters = tokenMoveMeters(viewer, board)
     return {
       ok: false,
-      reason: `You can move up to ${feet} ft this turn (about ${feet / feetPerSquare(board)} squares).`
+      reason: `You can move up to ${meters} m this turn (about ${tokenMoveSquares(viewer, board)} squares).`
     }
   }
 

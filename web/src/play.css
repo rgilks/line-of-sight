@@ -238,6 +238,42 @@ body {
   cursor: default;
 }
 
+.play-chat {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.6rem;
+}
+
+.play-chat input {
+  flex: 1 1 auto;
+  min-width: 0;
+  font: inherit;
+  font-size: 0.82rem;
+  color: var(--tre-white, #f5f5f5);
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.45rem 0.6rem;
+}
+
+.play-chat input:focus-visible {
+  outline: none;
+  border-color: var(--green);
+}
+
+.play-chat button {
+  flex: 0 0 auto;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--ink, #050505);
+  background: var(--green);
+  border: none;
+  border-radius: 6px;
+  padding: 0.45rem 0.8rem;
+  cursor: pointer;
+}
+
 .gm-door-lock {
   display: flex;
   align-items: center;
