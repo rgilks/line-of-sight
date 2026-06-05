@@ -450,7 +450,7 @@ const drawReachableDoorHints = (active: Board, me: Token): void => {
   if (isGm || !canToggleDoors()) return
   for (const occluder of active.occluders) {
     if (occluder.type === 'door' && canToggleDoorFrom(me, active, occluder)) {
-      drawReachableDoorAffordance(ctx, occluder, screenPixels)
+      drawReachableDoorAffordance(ctx, occluder, screenPixels, me)
     }
   }
 }

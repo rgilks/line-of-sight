@@ -8,7 +8,7 @@ import {
   selectedOccluderId,
   showWalls
 } from './state'
-import {isDoorOpen, isDoorReachable} from './visibility'
+import {getPovToken, isDoorOpen, isDoorReachable} from './visibility'
 
 export const drawDoorMarkers = (): void => {
   ctx.save()
@@ -22,10 +22,11 @@ export const drawDoorMarkers = (): void => {
 }
 
 export const drawReachableDoorMarkers = (): void => {
+  const pov = getPovToken()
   ctx.save()
   for (const occluder of occluders.value) {
     if (occluder.type === 'door' && isDoorReachable(occluder)) {
-      drawReachableDoorAffordance(ctx, occluder, screenPixels)
+      drawReachableDoorAffordance(ctx, occluder, screenPixels, pov)
     }
   }
   ctx.restore()

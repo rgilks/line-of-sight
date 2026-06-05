@@ -1,80 +1,47 @@
-import type {DoorOccluder} from './los-core'
+import type {DoorOccluder, Point} from './los-core'
 
 type PixelScaler = (pixels: number) => number
-
-const strokeSegment = (
-  ctx: CanvasRenderingContext2D,
-  x1: number,
-  y1: number,
-  x2: number,
-  y2: number,
-  width: number,
-  color: string
-): void => {
-  ctx.strokeStyle = color
-  ctx.lineWidth = width
-  ctx.beginPath()
-  ctx.moveTo(x1, y1)
-  ctx.lineTo(x2, y2)
-  ctx.stroke()
-}
 
 export const drawReachableDoorAffordance = (
   ctx: CanvasRenderingContext2D,
   door: DoorOccluder,
-  screenPixels: PixelScaler
+  screenPixels: PixelScaler,
+  actor?: Point | null
 ): void => {
   const dx = door.x2 - door.x1
   const dy = door.y2 - door.y1
   const length = Math.max(1, Math.hypot(dx, dy))
   const px = -dy / length
   const py = dx / length
-  const cap = Math.min(screenPixels(8), Math.max(screenPixels(4), length * 0.18))
+  const midX = (door.x1 + door.x2) / 2
+  const midY = (door.y1 + door.y2) / 2
+  const side = actor && (actor.x - midX) * px + (actor.y - midY) * py > 0 ? -1 : 1
+  const pipX = midX + px * side * screenPixels(11)
+  const pipY = midY + py * side * screenPixels(11)
+  const haloRadius = screenPixels(6.5)
+  const ringRadius = screenPixels(4.2)
+  const dotRadius = screenPixels(1.6)
 
   ctx.save()
-  ctx.lineCap = 'round'
-  ctx.lineJoin = 'round'
   ctx.setLineDash([])
   ctx.shadowColor = 'rgba(57, 255, 20, 0.72)'
-  ctx.shadowBlur = screenPixels(11)
+  ctx.shadowBlur = screenPixels(7)
 
-  strokeSegment(
-    ctx,
-    door.x1,
-    door.y1,
-    door.x2,
-    door.y2,
-    screenPixels(7),
-    'rgba(57, 255, 20, 0.24)'
-  )
+  ctx.fillStyle = 'rgba(5, 5, 5, 0.82)'
+  ctx.beginPath()
+  ctx.arc(pipX, pipY, haloRadius, 0, Math.PI * 2)
+  ctx.fill()
 
   ctx.shadowBlur = 0
-  strokeSegment(
-    ctx,
-    door.x1,
-    door.y1,
-    door.x2,
-    door.y2,
-    screenPixels(2.8),
-    'rgba(57, 255, 20, 0.96)'
-  )
-  strokeSegment(
-    ctx,
-    door.x1 - px * cap,
-    door.y1 - py * cap,
-    door.x1 + px * cap,
-    door.y1 + py * cap,
-    screenPixels(2.2),
-    'rgba(57, 255, 20, 0.9)'
-  )
-  strokeSegment(
-    ctx,
-    door.x2 - px * cap,
-    door.y2 - py * cap,
-    door.x2 + px * cap,
-    door.y2 + py * cap,
-    screenPixels(2.2),
-    'rgba(57, 255, 20, 0.9)'
-  )
+  ctx.strokeStyle = 'rgba(57, 255, 20, 0.95)'
+  ctx.lineWidth = screenPixels(1.6)
+  ctx.beginPath()
+  ctx.arc(pipX, pipY, ringRadius, 0, Math.PI * 2)
+  ctx.stroke()
+
+  ctx.fillStyle = 'rgba(57, 255, 20, 0.95)'
+  ctx.beginPath()
+  ctx.arc(pipX, pipY, dotRadius, 0, Math.PI * 2)
+  ctx.fill()
   ctx.restore()
 }
