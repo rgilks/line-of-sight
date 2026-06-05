@@ -1,12 +1,18 @@
 import {describe, expect, it} from 'vitest'
 import {
+  activeCombatant,
   canToggleDoorFrom,
   CEPHEUS_DEFAULT_MOVE_METERS,
   CEPHEUS_METERS_PER_SQUARE,
+  combatReady,
   doorReach,
+  isPlayersCombatTurn,
   moveRadiusPixels,
+  orderCombatantsByInitiative,
   validateTokenMove,
   type Board,
+  type Combatant,
+  type CombatState,
   type Token
 } from './protocol'
 
@@ -118,5 +124,51 @@ describe('canToggleDoorFrom', () => {
     const board = seedBoard()
     const wall = board.occluders[0]
     expect(canToggleDoorFrom(viewer(500, 100), board, wall)).toBe(false)
+  })
+})
+
+const combatant = (
+  playerId: string,
+  label: string,
+  initiative: number | null,
+  order: number
+): Combatant => ({
+  playerId,
+  tokenId: `token-${playerId}`,
+  label,
+  order,
+  dexterityDm: 0,
+  dice: initiative == null ? null : [3, 3],
+  initiative
+})
+
+describe('combat helpers', () => {
+  it('orders combatants by descending initiative with stable join-order ties', () => {
+    const p1 = combatant('p1', 'P1', 8, 0)
+    const p2 = combatant('p2', 'P2', 12, 1)
+    const p3 = combatant('p3', 'P3', 8, 2)
+    expect(orderCombatantsByInitiative([p1, p2, p3]).map((entry) => entry.playerId)).toEqual([
+      'p2',
+      'p1',
+      'p3'
+    ])
+  })
+
+  it('is ready only after every combatant has initiative and a turn index exists', () => {
+    const rolling: CombatState = {
+      round: 1,
+      turnIndex: null,
+      combatants: [combatant('p1', 'P1', 8, 0), combatant('p2', 'P2', null, 1)]
+    }
+    const ready: CombatState = {
+      round: 1,
+      turnIndex: 0,
+      combatants: [combatant('p1', 'P1', 8, 0), combatant('p2', 'P2', 7, 1)]
+    }
+    expect(combatReady(rolling)).toBe(false)
+    expect(combatReady(ready)).toBe(true)
+    expect(activeCombatant(ready)?.playerId).toBe('p1')
+    expect(isPlayersCombatTurn(ready, 'p1')).toBe(true)
+    expect(isPlayersCombatTurn(ready, 'p2')).toBe(false)
   })
 })

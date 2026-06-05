@@ -14,13 +14,19 @@ import {drawReachableDoorAffordance} from './door-affordance'
 import {distanceToOccluder, visibilityPolygon, type Occluder, type Point} from './los-core'
 import {counterDefinitions, counterPortraits, preloadCounterPortraits} from './state'
 import {
+  activeCombatant,
   canToggleDoorFrom,
+  combatantForPlayer,
+  combatReady,
+  isPlayersCombatTurn,
   metersPerSquare,
   moveRadiusPixels,
   tokenMoveMeters,
   tokenMoveSquares,
   validateTokenMove,
   type Board,
+  type Combatant,
+  type CombatState,
   type ChatSay,
   type CommandEnvelope,
   type Token,
@@ -72,6 +78,7 @@ const you = signal<string | null>(null)
 const board = signal<Board | null>(null)
 const tokens = signal<Token[]>([])
 const says = signal<ChatSay[]>([])
+const combat = signal<CombatState | null>(null)
 const status = signal('Connecting…')
 const mapImage = signal<HTMLImageElement | null>(null)
 const drawerOpen = signal(true)
@@ -154,6 +161,10 @@ const post = (command: CommandEnvelope['command']): void => {
     method: 'POST',
     headers: {'content-type': 'application/json'},
     body: JSON.stringify({playerId, command} satisfies CommandEnvelope)
+  }).then(async (response) => {
+    if (response.ok) return
+    const body = (await response.json().catch(() => null)) as {error?: string} | null
+    status.value = body?.error ?? 'Command rejected.'
   })
 }
 
@@ -183,11 +194,17 @@ const boardGeometryChanged = (previous: Board | null, next: Board): boolean => {
   return JSON.stringify(previous.occluders) !== JSON.stringify(next.occluders)
 }
 
-const applyView = (next: Board, nextTokens: Token[], nextSays: ChatSay[]): void => {
+const applyView = (
+  next: Board,
+  nextTokens: Token[],
+  nextSays: ChatSay[],
+  nextCombat: CombatState | null
+): void => {
   const previous = board.value
   const geometryChanged = boardGeometryChanged(previous, next)
   reconcileRenderPos(nextTokens, geometryChanged)
   says.value = nextSays
+  combat.value = nextCombat
   board.value = next
   tokens.value = nextTokens
   if (targetTokenId.value && !nextTokens.some((token) => token.id === targetTokenId.value)) {
@@ -416,7 +433,7 @@ const connect = (): void => {
   source.onmessage = (event) => {
     const message = JSON.parse(event.data) as ViewMessage
     if (message.type === 'snapshot') you.value = message.you
-    applyView(message.board, message.tokens, message.says)
+    applyView(message.board, message.tokens, message.says, message.combat ?? null)
   }
   window.addEventListener('beforeunload', () => source.close())
 }
@@ -489,6 +506,21 @@ const targetingStatus = (active: Board, me: Token, target: Token): string => {
   const meters = rangeMetersBetween(active, positionOf(me), positionOf(target))
   return `Targeting ${target.label} · ${formatRange(meters)}`
 }
+
+const combatMovementBlockReason = (): string | null => {
+  const activeCombat = combat.value
+  if (!activeCombat || isGm) return null
+  const playerId = you.value
+  const mine = combatantForPlayer(activeCombat, playerId)
+  if (!mine) return 'You are not in this combat.'
+  if (!combatReady(activeCombat)) {
+    return mine.initiative == null ? 'Roll initiative before moving.' : 'Waiting for initiative rolls.'
+  }
+  const current = activeCombatant(activeCombat)
+  return current?.playerId === playerId ? null : `${current?.label ?? 'Another combatant'} is acting.`
+}
+
+const canMoveNow = (): boolean => combatMovementBlockReason() == null
 
 const drawReachableDoorHints = (active: Board, me: Token): void => {
   if (isGm || !canToggleDoors()) return
@@ -726,6 +758,11 @@ const handleBoardTap = (clientX: number, clientY: number): void => {
   }
 
   if (!me) return
+  const combatBlock = combatMovementBlockReason()
+  if (combatBlock) {
+    status.value = combatBlock
+    return
+  }
   const moveCheck = validateTokenMove(me, active, point, {gm: isGm})
   if (!moveCheck.ok) {
     status.value = moveCheck.reason
@@ -871,7 +908,7 @@ const draw = (): void => {
     // counter rather than snapping ahead of it.
     const animated = {...me, ...positionOf(me)}
     drawFog(active, animated)
-    drawMoveRadius(active, animated)
+    if (canMoveNow()) drawMoveRadius(active, animated)
     drawReachableDoorHints(active, animated)
     if (target) drawTargetingLine(active, animated, target)
   }
@@ -1034,11 +1071,28 @@ const drawRoomLabels = (active: Board): void => {
 
 const hintText = (): string => {
   const active = board.value
+  const activeCombat = combat.value
   if (isGm) {
     const locked = active != null && !playerDoorControl(active)
+    if (activeCombat) {
+      return combatReady(activeCombat)
+        ? 'Combat running — use the turn arrow to advance, or end combat to unlock everyone.'
+        : 'Combat started — waiting for players to roll initiative.'
+    }
     return locked
       ? 'GM view — wheel to zoom; ⌘-drag or right-drag to pan. Doors locked; click doors to toggle.'
       : 'GM view — wheel to zoom; ⌘-drag or right-drag to pan. Click doors to toggle.'
+  }
+  if (activeCombat) {
+    const mine = combatantForPlayer(activeCombat, you.value)
+    if (!combatReady(activeCombat)) {
+      return mine?.initiative == null
+        ? 'Combat started. Roll initiative before moving.'
+        : 'Waiting for the remaining initiative rolls.'
+    }
+    return isPlayersCombatTurn(activeCombat, you.value)
+      ? 'Your turn. Move within the green ring, then tap the down arrow to end your turn.'
+      : 'Combat is locked to the current turn. You can target, but only the active combatant can move.'
   }
   if (active && !playerDoorControl(active)) {
     return 'Click visible counters to target. Move within the green ring (6 m / 4 squares by default). Wheel to zoom; ⌘-drag or right-drag to pan. Doors are GM-only.'
@@ -1061,16 +1115,139 @@ const wireDoorControl = (): void => {
   })
 }
 
-// The collapsed-drawer rail: a vertical column of portraits for the characters
-// currently visible to this viewer (own token first). Shown only when the drawer
-// is minimised. (Later this column will carry initiative order.)
+const escapeHtml = (value: string): string =>
+  value.replace(/[&<>"']/g, (char) => {
+    switch (char) {
+      case '&':
+        return '&amp;'
+      case '<':
+        return '&lt;'
+      case '>':
+        return '&gt;'
+      case '"':
+        return '&quot;'
+      default:
+        return '&#39;'
+    }
+  })
+
+// The collapsed-drawer rail: visible portraits out of combat, initiative order
+// during combat. The server already filters this per viewer.
 const portraitForKind = (kind: string): string =>
   counterDefinitions.find((d) => d.kind === kind)?.portrait ??
   counterDefinitions[0].portrait
 
+const tokenForCombatant = (combatant: Combatant): Token | null =>
+  tokens.value.find((token) => token.ownerId === combatant.playerId) ?? null
+
+const initiativeText = (combatant: Combatant): string =>
+  combatant.initiative == null ? 'roll' : String(combatant.initiative)
+
+const combatantClasses = (combatant: Combatant, active: Combatant | null): string => {
+  const classes = ['play-combatant']
+  if (combatant.playerId === you.value) classes.push('is-me')
+  if (active?.playerId === combatant.playerId) classes.push('is-active')
+  if (combatant.initiative == null) classes.push('is-pending')
+  return classes.join(' ')
+}
+
+const combatantRowHtml = (combatant: Combatant, active: Combatant | null): string => {
+  const dice = combatant.dice ? ` (${combatant.dice[0]}+${combatant.dice[1]})` : ''
+  return `<div class="${combatantClasses(combatant, active)}">
+    <span class="play-combatant-label">${escapeHtml(combatant.label)}</span>
+    <span class="play-combatant-score">${initiativeText(combatant)}${dice}</span>
+  </div>`
+}
+
+const canRollInitiative = (activeCombat: CombatState | null): boolean => {
+  if (isGm) return false
+  const mine = combatantForPlayer(activeCombat, you.value)
+  return mine != null && mine.initiative == null
+}
+
+const canAdvanceCombat = (activeCombat: CombatState | null): boolean =>
+  combatReady(activeCombat) && (isGm || isPlayersCombatTurn(activeCombat, you.value))
+
+const syncCombatPanel = (): void => {
+  const panel = document.querySelector<HTMLDivElement>('#combatPanel')
+  if (!panel) return
+  const activeCombat = combat.value
+
+  if (!activeCombat) {
+    if (!isGm) {
+      panel.hidden = true
+      panel.innerHTML = ''
+      return
+    }
+    panel.hidden = false
+    panel.innerHTML = `
+      <h3 class="play-combat-title">Combat</h3>
+      <button class="play-combat-button" type="button" data-combat-action="start">Start combat</button>`
+    return
+  }
+
+  const ready = combatReady(activeCombat)
+  const active = activeCombatant(activeCombat)
+  const waiting = activeCombat.combatants.filter((combatant) => combatant.initiative == null).length
+  const statusLine = ready
+    ? `Round ${activeCombat.round} · ${active?.label ?? 'Unknown'} acting`
+    : `Initiative · ${waiting} to roll`
+  const rollButton = canRollInitiative(activeCombat)
+    ? '<button class="play-combat-button" type="button" data-combat-action="roll">Roll initiative</button>'
+    : ''
+  const advanceButton = ready
+    ? `<button class="play-combat-button" type="button" data-combat-action="advance" ${
+        canAdvanceCombat(activeCombat) ? '' : 'disabled'
+      }>End turn ↓</button>`
+    : ''
+  const endButton = isGm
+    ? '<button class="play-combat-button play-combat-danger" type="button" data-combat-action="end">End combat</button>'
+    : ''
+
+  panel.hidden = false
+  panel.innerHTML = `
+    <h3 class="play-combat-title">Combat</h3>
+    <p class="play-combat-status">${escapeHtml(statusLine)}</p>
+    <div class="play-combat-list">${activeCombat.combatants
+      .map((combatant) => combatantRowHtml(combatant, active))
+      .join('')}</div>
+    <div class="play-combat-actions">${rollButton}${advanceButton}${endButton}</div>`
+}
+
 const syncPortraitRail = (): void => {
   const rail = document.querySelector<HTMLDivElement>('#portraitRail')
   if (!rail) return
+  const activeCombat = combat.value
+  if (activeCombat) {
+    const active = activeCombatant(activeCombat)
+    const ready = combatReady(activeCombat)
+    const rollEnabled = canRollInitiative(activeCombat)
+    const advanceEnabled = canAdvanceCombat(activeCombat)
+    const action = ready ? 'advance' : 'roll'
+    const actionText = ready ? '↓' : '2D6'
+    const actionDisabled = ready ? !advanceEnabled : !rollEnabled
+    const html = `<div class="play-initiative-rail">
+      <div class="play-initiative-list">${activeCombat.combatants
+        .map((combatant) => {
+          const token = tokenForCombatant(combatant)
+          return `<div class="${combatantClasses(combatant, active)}" title="${escapeHtml(combatant.label)}">
+            <img src="${portraitForKind(token?.kind ?? 'officer')}" alt="${escapeHtml(combatant.label)}" loading="lazy" />
+            <span class="play-combatant-label">${escapeHtml(combatant.label)}</span>
+            <span class="play-combatant-score">${initiativeText(combatant)}</span>
+          </div>`
+        })
+        .join('')}</div>
+      <button
+        class="play-rail-action"
+        type="button"
+        data-combat-action="${action}"
+        ${actionDisabled ? 'disabled' : ''}
+        aria-label="${ready ? 'End turn' : 'Roll initiative'}"
+      >${actionText}</button>
+    </div>`
+    if (rail.innerHTML !== html) rail.innerHTML = html
+    return
+  }
   const mine = you.value
   const ordered = [...tokens.value].sort((a, b) => {
     if (a.ownerId === mine) return -1
@@ -1080,13 +1257,33 @@ const syncPortraitRail = (): void => {
   const html = ordered
     .map((token) => {
       const isMe = token.ownerId === mine
-      return `<div class="play-portrait${isMe ? ' is-me' : ''}" title="${token.label}">
-        <img src="${portraitForKind(token.kind)}" alt="${token.label}" loading="lazy" />
-        <span>${token.label}</span>
+      return `<div class="play-portrait${isMe ? ' is-me' : ''}" title="${escapeHtml(token.label)}">
+        <img src="${portraitForKind(token.kind)}" alt="${escapeHtml(token.label)}" loading="lazy" />
+        <span>${escapeHtml(token.label)}</span>
       </div>`
     })
     .join('')
   if (rail.innerHTML !== html) rail.innerHTML = html
+}
+
+const wireCombatControls = (): void => {
+  document.addEventListener('click', (event) => {
+    const button = (event.target as HTMLElement).closest<HTMLButtonElement>('button[data-combat-action]')
+    if (!button || button.disabled) return
+    const action = button.dataset.combatAction
+    if (action === 'start') {
+      status.value = 'Starting combat…'
+      post({type: 'StartCombat'})
+    } else if (action === 'roll') {
+      status.value = 'Rolling initiative…'
+      post({type: 'RollInitiative'})
+    } else if (action === 'advance') {
+      post({type: 'AdvanceTurn'})
+    } else if (action === 'end') {
+      status.value = 'Ending combat…'
+      post({type: 'EndCombat'})
+    }
+  })
 }
 
 const syncGmTokenMoves = (): void => {
@@ -1191,6 +1388,7 @@ const mount = (): void => {
             ${isHost ? '<button id="copyLink" type="button">Copy player link</button>' : ''}
             ${isHost ? '<button id="newMap" class="play-secondary" type="button">New map</button>' : ''}
             ${gmControls}
+            <div id="combatPanel" class="play-combat-panel" hidden></div>
             <div id="gmTokenMoves" class="play-gm-moves" hidden>
               <h3 class="play-gm-moves-title">Movement (m / round)</h3>
               <p class="play-gm-moves-lead">Cepheus Engine default is 6 m (≈ 4 squares of 1.5 m). Override per counter.</p>
@@ -1240,6 +1438,7 @@ const mount = (): void => {
   boardViewport.addEventListener('touchcancel', onTouchEnd)
   wireCopyLink()
   wireDoorControl()
+  wireCombatControls()
   wireGmTokenMoves()
   wireNewMap()
   wireChat()
@@ -1332,15 +1531,19 @@ effect(() => {
   board.value
   tokens.value
   says.value
+  combat.value
   targetTokenId.value
   zoom.value
   drawerOpen.value
   updateCanvasDisplaySize()
+  syncCombatPanel()
   syncGmTokenMoves()
   syncPortraitRail()
   requestDraw() // the rAF loop owns pixels; this also services token eases
   const statusEl = document.querySelector('#status')
   if (statusEl) statusEl.textContent = status.value
+  const hintEl = document.querySelector('.play-hint')
+  if (hintEl) hintEl.textContent = hintText()
   const whoEl = document.querySelector('#who')
   if (whoEl) {
     const me = myToken()

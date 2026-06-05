@@ -57,6 +57,27 @@ export type Token = {
   moveMeters?: number
 }
 
+export type Combatant = {
+  playerId: PlayerId
+  tokenId: string
+  label: string
+  /** Stable tie-breaker until character Dexterity is modelled. */
+  order: number
+  /** Future character-sheet hook. Initiative is currently 2D6 + this value. */
+  dexterityDm: number
+  dice: [number, number] | null
+  initiative: number | null
+}
+
+export type CombatState = {
+  round: number
+  /** Null while waiting for initiative rolls. */
+  turnIndex: number | null
+  combatants: Combatant[]
+}
+
+export type ReadyCombatState = CombatState & {turnIndex: number}
+
 export type Board = {
   assetRef: string
   /** Bumped on each GM publish so clients reload map art and geometry. */
@@ -103,6 +124,10 @@ export type Command =
   | {type: 'SetPlayerDoorControl'; enabled: boolean}
   | {type: 'SetTokenMoveMeters'; playerId: PlayerId; moveMeters: number}
   | {type: 'Say'; text: string}
+  | {type: 'StartCombat'}
+  | {type: 'RollInitiative'}
+  | {type: 'AdvanceTurn'}
+  | {type: 'EndCombat'}
 
 // A chat message, shown as a speech bubble. A player's bubble attaches to their
 // token; the GM (no token) speaks via `fromGm`, shown as a board banner. `at` is
@@ -131,14 +156,31 @@ export type DomainEvent = {seq: number} & (
   | {type: 'PlayerDoorControlSet'; enabled: boolean}
   | {type: 'TokenMoveMetersSet'; playerId: PlayerId; moveMeters: number}
   | {type: 'BoardPublished'; assetRef: string}
+  | {type: 'CombatStarted'; playerIds: PlayerId[]}
+  | {
+      type: 'InitiativeRolled'
+      playerId: PlayerId
+      dice: [number, number]
+      dexterityDm: number
+      initiative: number
+    }
+  | {type: 'TurnAdvanced'; round: number; turnIndex: number}
+  | {type: 'CombatEnded'}
 )
 
 // Server -> client read model. `tokens` and `says` are ALREADY visibility-gated
 // for the recipient, and `board` is included so a freshly published board (new
 // map + occluders) reaches already-connected clients without a reconnect.
 export type ViewMessage =
-  | {type: 'snapshot'; you: PlayerId; board: Board; tokens: Token[]; says: ChatSay[]}
-  | {type: 'update'; board: Board; tokens: Token[]; says: ChatSay[]}
+  | {
+      type: 'snapshot'
+      you: PlayerId
+      board: Board
+      tokens: Token[]
+      says: ChatSay[]
+      combat: CombatState | null
+    }
+  | {type: 'update'; board: Board; tokens: Token[]; says: ChatSay[]; combat: CombatState | null}
 
 /** Cepheus Engine: one tactical grid square is 1.5 metres. */
 export const CEPHEUS_METERS_PER_SQUARE = 1.5
@@ -168,6 +210,36 @@ export const moveRadiusPixels = (token: Token, board: Board): number => {
   const squares = tokenMoveMeters(token, board) / metersPerSquare(board)
   return squares * board.gridScale
 }
+
+export const combatReady = (combat: CombatState | null): combat is ReadyCombatState =>
+  combat != null &&
+  combat.combatants.length > 0 &&
+  combat.turnIndex != null &&
+  combat.combatants.every((combatant) => combatant.initiative != null)
+
+export const activeCombatant = (combat: CombatState | null): Combatant | null => {
+  if (!combatReady(combat)) return null
+  return combat.combatants[combat.turnIndex] ?? null
+}
+
+export const combatantForPlayer = (
+  combat: CombatState | null,
+  playerId: PlayerId | null
+): Combatant | null => {
+  if (!combat || !playerId) return null
+  return combat.combatants.find((combatant) => combatant.playerId === playerId) ?? null
+}
+
+export const isPlayersCombatTurn = (combat: CombatState | null, playerId: PlayerId | null): boolean =>
+  activeCombatant(combat)?.playerId === playerId
+
+export const orderCombatantsByInitiative = (combatants: Combatant[]): Combatant[] =>
+  [...combatants].sort((left, right) => {
+    const leftInitiative = left.initiative ?? Number.NEGATIVE_INFINITY
+    const rightInitiative = right.initiative ?? Number.NEGATIVE_INFINITY
+    if (leftInitiative !== rightInitiative) return rightInitiative - leftInitiative
+    return left.order - right.order
+  })
 
 const pointInPolygon = (point: Point, polygon: Point[]): boolean => {
   let inside = false

@@ -4,12 +4,17 @@
 // persistence is a later phase (see docs/MULTIPLAYER.md).
 import type {DurableObjectState} from './cf'
 import {
+  activeCombatant,
   canToggleDoorFrom,
   COUNTER_KINDS,
+  combatReady,
   hasLineOfSight,
+  orderCombatantsByInitiative,
   validateTokenMove,
   visibleTokensFor,
   type Board,
+  type Combatant,
+  type CombatState,
   type ChatSay,
   type Command,
   type CommandEnvelope,
@@ -64,6 +69,7 @@ export class GameTable {
   private readonly connections = new Map<PlayerId, Connection>()
   private readonly log: DomainEvent[] = []
   private says: ChatSay[] = []
+  private combat: CombatState | null = null
   private seq = 0
   // Per-table salt so the spawn-point shuffle is stable within a table but
   // differs between tables. Derived once from the (random) DO id name.
@@ -123,6 +129,25 @@ export class GameTable {
     return this.connections.get(playerId)?.gm ? all : visibleTokensFor(playerId, all, this.board)
   }
 
+  private combatFor(playerId: PlayerId): CombatState | null {
+    if (!this.combat) return null
+    if (this.connections.get(playerId)?.gm) return this.combat
+
+    const visiblePlayerIds = new Set(this.tokensFor(playerId).map((token) => token.ownerId))
+    const combatants = this.combat.combatants.filter((combatant) =>
+      visiblePlayerIds.has(combatant.playerId)
+    )
+    const active = activeCombatant(this.combat)
+    const turnIndex = active
+      ? combatants.findIndex((combatant) => combatant.playerId === active.playerId)
+      : null
+    return {
+      ...this.combat,
+      combatants,
+      turnIndex: turnIndex != null && turnIndex >= 0 ? turnIndex : null
+    }
+  }
+
   // Board this connection may see. Room labels are GM-only knowledge, so they are
   // stripped for players at the server — never sent over the wire, not merely
   // hidden client-side.
@@ -179,7 +204,8 @@ export class GameTable {
       you: playerId,
       board: this.boardFor(playerId),
       tokens: this.tokensFor(playerId),
-      says: this.saysFor(playerId)
+      says: this.saysFor(playerId),
+      combat: this.combatFor(playerId)
     }
     void this.send(playerId, snapshot)
     this.projectAll()
@@ -255,6 +281,66 @@ export class GameTable {
       return null
     }
 
+    if (command.type === 'StartCombat') {
+      if (!connection?.gm) return 'GM only'
+      if (this.combat) return 'Combat is already running'
+      const combatants = [...this.tokens.values()].map(
+        (token, order): Combatant => ({
+          playerId: token.ownerId,
+          tokenId: token.id,
+          label: token.label,
+          order,
+          dexterityDm: 0,
+          dice: null,
+          initiative: null
+        })
+      )
+      if (combatants.length === 0) return 'No counters to put into combat'
+      this.combat = {round: 1, turnIndex: null, combatants}
+      this.append({type: 'CombatStarted', playerIds: combatants.map((combatant) => combatant.playerId)})
+      return null
+    }
+
+    if (command.type === 'RollInitiative') {
+      if (!this.combat) return 'Combat has not started'
+      const combatant = this.combat.combatants.find((entry) => entry.playerId === playerId)
+      if (!combatant) return 'You are not in this combat'
+      if (combatant.initiative != null) return 'Initiative already rolled'
+      const dice: [number, number] = [rollD6(), rollD6()]
+      const initiative = dice[0] + dice[1] + combatant.dexterityDm
+      const combatants = this.combat.combatants.map((entry) =>
+        entry.playerId === playerId ? {...entry, dice, initiative} : entry
+      )
+      const ready = combatants.every((entry) => entry.initiative != null)
+      this.combat = {
+        round: this.combat.round,
+        turnIndex: ready ? 0 : null,
+        combatants: ready ? orderCombatantsByInitiative(combatants) : combatants
+      }
+      this.append({type: 'InitiativeRolled', playerId, dice, dexterityDm: combatant.dexterityDm, initiative})
+      return null
+    }
+
+    if (command.type === 'AdvanceTurn') {
+      if (!this.combat) return 'Combat has not started'
+      if (!combatReady(this.combat)) return 'Waiting for initiative rolls'
+      const current = activeCombatant(this.combat)
+      if (!connection?.gm && current?.playerId !== playerId) return 'Only the current combatant can end their turn'
+      const nextIndex = (this.combat.turnIndex + 1) % this.combat.combatants.length
+      const nextRound = nextIndex === 0 ? this.combat.round + 1 : this.combat.round
+      this.combat = {...this.combat, round: nextRound, turnIndex: nextIndex}
+      this.append({type: 'TurnAdvanced', round: nextRound, turnIndex: nextIndex})
+      return null
+    }
+
+    if (command.type === 'EndCombat') {
+      if (!connection?.gm) return 'GM only'
+      if (!this.combat) return null
+      this.combat = null
+      this.append({type: 'CombatEnded'})
+      return null
+    }
+
     if (command.type === 'ToggleDoor') {
       if (this.board.playerDoorControl === false && !connection?.gm) {
         return 'Doors are locked — GM only'
@@ -276,6 +362,12 @@ export class GameTable {
     if (!token) return 'No token to act on'
 
     if (command.type === 'MoveToken') {
+      if (this.combat) {
+        if (!combatReady(this.combat)) return 'Roll initiative before moving'
+        if (activeCombatant(this.combat)?.playerId !== playerId) {
+          return 'Only the current combatant can move'
+        }
+      }
       const destination = {x: command.x, y: command.y}
       const moveCheck = validateTokenMove(token, this.board, destination, {gm: connection?.gm})
       if (!moveCheck.ok) return moveCheck.reason
@@ -325,7 +417,8 @@ export class GameTable {
         type: 'update',
         board: this.boardFor(playerId),
         tokens: this.tokensFor(playerId),
-        says: this.saysFor(playerId)
+        says: this.saysFor(playerId),
+        combat: this.combatFor(playerId)
       }
       void this.send(playerId, update)
     }
@@ -346,6 +439,7 @@ export class GameTable {
     this.connections.delete(playerId)
     if (this.tokens.delete(playerId)) {
       this.append({type: 'PlayerLeft', playerId})
+      this.removeCombatant(playerId)
     }
     if (connection) {
       try {
@@ -355,6 +449,30 @@ export class GameTable {
       }
     }
     this.projectAll()
+  }
+
+  private removeCombatant(playerId: PlayerId): void {
+    if (!this.combat) return
+    const removedIndex = this.combat.combatants.findIndex((combatant) => combatant.playerId === playerId)
+    if (removedIndex < 0) return
+
+    let combatants = this.combat.combatants.filter((combatant) => combatant.playerId !== playerId)
+    if (combatants.length === 0) {
+      this.combat = null
+      this.append({type: 'CombatEnded'})
+      return
+    }
+
+    let turnIndex = this.combat.turnIndex
+    if (turnIndex != null) {
+      if (removedIndex < turnIndex) turnIndex -= 1
+      else if (removedIndex === turnIndex && turnIndex >= combatants.length) turnIndex = 0
+    }
+    if (turnIndex == null && combatants.every((combatant) => combatant.initiative != null)) {
+      combatants = orderCombatantsByInitiative(combatants)
+      turnIndex = 0
+    }
+    this.combat = {...this.combat, combatants, turnIndex}
   }
 }
 
@@ -374,3 +492,13 @@ const shuffleIndices = (count: number, salt: number): number[] =>
   Array.from({length: count}, (_, i) => i).sort(
     (a, b) => hashFloat(salt + a * 7.13) - hashFloat(salt + b * 7.13)
   )
+
+const rollD6 = (): number => {
+  const bytes = new Uint8Array(1)
+  let value = 255
+  while (value >= 252) {
+    crypto.getRandomValues(bytes)
+    value = bytes[0]
+  }
+  return (value % 6) + 1
+}
