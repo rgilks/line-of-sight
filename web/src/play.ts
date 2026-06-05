@@ -482,12 +482,12 @@ const rangeMetersBetween = (active: Board, from: Point, to: Point): number =>
 
 const formatRange = (meters: number): string => {
   const rounded = meters >= 10 ? Math.round(meters) : Math.round(meters * 10) / 10
-  return `${Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(1)} m`
+  return Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(1)
 }
 
 const targetingStatus = (active: Board, me: Token, target: Token): string => {
   const meters = rangeMetersBetween(active, positionOf(me), positionOf(target))
-  return `Targeting ${target.label} · ${formatRange(meters)}.`
+  return `Targeting ${target.label} · ${formatRange(meters)}`
 }
 
 const drawReachableDoorHints = (active: Board, me: Token): void => {
@@ -502,28 +502,49 @@ const drawReachableDoorHints = (active: Board, me: Token): void => {
 const drawTargetingLine = (active: Board, me: Token, target: Token): void => {
   const from = positionOf(me)
   const to = positionOf(target)
+  const dx = to.x - from.x
+  const dy = to.y - from.y
+  const distance = Math.hypot(dx, dy)
+  if (distance <= 0) return
+
+  const ux = dx / distance
+  const uy = dy / distance
+  const px = -uy
+  const py = ux
+  const tokenRadius = counterTokenSize(active.gridScale) / 2 + screenPixels(5)
+  const startInset = Math.min(tokenRadius, distance * 0.25)
+  const endInset = Math.min(tokenRadius, distance * 0.35)
+  const startX = from.x + ux * startInset
+  const startY = from.y + uy * startInset
+  const tipX = to.x - ux * endInset
+  const tipY = to.y - uy * endInset
   const midX = (from.x + to.x) / 2
   const midY = (from.y + to.y) / 2
   const label = formatRange(rangeMetersBetween(active, from, to))
   const fontSize = screenPixels(12)
   const padX = screenPixels(7)
   const padY = screenPixels(4)
+  const arrowLength = screenPixels(15)
+  const arrowHalfWidth = screenPixels(6)
 
   ctx.save()
   ctx.lineCap = 'round'
   ctx.lineJoin = 'round'
-  ctx.shadowColor = 'rgba(57, 255, 20, 0.38)'
-  ctx.shadowBlur = screenPixels(7)
-  ctx.strokeStyle = 'rgba(57, 255, 20, 0.72)'
-  ctx.lineWidth = screenPixels(2)
-  ctx.setLineDash([screenPixels(9), screenPixels(6)])
+  ctx.strokeStyle = 'rgba(57, 255, 20, 0.62)'
+  ctx.fillStyle = 'rgba(57, 255, 20, 0.78)'
+  ctx.lineWidth = screenPixels(1.6)
   ctx.beginPath()
-  ctx.moveTo(from.x, from.y)
-  ctx.lineTo(to.x, to.y)
+  ctx.moveTo(startX, startY)
+  ctx.lineTo(tipX, tipY)
   ctx.stroke()
 
-  ctx.shadowBlur = 0
-  ctx.setLineDash([])
+  ctx.beginPath()
+  ctx.moveTo(tipX, tipY)
+  ctx.lineTo(tipX - ux * arrowLength + px * arrowHalfWidth, tipY - uy * arrowLength + py * arrowHalfWidth)
+  ctx.lineTo(tipX - ux * arrowLength - px * arrowHalfWidth, tipY - uy * arrowLength - py * arrowHalfWidth)
+  ctx.closePath()
+  ctx.fill()
+
   ctx.font = `800 ${fontSize}px "JetBrains Mono", ui-monospace, monospace`
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
@@ -537,50 +558,6 @@ const drawTargetingLine = (active: Board, me: Token, target: Token): void => {
   ctx.stroke()
   ctx.fillStyle = 'rgba(244, 255, 241, 0.96)'
   ctx.fillText(label, midX, midY + screenPixels(0.2))
-  ctx.restore()
-}
-
-const drawTargetCrosshair = (active: Board, target: Token): void => {
-  const at = positionOf(target)
-  const half = counterTokenSize(active.gridScale) / 2 + screenPixels(7)
-  const arm = screenPixels(11)
-
-  ctx.save()
-  ctx.lineCap = 'round'
-  ctx.lineJoin = 'round'
-  ctx.shadowColor = 'rgba(57, 255, 20, 0.45)'
-  ctx.shadowBlur = screenPixels(8)
-  ctx.strokeStyle = 'rgba(57, 255, 20, 0.95)'
-  ctx.lineWidth = screenPixels(2)
-  ctx.setLineDash([])
-
-  ctx.beginPath()
-  ctx.moveTo(at.x - half, at.y - half + arm)
-  ctx.lineTo(at.x - half, at.y - half)
-  ctx.lineTo(at.x - half + arm, at.y - half)
-  ctx.moveTo(at.x + half - arm, at.y - half)
-  ctx.lineTo(at.x + half, at.y - half)
-  ctx.lineTo(at.x + half, at.y - half + arm)
-  ctx.moveTo(at.x + half, at.y + half - arm)
-  ctx.lineTo(at.x + half, at.y + half)
-  ctx.lineTo(at.x + half - arm, at.y + half)
-  ctx.moveTo(at.x - half + arm, at.y + half)
-  ctx.lineTo(at.x - half, at.y + half)
-  ctx.lineTo(at.x - half, at.y + half - arm)
-  ctx.stroke()
-
-  ctx.shadowBlur = 0
-  ctx.strokeStyle = 'rgba(5, 5, 5, 0.82)'
-  ctx.lineWidth = screenPixels(4)
-  ctx.beginPath()
-  ctx.arc(at.x, at.y, half + screenPixels(2), 0, Math.PI * 2)
-  ctx.stroke()
-  ctx.strokeStyle = 'rgba(57, 255, 20, 0.75)'
-  ctx.lineWidth = screenPixels(1.3)
-  ctx.setLineDash([screenPixels(4), screenPixels(7)])
-  ctx.beginPath()
-  ctx.arc(at.x, at.y, half + screenPixels(2), 0, Math.PI * 2)
-  ctx.stroke()
   ctx.restore()
 }
 
@@ -899,7 +876,6 @@ const draw = (): void => {
     if (target) drawTargetingLine(active, animated, target)
   }
   for (const token of tokens.value) drawToken(token)
-  if (target) drawTargetCrosshair(active, target)
   // GM-only room labels, drawn on top of everything (the GM has no fog).
   if (isGm) drawRoomLabels(active)
   drawSpeechBubbles(active)
@@ -1025,9 +1001,8 @@ const roundRect = (x: number, y: number, w: number, h: number, r: number): void 
 const drawMoveRadius = (active: Board, me: Token): void => {
   const radius = moveRadiusPixels(me, active)
   ctx.save()
-  ctx.strokeStyle = 'rgba(57, 255, 20, 0.42)'
-  ctx.lineWidth = 2
-  ctx.setLineDash([10, 8])
+  ctx.strokeStyle = 'rgba(57, 255, 20, 0.3)'
+  ctx.lineWidth = screenPixels(1.2)
   ctx.beginPath()
   ctx.arc(me.x, me.y, radius, 0, Math.PI * 2)
   ctx.stroke()
