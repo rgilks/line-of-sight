@@ -33,7 +33,14 @@ import type {RoomType, Theme} from './synth/types'
 import {GEN_ROOM_TYPES, GEN_THEMES, loadGeneratedMap, randomizedSpec} from './generate-board'
 import type {Tool} from './types'
 import {analyzeTiles, arrangeTiles, loadMapFiles, reorderTile, syncCanvasSize} from './board'
-import {getPovToken, isDoorOpen, markExplored, setDoorOpen, setPovToken} from './visibility'
+import {
+  getPovToken,
+  isDoorOpen,
+  isDoorReachable,
+  markExplored,
+  setDoorOpen,
+  setPovToken
+} from './visibility'
 import {renderBoard} from './rendering'
 import {
   handleMapKeyDown,
@@ -146,6 +153,8 @@ const App = (): JSX.Element => {
   const selectedOccluder = getSelectedOccluder()
   const selectedToken = getSelectedToken()
   const povToken = getPovToken()
+  const selectedDoorReachable =
+    selectedOccluder?.type === 'door' ? isDoorReachable(selectedOccluder) : false
   const nextCounterLabel = nextTokenLabel(activeCounterGroup.value)
   const spec = genSpec.value
   const hasRoomLabels = roomLabels.value.length > 0
@@ -577,11 +586,21 @@ const App = (): JSX.Element => {
                     {selectedOccluder.type === 'door' ? (
                       <button
                         type="button"
+                        disabled={!selectedDoorReachable}
+                        title={
+                          selectedDoorReachable
+                            ? undefined
+                            : 'Move the POV counter adjacent to this door to operate it.'
+                        }
                         onClick={() => {
                           setDoorOpen(selectedOccluder.id, !isDoorOpen(selectedOccluder))
                         }}
                       >
-                        {isDoorOpen(selectedOccluder) ? 'Close' : 'Open'}
+                        {selectedDoorReachable
+                          ? isDoorOpen(selectedOccluder)
+                            ? 'Close'
+                            : 'Open'
+                          : 'Out of reach'}
                       </button>
                     ) : null}
                     <button

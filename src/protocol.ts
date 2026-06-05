@@ -2,6 +2,7 @@
 // per-viewer visibility gate. No Cloudflare or DOM dependencies — it reuses the
 // deterministic core, so the gate is identical to what the single-player UI draws.
 import {
+  doorReachForGrid,
   distanceToOccluder,
   hasLineOfSight,
   visibilityPolygon,
@@ -229,7 +230,7 @@ export const canMoveTokenTo = (
 ): boolean => validateTokenMove(viewer, board, destination, options).ok
 
 /** How close (in board pixels) a player's token must be to a door to toggle it. */
-export const doorReach = (board: Board): number => 1.5 * board.gridScale
+export const doorReach = (board: Board): number => doorReachForGrid(board.gridScale)
 
 /**
  * Whether a player may open/close a door from where their token stands. The GM

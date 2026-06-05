@@ -10,6 +10,7 @@
 //   ?gm=1          spectator/GM view — sees ALL counters, manages doors, no fog
 import {effect, signal} from '@preact/signals'
 import {drawCounterToken} from './counter-render'
+import {drawReachableDoorAffordance} from './door-affordance'
 import {distanceToOccluder, visibilityPolygon, type Occluder, type Point} from './los-core'
 import {counterDefinitions, counterPortraits, preloadCounterPortraits} from './state'
 import {
@@ -443,6 +444,17 @@ const nearestDoor = (point: Point, active: Board): Occluder | null => {
 const doorOpen = (active: Board, door: Occluder): boolean =>
   active.doorStates[door.id]?.open ?? (door.type === 'door' && door.open)
 
+const screenPixels = (pixels: number): number => Math.max(0.5, pixels / zoom.value)
+
+const drawReachableDoorHints = (active: Board, me: Token): void => {
+  if (isGm || !canToggleDoors()) return
+  for (const occluder of active.occluders) {
+    if (occluder.type === 'door' && canToggleDoorFrom(me, active, occluder)) {
+      drawReachableDoorAffordance(ctx, occluder, screenPixels)
+    }
+  }
+}
+
 /** Pan gestures: right/middle drag, or ⌘/Meta + left-drag (natural on Mac trackpads). */
 const shouldStartPan = (event: PointerEvent): boolean =>
   event.button === 1 || event.button === 2 || (event.button === 0 && event.metaKey)
@@ -740,6 +752,7 @@ const draw = (): void => {
     const animated = {...me, ...positionOf(me)}
     drawFog(active, animated)
     drawMoveRadius(active, animated)
+    drawReachableDoorHints(active, animated)
   }
   for (const token of tokens.value) drawToken(token)
   // GM-only room labels, drawn on top of everything (the GM has no fog).

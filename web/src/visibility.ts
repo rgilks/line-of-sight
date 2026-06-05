@@ -1,9 +1,16 @@
-import {visibilityPolygon, type DoorOccluder, type Point} from './los-core'
+import {
+  distanceToOccluder,
+  doorReachForGrid,
+  visibilityPolygon,
+  type DoorOccluder,
+  type Point
+} from './los-core'
 import type {Token} from './types'
 import {
   boardSize,
   doorStates,
   exploredCtx,
+  gridScale,
   hasMap,
   occluders,
   povTokenId,
@@ -22,6 +29,14 @@ export const doorOccluders = (): DoorOccluder[] =>
 
 export const isDoorOpen = (door: DoorOccluder): boolean =>
   doorStates.value[door.id]?.open ?? door.open
+
+export const doorOperationReach = (): number => doorReachForGrid(gridScale())
+
+export const isDoorReachable = (door: DoorOccluder): boolean => {
+  const pov = getPovToken()
+  if (!pov) return false
+  return distanceToOccluder(pov, door) <= doorOperationReach()
+}
 
 export const setDoorOpen = (doorId: string, open: boolean): void => {
   const door = doorOccluders().find((candidate) => candidate.id === doorId)

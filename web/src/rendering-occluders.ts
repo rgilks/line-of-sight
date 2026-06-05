@@ -1,4 +1,5 @@
 import type {DoorOccluder} from './los-core'
+import {drawReachableDoorAffordance} from './door-affordance'
 import {
   ctx,
   hoveredOccluderId,
@@ -7,7 +8,7 @@ import {
   selectedOccluderId,
   showWalls
 } from './state'
-import {isDoorOpen} from './visibility'
+import {isDoorOpen, isDoorReachable} from './visibility'
 
 export const drawDoorMarkers = (): void => {
   ctx.save()
@@ -15,6 +16,16 @@ export const drawDoorMarkers = (): void => {
   for (const occluder of occluders.value) {
     if (occluder.type === 'door') {
       drawDoorStateMarker(occluder, isDoorOpen(occluder))
+    }
+  }
+  ctx.restore()
+}
+
+export const drawReachableDoorMarkers = (): void => {
+  ctx.save()
+  for (const occluder of occluders.value) {
+    if (occluder.type === 'door' && isDoorReachable(occluder)) {
+      drawReachableDoorAffordance(ctx, occluder, screenPixels)
     }
   }
   ctx.restore()

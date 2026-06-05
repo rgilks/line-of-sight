@@ -13,6 +13,7 @@ import {
   hideUnseen,
   hoveredOccluderId,
   hoveredTokenId,
+  occluders,
   placements,
   previewPoint,
   renderTick,
@@ -25,9 +26,14 @@ import {
   tool
 } from './state'
 import {syncCanvasSize} from './board'
-import {getPovToken, getVisiblePolygon} from './visibility'
+import {getPovToken, getVisiblePolygon, isDoorReachable} from './visibility'
 import {drawTokens} from './rendering-tokens'
-import {drawDebugWalls, drawDoorMarkers, drawEditOverlay} from './rendering-occluders'
+import {
+  drawDebugWalls,
+  drawDoorMarkers,
+  drawEditOverlay,
+  drawReachableDoorMarkers
+} from './rendering-occluders'
 
 export const renderBoard = (): void => {
   renderTick.value
@@ -48,6 +54,7 @@ export const renderBoard = (): void => {
   drawGrid()
   drawDoorMarkers()
   drawFog()
+  drawReachableDoorMarkers()
   drawPovRange()
   drawTokens()
   drawDebugWalls()
@@ -90,7 +97,15 @@ const syncCanvasCursor = (): void => {
   } else if (hoveredTokenId.value && (tool.value === 'token' || tool.value === 'viewer')) {
     canvas.style.cursor = tool.value === 'viewer' ? 'pointer' : 'grab'
   } else if (hoveredOccluderId.value) {
-    canvas.style.cursor = tool.value === 'erase' ? 'not-allowed' : 'grab'
+    const hovered = occluders.value.find((occluder) => occluder.id === hoveredOccluderId.value)
+    if (tool.value === 'erase') {
+      canvas.style.cursor = 'not-allowed'
+    } else if (tool.value === 'viewer') {
+      canvas.style.cursor =
+        hovered?.type === 'door' && !isDoorReachable(hovered) ? 'not-allowed' : 'pointer'
+    } else {
+      canvas.style.cursor = 'grab'
+    }
   } else {
     canvas.style.cursor = tool.value === 'viewer' ? 'pointer' : 'cell'
   }

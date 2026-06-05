@@ -1,5 +1,5 @@
 import type {JSX} from 'preact'
-import type {Occluder, Point} from './los-core'
+import type {DoorOccluder, Occluder, Point} from './los-core'
 import {distanceToOccluder} from './los-core'
 import type {CounterGroupId, EditDrag, EditHandle, Token} from './types'
 import {
@@ -36,6 +36,7 @@ import {pushUndoHistory, redoEditorChange, undoEditorChange} from './history'
 import {
   getPovToken,
   isDoorOpen,
+  isDoorReachable,
   isPovToken,
   markExplored,
   setDoorOpen,
@@ -188,6 +189,23 @@ export const removeToken = (id: string, recordHistory = true): void => {
   if (wasPov) markExplored()
 }
 
+const doorOutOfReachStatus = (): string =>
+  getPovToken()
+    ? 'Move the POV counter adjacent to this door to operate it.'
+    : 'Place a POV counter next to this door to operate it.'
+
+const toggleDoorIfReachable = (door: DoorOccluder): boolean => {
+  if (!isDoorReachable(door)) {
+    setStatus(doorOutOfReachStatus())
+    return false
+  }
+
+  const opening = !isDoorOpen(door)
+  setDoorOpen(door.id, opening)
+  setStatus(opening ? 'Door open.' : 'Door closed.')
+  return true
+}
+
 const editableFilterForTool = (): ((occluder: Occluder) => boolean) | null => {
   if (tool.value === 'wall') return (occluder) => occluder.type === 'wall'
   if (tool.value === 'door') return (occluder) => occluder.type === 'door'
@@ -308,7 +326,7 @@ export const handleMapKeyDown = (event: KeyboardEvent): void => {
     const selected = occluders.value.find((occluder) => occluder.id === selectedOccluderId.value)
     if (selected?.type === 'door') {
       event.preventDefault()
-      setDoorOpen(selected.id, !isDoorOpen(selected))
+      toggleDoorIfReachable(selected)
       requestCanvasRender()
       return
     }
@@ -382,22 +400,17 @@ export const handlePointerDown = (event: JSX.TargetedPointerEvent<HTMLCanvasElem
 
     const occluder = nearestOccluder(rawPoint, () => true, 18)
     if (occluder) {
-      if (occluder.type === 'door' && selectedOccluderId.value === occluder.id) {
-        const opening = !isDoorOpen(occluder)
-        setDoorOpen(occluder.id, opening)
-        setStatus(opening ? 'Door open.' : 'Door closed.')
+      selectedOccluderId.value = occluder.id
+      selectedTokenId.value = null
+      hoveredOccluderId.value = occluder.id
+
+      if (occluder.type === 'door') {
+        toggleDoorIfReachable(occluder)
         requestCanvasRender()
         return
       }
 
-      selectedOccluderId.value = occluder.id
-      selectedTokenId.value = null
-      hoveredOccluderId.value = occluder.id
-      if (occluder.type === 'door') {
-        setStatus('Door selected — click again to open/close, Del to remove.')
-      } else {
-        setStatus('Wall selected — Del to remove, or use Wall/Door tool to reshape.')
-      }
+      setStatus('Wall selected — Del to remove, or use Wall/Door tool to reshape.')
       requestCanvasRender()
       return
     }

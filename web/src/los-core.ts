@@ -2605,6 +2605,9 @@ export const distanceToOccluder = (point: Point, occluder: Occluder): number => 
   return Math.hypot(point.x - (ax + t * dx), point.y - (ay + t * dy))
 }
 
+/** How close a token must be to a door segment to operate it. */
+export const doorReachForGrid = (gridScale: number): number => 1.5 * gridScale
+
 const isOpenDoor = (door: DoorOccluder, doorStates: DoorStateLookup): boolean => {
   const state = doorStates[door.id]
   if (typeof state === 'boolean') return state
