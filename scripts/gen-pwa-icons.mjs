@@ -1,40 +1,30 @@
-// Generate PWA + Apple touch icons from the brand favicon. Standard icons keep
-// the transparent-on-dark mark; the maskable icon adds the safe-zone padding
-// Android/iOS need so the mark isn't clipped by a circular/rounded mask.
-// Run: node scripts/gen-pwa-icons.mjs
+// Sync the PWA / favicon assets from the shared Cepheus brand repo into this
+// project, so every Cepheus tool ships the same C-Cog mark (see the brand
+// guidelines, §7 "Shared icon"). Run after the brand assets change:
+//   node scripts/gen-pwa-icons.mjs
+//
+// Source of truth: ~/Source/cepheus-branding/assets. Copies the canonical icon
+// sizes and derives the two extra sizes this app's manifest/HTML reference
+// (maskable-192, icon-180). Never hand-edit the generated icons.
 import sharp from 'sharp'
-import {mkdirSync} from 'node:fs'
+import {copyFileSync, mkdirSync} from 'node:fs'
+import {homedir} from 'node:os'
+import {join} from 'node:path'
 
-const OUT = 'web/public/icons'
-mkdirSync(OUT, {recursive: true})
+const BRAND = process.env.CEPHEUS_BRAND ?? join(homedir(), 'Source/cepheus-branding/assets')
+const ICONS = 'web/public/icons'
+mkdirSync(ICONS, {recursive: true})
 
-const BG = '#050505'
-const svg = 'web/favicon.svg'
+// Canonical assets copied verbatim.
+copyFileSync(join(BRAND, 'favicon/favicon.svg'), 'web/public/favicon.svg')
+copyFileSync(join(BRAND, 'favicon/favicon.ico'), 'web/public/favicon.ico')
+copyFileSync(join(BRAND, 'app-icons/icon-192.png'), `${ICONS}/icon-192.png`)
+copyFileSync(join(BRAND, 'app-icons/icon-512.png'), `${ICONS}/icon-512.png`)
+copyFileSync(join(BRAND, 'app-icons/icon-maskable-512.png'), `${ICONS}/maskable-512.png`)
+copyFileSync(join(BRAND, 'app-icons/apple-touch-icon.png'), `${ICONS}/apple-touch-icon.png`)
 
-const plain = async (size) => {
-  const mark = await sharp(svg).resize(size, size, {fit: 'contain'}).png().toBuffer()
-  await sharp({create: {width: size, height: size, channels: 4, background: BG}})
-    .composite([{input: mark}])
-    .png()
-    .toFile(`${OUT}/icon-${size}.png`)
-}
+// Derived sizes our manifest/HTML still reference.
+await sharp(join(BRAND, 'app-icons/icon-maskable-512.png')).resize(192, 192).toFile(`${ICONS}/maskable-192.png`)
+await sharp(join(BRAND, 'app-icons/icon-192.png')).resize(180, 180).toFile(`${ICONS}/icon-180.png`)
 
-const maskable = async (size) => {
-  // Mark fills ~64% of the canvas, centered, leaving the maskable safe zone.
-  const inner = Math.round(size * 0.64)
-  const mark = await sharp(svg).resize(inner, inner, {fit: 'contain'}).png().toBuffer()
-  await sharp({create: {width: size, height: size, channels: 4, background: BG}})
-    .composite([{input: mark, gravity: 'center'}])
-    .png()
-    .toFile(`${OUT}/maskable-${size}.png`)
-}
-
-await plain(192)
-await plain(512)
-await maskable(192)
-await maskable(512)
-// Apple touch icon (180, opaque, no transparency — iOS ignores alpha anyway).
-await plain(180).then(() =>
-  sharp(`${OUT}/icon-192.png`).resize(180, 180).png().toFile(`${OUT}/apple-touch-icon.png`)
-)
-console.log('wrote PWA icons to', OUT)
+console.log('synced Cepheus brand icons from', BRAND)

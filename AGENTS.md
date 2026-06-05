@@ -104,11 +104,15 @@ check on every push to `main` and on PRs.
 
 ## Visual Direction
 
-The app should feel related to the main TRE site:
+This is a **Cepheus** tool by Total Reality Engineering. Follow the shared brand
+guidelines in `~/Source/cepheus-branding` (`BRAND-GUIDELINES.md`, `tokens/`):
 
-- black background
-- terminal green accent (`#39ff14`)
-- white text
-- JetBrains Mono for brand/navigation/tool labels
-- restrained green borders and glow
-- avoid overly bright UI chrome that competes with the map canvas
+- **Identity:** the shared **C-Cog** mark (`web/public/favicon.svg`, app icons),
+  the `CEPHEUS · LINE OF SIGHT` lockup in headers. Sync icons with
+  `node scripts/gen-pwa-icons.mjs` (copies from the brand repo) — never hand-edit.
+- **Colour:** Void Black `#000000` background, Phosphor Green `#39FF14` (primary,
+  dark-only), Star White text, Panel `#050805` surfaces. Green borders/glow at the
+  brand alphas. `theme-color`/manifest = `#000000`.
+- **Type:** **Orbitron** for display headings, panel titles, and big numbers;
+  **JetBrains Mono** for everything else (labels, body, the wordmark).
+- Restrained chrome that doesn't compete with the map canvas.

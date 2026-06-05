@@ -167,35 +167,10 @@ const App = (): JSX.Element => {
       >
         <div className="drawer-panel">
           <header className="drawer-header">
-            <a className="brand drawer-brand" href="https://tre.systems/" aria-label="Total Reality Engineering">
-              <svg
-                className="brand-logo"
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 512 512"
-                aria-hidden="true"
-              >
-                <g>
-                  <rect
-                    x="214"
-                    y="288"
-                    width="80"
-                    height="206"
-                    fill="#19C15E"
-                    transform="rotate(22, 262, 295)"
-                  />
-                  <path
-                    d="M256 36 L72 476 L440 476 Z"
-                    fill="none"
-                    stroke="#F5F5F5"
-                    strokeWidth="30"
-                    strokeLinejoin="round"
-                    strokeLinecap="round"
-                  />
-                  <circle cx="256" cy="288" r="40" fill="#F5F5F5" />
-                </g>
-              </svg>
+            <a className="brand drawer-brand" href="https://tre.systems/" aria-label="Cepheus · Line of Sight">
+              <img className="brand-logo" src="/favicon.svg" alt="" width="34" height="34" />
               <div className="brand-copy">
-                <span className="brand-eyebrow">Total Reality Engineering</span>
+                <span className="brand-eyebrow">Cepheus</span>
                 <h1>Line of Sight</h1>
                 <p id="runtimeStatus" className="drawer-status">
                   {runtimeStatus.value}

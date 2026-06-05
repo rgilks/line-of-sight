@@ -1353,9 +1353,13 @@ const mount = (): void => {
       <aside class="play-drawer open" aria-label="Session controls">
         <div class="play-drawer-panel">
           <header class="play-drawer-header">
-            <div class="play-brand">
-              <strong>Line of Sight</strong>
-              <span>${isHost ? 'GM — hosting' : 'Multiplayer'}</span>
+            <div class="play-brand" aria-label="Cepheus · Line of Sight">
+              <img class="play-brand-mark" src="/favicon.svg" alt="" width="28" height="28" />
+              <div class="play-brand-copy">
+                <span class="play-brand-eyebrow">CEPHEUS</span>
+                <strong class="play-brand-tool">Line of Sight</strong>
+                <span class="play-brand-role">${isHost ? 'GM — hosting' : 'Multiplayer'}</span>
+              </div>
             </div>
             <button
               id="drawerToggle"

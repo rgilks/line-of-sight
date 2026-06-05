@@ -1,16 +1,21 @@
 :root {
-  --tre-black: #000000;
-  --tre-green: #39ff14;
+  /* Cepheus brand tokens (see ~/Source/cepheus-branding): Phosphor green on Void
+     Black, Panel surfaces, Orbitron display + JetBrains Mono UI. */
+  --tre-black: #000000; /* Void Black */
+  --tre-green: #39ff14; /* Phosphor Green */
   --tre-green-rgb: 57, 255, 20;
   --tre-green-dark: #2ecc71;
-  --tre-white: #ffffff;
-  --tre-ink: #050505;
-  --tre-panel: rgba(10, 10, 10, 0.72);
-  --tre-panel-strong: rgba(15, 15, 15, 0.9);
+  --tre-white: #ffffff; /* Star White */
+  --tre-ink: #050805; /* Panel — slightly-warm near-black surfaces */
+  --tre-panel: rgba(5, 8, 5, 0.72);
+  --tre-panel-strong: rgba(5, 8, 5, 0.9);
   --tre-border: rgba(var(--tre-green-rgb), 0.18);
-  --tre-border-strong: rgba(var(--tre-green-rgb), 0.5);
+  --tre-border-strong: rgba(var(--tre-green-rgb), 0.45);
   --tre-muted: rgba(255, 255, 255, 0.68);
   --tre-faint: rgba(255, 255, 255, 0.44);
+  --tre-bone: #ecd5bb; /* Bone — warm secondary accent */
+  --font-display: 'Orbitron', sans-serif;
+  --font-ui: 'JetBrains Mono', 'SF Mono', Menlo, ui-monospace, monospace;
   --danger: #ff4d5d;
   --door: #ffb020;
   --viewer: #4aa3ff;
@@ -293,7 +298,6 @@ textarea:focus-visible {
 
 .brand-copy span,
 .drawer-action-grid label,
-h2,
 .stats dt {
   font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
@@ -318,22 +322,27 @@ p {
   margin: 0;
 }
 
+/* Display headings — Orbitron per brand §4 (tool name, panel titles). */
 h1 {
   color: var(--tre-white);
-  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 17px;
+  font-family: var(--font-display);
+  font-size: 16px;
   font-weight: 700;
+  letter-spacing: 0.03em;
   line-height: 1.2;
+  text-transform: uppercase;
 }
 
 .drawer-brand h1 {
-  font-size: 16px;
+  font-size: 15px;
 }
 
 h2 {
   color: var(--tre-green);
-  font-size: 12px;
+  font-family: var(--font-display);
+  font-size: 11px;
   font-weight: 700;
+  letter-spacing: 0.06em;
   line-height: 1.2;
   text-transform: uppercase;
 }

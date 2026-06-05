@@ -1,9 +1,19 @@
 :root {
-  --green: #39ff14;
+  /* Cepheus brand tokens (see ~/Source/cepheus-branding). Phosphor green on
+     Void Black, JetBrains Mono UI / Orbitron display, Panel surfaces. */
+  --green: #39ff14; /* Phosphor Green — primary brand colour */
   --green-rgb: 57, 255, 20;
-  --ink: #050505;
-  --border: rgba(var(--green-rgb), 0.28);
-  --border-strong: rgba(var(--green-rgb), 0.5);
+  --ink: #000000; /* Void Black — primary background */
+  --panel: #050805; /* Panel — slightly-warm near-black for surfaces */
+  --star: #ffffff; /* Star White — primary text */
+  --bone: #ecd5bb; /* Bone — warm secondary accent, sparingly */
+  --border-soft: rgba(var(--green-rgb), 0.18);
+  --border: rgba(var(--green-rgb), 0.2);
+  --border-strong: rgba(var(--green-rgb), 0.45);
+  --glow-soft: rgba(var(--green-rgb), 0.08);
+  --glow: rgba(var(--green-rgb), 0.45);
+  --font-display: 'Orbitron', sans-serif;
+  --font-ui: 'JetBrains Mono', 'SF Mono', Menlo, ui-monospace, monospace;
 }
 
 * {
@@ -14,8 +24,8 @@ html,
 body {
   margin: 0;
   background: var(--ink);
-  color: #f5f5f5;
-  font-family: 'Inter', system-ui, sans-serif;
+  color: var(--star);
+  font-family: var(--font-ui);
   height: 100dvh;
   overflow: hidden;
   /* Stop iOS Safari rubber-band scroll / pull-to-refresh over the app. */
@@ -139,7 +149,7 @@ body {
 }
 
 .play-portrait span {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-ui);
   font-size: 0.56rem;
   font-weight: 700;
   letter-spacing: 0.02em;
@@ -203,7 +213,7 @@ body {
 
 .play-combatant-label,
 .play-combatant-score {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-ui);
   font-weight: 700;
   line-height: 1.1;
 }
@@ -217,9 +227,12 @@ body {
   white-space: nowrap;
 }
 
+/* Initiative score is a "big number" — Orbitron display per brand §4. */
 .play-combatant-score {
+  font-family: var(--font-display);
   color: var(--green);
-  font-size: 0.58rem;
+  font-size: 0.62rem;
+  letter-spacing: 0.02em;
 }
 
 .play-combatant.is-pending .play-combatant-score {
@@ -234,7 +247,7 @@ body {
   border-radius: 50%;
   background: rgba(var(--green-rgb), 0.12);
   color: var(--green);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-ui);
   font-size: 1.15rem;
   font-weight: 700;
   cursor: pointer;
@@ -301,27 +314,53 @@ body {
   padding: 10px 12px 14px;
 }
 
+/* Cepheus · Line of Sight lockup: shared C-Cog mark + CEPHEUS wordmark + the
+   tool name (Orbitron display) + the session role. */
 .play-brand {
   flex: 1 1 auto;
   min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.play-brand-mark {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  filter: drop-shadow(0 0 6px var(--glow-soft));
+}
+
+.play-brand-copy {
+  min-width: 0;
   display: grid;
-  gap: 2px;
+  gap: 1px;
 }
 
-.play-brand strong {
-  font-family: 'JetBrains Mono', monospace;
+.play-brand-eyebrow {
+  font-family: var(--font-ui);
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.22em;
   color: var(--green);
-  font-size: 1rem;
-  letter-spacing: 0.02em;
 }
 
-.play-brand span {
-  color: rgba(245, 245, 245, 0.55);
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.72rem;
+.play-brand-tool {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 0.84rem;
+  letter-spacing: 0.04em;
+  color: var(--star);
+  text-transform: uppercase;
+}
+
+.play-brand-role {
+  font-family: var(--font-ui);
+  font-size: 0.66rem;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+  color: rgba(245, 245, 245, 0.5);
 }
 
 .play-meta {
@@ -338,7 +377,7 @@ body {
 .play-meta dt {
   margin: 0;
   color: rgba(245, 245, 245, 0.44);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-ui);
   font-size: 0.68rem;
   font-weight: 700;
   letter-spacing: 0.06em;
@@ -348,7 +387,7 @@ body {
 .play-meta dd {
   margin: 0;
   color: #f5f5f5;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-ui);
   font-size: 0.82rem;
   line-height: 1.35;
   overflow-wrap: anywhere;
@@ -432,7 +471,7 @@ body {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-ui);
   font-size: 0.78rem;
   color: rgba(245, 245, 245, 0.85);
   cursor: pointer;
@@ -460,10 +499,10 @@ body {
 .play-gm-moves-title {
   margin: 0;
   color: var(--green);
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.72rem;
+  font-family: var(--font-display);
+  font-size: 0.7rem;
   font-weight: 700;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
@@ -485,7 +524,7 @@ body {
   align-items: center;
   gap: 8px;
   color: rgba(245, 245, 245, 0.85);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-ui);
   font-size: 0.78rem;
 }
 
@@ -515,7 +554,7 @@ body {
 .play-combat-title {
   margin: 0;
   color: var(--green);
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-ui);
   font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.06em;
