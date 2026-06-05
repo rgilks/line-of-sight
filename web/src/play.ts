@@ -9,12 +9,13 @@
 //   ?table=<name>  join a specific table (default "demo")
 //   ?gm=1          spectator/GM view — sees ALL counters, manages doors, no fog
 import {effect, signal} from '@preact/signals'
-import {drawCounterToken} from './counter-render'
+import {counterTokenSize, drawCounterToken} from './counter-render'
 import {drawReachableDoorAffordance} from './door-affordance'
 import {distanceToOccluder, visibilityPolygon, type Occluder, type Point} from './los-core'
 import {counterDefinitions, counterPortraits, preloadCounterPortraits} from './state'
 import {
   canToggleDoorFrom,
+  metersPerSquare,
   moveRadiusPixels,
   tokenMoveMeters,
   tokenMoveSquares,
@@ -74,6 +75,7 @@ const says = signal<ChatSay[]>([])
 const status = signal('Connecting…')
 const mapImage = signal<HTMLImageElement | null>(null)
 const drawerOpen = signal(true)
+const targetTokenId = signal<string | null>(null)
 
 // A chat bubble shows for this long, fading over its final stretch.
 const SAY_VISIBLE_MS = 6000
@@ -138,6 +140,13 @@ const myToken = (): Token | null => {
   return id ? (tokens.value.find((token) => token.ownerId === id) ?? null) : null
 }
 
+const targetedToken = (): Token | null => {
+  const targetId = targetTokenId.value
+  const mine = you.value
+  if (!targetId || !mine) return null
+  return tokens.value.find((token) => token.id === targetId && token.ownerId !== mine) ?? null
+}
+
 const post = (command: CommandEnvelope['command']): void => {
   const playerId = you.value
   if (!playerId) return
@@ -181,6 +190,10 @@ const applyView = (next: Board, nextTokens: Token[], nextSays: ChatSay[]): void 
   says.value = nextSays
   board.value = next
   tokens.value = nextTokens
+  if (targetTokenId.value && !nextTokens.some((token) => token.id === targetTokenId.value)) {
+    targetTokenId.value = null
+    status.value = 'Target lost.'
+  }
   ensureMap(next)
   syncDoorControlUi(next)
   if (geometryChanged && previous) {
@@ -441,10 +454,41 @@ const nearestDoor = (point: Point, active: Board): Occluder | null => {
   return nearest
 }
 
+const nearestTargetableToken = (point: Point): Token | null => {
+  if (isGm) return null
+  const mine = you.value
+  if (!mine) return null
+  let nearest: Token | null = null
+  let nearestDistance = boardPickRadius(30)
+  for (const token of tokens.value) {
+    if (token.ownerId === mine) continue
+    const at = positionOf(token)
+    const distance = Math.hypot(point.x - at.x, point.y - at.y)
+    if (distance < nearestDistance) {
+      nearest = token
+      nearestDistance = distance
+    }
+  }
+  return nearest
+}
+
 const doorOpen = (active: Board, door: Occluder): boolean =>
   active.doorStates[door.id]?.open ?? (door.type === 'door' && door.open)
 
 const screenPixels = (pixels: number): number => Math.max(0.5, pixels / zoom.value)
+
+const rangeMetersBetween = (active: Board, from: Point, to: Point): number =>
+  (Math.hypot(to.x - from.x, to.y - from.y) / active.gridScale) * metersPerSquare(active)
+
+const formatRange = (meters: number): string => {
+  const rounded = meters >= 10 ? Math.round(meters) : Math.round(meters * 10) / 10
+  return `${Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(1)} m`
+}
+
+const targetingStatus = (active: Board, me: Token, target: Token): string => {
+  const meters = rangeMetersBetween(active, positionOf(me), positionOf(target))
+  return `Targeting ${target.label} · ${formatRange(meters)}.`
+}
 
 const drawReachableDoorHints = (active: Board, me: Token): void => {
   if (isGm || !canToggleDoors()) return
@@ -453,6 +497,91 @@ const drawReachableDoorHints = (active: Board, me: Token): void => {
       drawReachableDoorAffordance(ctx, occluder, screenPixels, me)
     }
   }
+}
+
+const drawTargetingLine = (active: Board, me: Token, target: Token): void => {
+  const from = positionOf(me)
+  const to = positionOf(target)
+  const midX = (from.x + to.x) / 2
+  const midY = (from.y + to.y) / 2
+  const label = formatRange(rangeMetersBetween(active, from, to))
+  const fontSize = screenPixels(12)
+  const padX = screenPixels(7)
+  const padY = screenPixels(4)
+
+  ctx.save()
+  ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
+  ctx.shadowColor = 'rgba(57, 255, 20, 0.38)'
+  ctx.shadowBlur = screenPixels(7)
+  ctx.strokeStyle = 'rgba(57, 255, 20, 0.72)'
+  ctx.lineWidth = screenPixels(2)
+  ctx.setLineDash([screenPixels(9), screenPixels(6)])
+  ctx.beginPath()
+  ctx.moveTo(from.x, from.y)
+  ctx.lineTo(to.x, to.y)
+  ctx.stroke()
+
+  ctx.shadowBlur = 0
+  ctx.setLineDash([])
+  ctx.font = `800 ${fontSize}px "JetBrains Mono", ui-monospace, monospace`
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  const width = ctx.measureText(label).width + padX * 2
+  const height = fontSize + padY * 2
+  roundRect(midX - width / 2, midY - height / 2, width, height, screenPixels(5))
+  ctx.fillStyle = 'rgba(5, 8, 6, 0.9)'
+  ctx.fill()
+  ctx.strokeStyle = 'rgba(57, 255, 20, 0.78)'
+  ctx.lineWidth = screenPixels(1.2)
+  ctx.stroke()
+  ctx.fillStyle = 'rgba(244, 255, 241, 0.96)'
+  ctx.fillText(label, midX, midY + screenPixels(0.2))
+  ctx.restore()
+}
+
+const drawTargetCrosshair = (active: Board, target: Token): void => {
+  const at = positionOf(target)
+  const half = counterTokenSize(active.gridScale) / 2 + screenPixels(7)
+  const arm = screenPixels(11)
+
+  ctx.save()
+  ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
+  ctx.shadowColor = 'rgba(57, 255, 20, 0.45)'
+  ctx.shadowBlur = screenPixels(8)
+  ctx.strokeStyle = 'rgba(57, 255, 20, 0.95)'
+  ctx.lineWidth = screenPixels(2)
+  ctx.setLineDash([])
+
+  ctx.beginPath()
+  ctx.moveTo(at.x - half, at.y - half + arm)
+  ctx.lineTo(at.x - half, at.y - half)
+  ctx.lineTo(at.x - half + arm, at.y - half)
+  ctx.moveTo(at.x + half - arm, at.y - half)
+  ctx.lineTo(at.x + half, at.y - half)
+  ctx.lineTo(at.x + half, at.y - half + arm)
+  ctx.moveTo(at.x + half, at.y + half - arm)
+  ctx.lineTo(at.x + half, at.y + half)
+  ctx.lineTo(at.x + half - arm, at.y + half)
+  ctx.moveTo(at.x - half + arm, at.y + half)
+  ctx.lineTo(at.x - half, at.y + half)
+  ctx.lineTo(at.x - half, at.y + half - arm)
+  ctx.stroke()
+
+  ctx.shadowBlur = 0
+  ctx.strokeStyle = 'rgba(5, 5, 5, 0.82)'
+  ctx.lineWidth = screenPixels(4)
+  ctx.beginPath()
+  ctx.arc(at.x, at.y, half + screenPixels(2), 0, Math.PI * 2)
+  ctx.stroke()
+  ctx.strokeStyle = 'rgba(57, 255, 20, 0.75)'
+  ctx.lineWidth = screenPixels(1.3)
+  ctx.setLineDash([screenPixels(4), screenPixels(7)])
+  ctx.beginPath()
+  ctx.arc(at.x, at.y, half + screenPixels(2), 0, Math.PI * 2)
+  ctx.stroke()
+  ctx.restore()
 }
 
 /** Pan gestures: right/middle drag, or ⌘/Meta + left-drag (natural on Mac trackpads). */
@@ -590,6 +719,20 @@ const handleBoardTap = (clientX: number, clientY: number): void => {
     x: ((clientX - rect.left) / rect.width) * active.width,
     y: ((clientY - rect.top) / rect.height) * active.height
   }
+  const me = myToken()
+
+  const target = nearestTargetableToken(point)
+  if (target && me) {
+    if (targetTokenId.value === target.id) {
+      targetTokenId.value = null
+      status.value = `Cleared target ${target.label}.`
+    } else {
+      targetTokenId.value = target.id
+      status.value = targetingStatus(active, me, target)
+    }
+    requestDraw()
+    return
+  }
 
   const door = nearestDoor(point, active)
   if (door) {
@@ -597,7 +740,7 @@ const handleBoardTap = (clientX: number, clientY: number): void => {
       status.value = 'Doors are locked — GM only.'
       return
     }
-    if (!canToggleDoorFrom(myToken(), active, door, {gm: isGm})) {
+    if (!canToggleDoorFrom(me, active, door, {gm: isGm})) {
       status.value = 'Move next to the door to open it.'
       return
     }
@@ -605,7 +748,6 @@ const handleBoardTap = (clientX: number, clientY: number): void => {
     return
   }
 
-  const me = myToken()
   if (!me) return
   const moveCheck = validateTokenMove(me, active, point, {gm: isGm})
   if (!moveCheck.ok) {
@@ -746,6 +888,7 @@ const draw = (): void => {
 
   drawOccluders(active)
   const me = myToken()
+  const target = me ? targetedToken() : null
   if (me && !isGm) {
     // Fog and the move ring follow the animated position so they glide with the
     // counter rather than snapping ahead of it.
@@ -753,8 +896,10 @@ const draw = (): void => {
     drawFog(active, animated)
     drawMoveRadius(active, animated)
     drawReachableDoorHints(active, animated)
+    if (target) drawTargetingLine(active, animated, target)
   }
   for (const token of tokens.value) drawToken(token)
+  if (target) drawTargetCrosshair(active, target)
   // GM-only room labels, drawn on top of everything (the GM has no fog).
   if (isGm) drawRoomLabels(active)
   drawSpeechBubbles(active)
@@ -921,9 +1066,9 @@ const hintText = (): string => {
       : 'GM view — wheel to zoom; ⌘-drag or right-drag to pan. Click doors to toggle.'
   }
   if (active && !playerDoorControl(active)) {
-    return 'Move within the green ring (6 m / 4 squares by default). Wheel to zoom; ⌘-drag or right-drag to pan. Doors are GM-only.'
+    return 'Click visible counters to target. Move within the green ring (6 m / 4 squares by default). Wheel to zoom; ⌘-drag or right-drag to pan. Doors are GM-only.'
   }
-  return 'Move within the green ring (6 m / 4 squares by default). Click doors to toggle. Wheel to zoom; ⌘-drag or right-drag to pan.'
+  return 'Click visible counters to target. Move within the green ring (6 m / 4 squares by default). Click doors to toggle. Wheel to zoom; ⌘-drag or right-drag to pan.'
 }
 
 const syncDoorControlUi = (active: Board): void => {
@@ -1212,6 +1357,7 @@ effect(() => {
   board.value
   tokens.value
   says.value
+  targetTokenId.value
   zoom.value
   drawerOpen.value
   updateCanvasDisplaySize()
