@@ -208,6 +208,11 @@ body {
   color: rgba(255, 114, 114, 0.95);
 }
 
+.solo-banner.is-won {
+  color: var(--green);
+  text-shadow: 0 0 10px var(--glow);
+}
+
 .solo-combatant-score {
   font-family: var(--font-display);
   font-weight: 700;

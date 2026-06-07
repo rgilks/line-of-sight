@@ -64,7 +64,7 @@ candidate → review → export).
 
 ```bash
 npm run typecheck      # tsc --noEmit
-npm run test           # vitest run (unit tests for web/src/los-core.ts)
+npm run test           # vitest run (unit tests for core/los.ts)
 npm run build          # vite build -> dist/client
 npm run check          # typecheck + test + build + check:diagrams
 npm run diagrams       # render docs/diagrams/*.dot to PNG
@@ -75,8 +75,8 @@ npm run deploy         # build, then wrangler deploy
 Use the narrowest check that proves the change:
 
 - CSS or HTML only: `npm run build:web` is usually enough.
-- Core geometry/analysis (`web/src/los-core.ts`): `npm run test` (add/adjust
-  cases in `web/src/los-core.test.ts`), then `npm run check`.
+- Core geometry/analysis (`core/los.ts`): `npm run test` (add/adjust
+  cases in `core/los.test.ts`), then `npm run check`.
 - TypeScript UI changes: `npm run check`.
 - Worker or deployment config changes: `npm run check`, then `npm run deploy`.
 - Diagram (`.dot`) changes: `npm run diagrams` to re-render, then commit the PNGs.
@@ -96,7 +96,7 @@ check on every push to `main` and on PRs.
 
 ## Coding Rules
 
-- Keep `web/src/los-core.ts` deterministic and free of browser or Cloudflare
+- Keep `core/los.ts` deterministic and free of browser or Cloudflare
   concerns.
 - Keep browser-only code in `web/src/`.
 - Keep Cloudflare platform code in `src/worker.ts`.
