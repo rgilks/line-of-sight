@@ -1137,7 +1137,9 @@ const mount = (): void => {
   boardViewport.appendChild(diceOverlay)
   diceRoller = createDiceRoller(diceOverlay, {
     colors: {body: '#ecd5bb', pip: '#222222'},
-    modelUrl: '/gltf/dice.gltf'
+    modelUrl: '/gltf/dice.gltf',
+    // 'void': dice spotlit over the dimmed board, not the green tray box.
+    lighting: 'void'
   })
 
   const seedParam = new URLSearchParams(location.search).get('seed')
@@ -1194,6 +1196,12 @@ if (import.meta.env.DEV) {
       }
       renderPanel()
       requestDraw()
-    }
+    },
+    // Preview the dice overlay without driving a full attack (visual tuning only).
+    rollDice: async (n = 2) => {
+      showDice()
+      await diceRoller.roll(n)
+    },
+    hideDice
   }
 }
