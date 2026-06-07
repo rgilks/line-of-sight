@@ -11,7 +11,7 @@
 import {generateMap} from './synth/generate-map'
 import {renderMap} from './synth/render-map'
 import {defaultSpec, type GeneratedMap} from './synth/types'
-import {drawCounterToken} from './counter-render'
+import {counterTokenSize, drawCounterToken} from './counter-render'
 import {counterDefinitions, counterPortraits, preloadCounterPortraits} from './state'
 import {roll2D6} from '../../core/dice'
 import {
@@ -510,6 +510,9 @@ const fireAttackFx = (prev: AttackFx | undefined): boolean => {
     to: positionOf(target),
     weapon: weaponById(fa.weaponId),
     hit: fa.hit,
+    effect: fa.effect,
+    damage: fa.damage,
+    killed: fa.killed,
     targetFaction: target.faction,
     gridScale: state.map.gridScale
   })
@@ -902,6 +905,37 @@ const drawGroundItem = (s: SoloState, item: GroundItem): void => {
   ctx.restore()
 }
 
+// Health as a fraction of total physical characteristics (STR+DEX+END). Damage
+// drains END first then STR/DEX, so this hits 0 exactly when the entity dies —
+// a truer "health level" than END alone.
+const vitalityRatio = (e: Entity): number => {
+  const cur = Math.max(0, e.stats.str) + Math.max(0, e.stats.dex) + Math.max(0, e.stats.end)
+  const max = e.statsMax.str + e.statsMax.dex + e.statsMax.end
+  return max > 0 ? Math.max(0, Math.min(1, cur / max)) : 0
+}
+
+const healthColor = (ratio: number): string =>
+  ratio > 0.5 ? '#3ddc6b' : ratio > 0.25 ? '#ffc24b' : '#ff5a4e'
+
+// A slim health bar under a token, coloured by remaining vitality.
+const drawHealthBar = (at: Point, entity: Entity, gridScale: number): void => {
+  const size = counterTokenSize(gridScale)
+  const w = size * 0.92
+  const h = Math.max(4, size * 0.13)
+  const x = at.x - w / 2
+  const y = at.y + size / 2 + Math.max(3, size * 0.14)
+  const ratio = vitalityRatio(entity)
+  ctx.save()
+  ctx.fillStyle = 'rgba(4, 8, 5, 0.85)'
+  ctx.fillRect(x - 1, y - 1, w + 2, h + 2)
+  ctx.fillStyle = healthColor(ratio)
+  ctx.fillRect(x, y, w * ratio, h)
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.7)'
+  ctx.lineWidth = 1
+  ctx.strokeRect(x - 1, y - 1, w + 2, h + 2)
+  ctx.restore()
+}
+
 const drawSelectionRing = (at: Point, faction: Entity['faction'], gridScale: number): void => {
   const radius = gridScale * 0.62
   ctx.save()
@@ -983,16 +1017,15 @@ const draw = (): void => {
         isPov: entity.id === actor?.id
       }
     )
+    if (vitalityRatio(entity) < 1) drawHealthBar(at, entity, s.map.gridScale)
     if (entity.id === selectedId) drawSelectionRing(at, entity.faction, s.map.gridScale)
   }
 
-  // Combat effects (muzzle flashes, tracers, slashes, impact bursts) on top.
+  // Combat effects (muzzle flashes, tracers, slashes, impact bursts, callouts) on top.
   drawEffects(ctx)
 }
 
 // ---- panel ----------------------------------------------------------------
-const endPct = (e: Entity): number => Math.round((Math.max(0, e.stats.end) / Math.max(1, e.statsMax.end)) * 100)
-
 const escapeHtml = (text: string): string =>
   text.replace(/[&<>]/g, (c) => (c === '&' ? '&amp;' : c === '<' ? '&lt;' : '&gt;'))
 
@@ -1004,11 +1037,12 @@ const squadRailHtml = (s: SoloState): string =>
       const active = e.id === activeEntity(s)?.id ? ' is-active' : ''
       const selected = e.id === selectedId ? ' is-selected' : ''
       const condition = isDead(e) ? ' · KIA' : isDown(e) ? ' · DOWN' : ''
+      const hp = vitalityRatio(e)
       return `<li class="solo-combatant${active}${selected}" data-select="${e.id}">
         <img class="solo-combatant-portrait" src="${def?.portrait ?? ''}" alt="" />
         <div class="solo-combatant-main">
           <span class="solo-combatant-label">${e.label}${condition}</span>
-          <div class="solo-bar"><div class="solo-bar-fill" style="width:${endPct(e)}%"></div></div>
+          <div class="solo-bar"><div class="solo-bar-fill" style="width:${Math.round(hp * 100)}%;background:${healthColor(hp)}"></div></div>
         </div>
         <span class="solo-combatant-score">${e.initiative ?? '—'}</span>
       </li>`
@@ -1254,9 +1288,9 @@ if (import.meta.env.DEV) {
     hideDice,
     // Slow effects down (or back to 1) for inspection.
     fxTimeScale: (s = 1) => setFxTimeScale(s),
-    // Preview a weapon's attack effect (sound + projectile/strike + impact) across
-    // the middle of the map, no combat needed (visual tuning only).
-    previewFx: (weaponId = 'autorifle', hit = true) => {
+    // Preview a weapon's attack effect (sound + projectile/strike + impact + the
+    // Effect callout) across the middle of the map, no combat needed.
+    previewFx: (weaponId = 'autorifle', hit = true, effect = 3, killed = false) => {
       if (!state) return
       const cx = state.map.width / 2
       const cy = state.map.height / 2
@@ -1266,6 +1300,9 @@ if (import.meta.env.DEV) {
         to: {x: cx + span, y: cy},
         weapon: weaponById(weaponId),
         hit,
+        effect,
+        damage: hit ? Math.max(1, 6 + effect) : 0,
+        killed,
         targetFaction: 'monster',
         gridScale: state.map.gridScale
       })

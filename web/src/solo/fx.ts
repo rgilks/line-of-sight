@@ -205,7 +205,7 @@ const spawnBullets = (o: {
   gridScale: number
   hit: boolean
   bloodColor: string
-}): void => {
+}): number => {
   const t0 = nowMs()
   const dist = Math.hypot(o.to.x - o.from.x, o.to.y - o.from.y)
   const travel = D(clamp(dist / 7, 60, 190))
@@ -224,9 +224,10 @@ const spawnBullets = (o: {
   } else {
     spawnBurst(missPoint(o.from, o.to, o.gridScale), SPARK, {reach: o.gridScale * 0.4, count: 7, dur: 240, t: arrive})
   }
+  return arrive
 }
 
-const spawnMeleeFx = (o: {from: Point; to: Point; gridScale: number; hit: boolean; bloodColor: string}): void => {
+const spawnMeleeFx = (o: {from: Point; to: Point; gridScale: number; hit: boolean; bloodColor: string}): number => {
   const t0 = nowMs()
   const dur = D(240)
   const ang = Math.atan2(o.to.y - o.from.y, o.to.x - o.from.x)
@@ -251,11 +252,13 @@ const spawnMeleeFx = (o: {from: Point; to: Point; gridScale: number; hit: boolea
     ctx.arc(0, 0, r * 0.8, sweep - 0.7, sweep + 0.3)
     ctx.stroke()
   })
-  if (o.hit) spawnBurst(o.to, o.bloodColor, {reach: o.gridScale * 0.7, count: 12, dur: 360, t: t0 + D(110)})
+  const impact = t0 + D(110)
+  if (o.hit) spawnBurst(o.to, o.bloodColor, {reach: o.gridScale * 0.7, count: 12, dur: 360, t: impact})
   else spawnBurst(missPoint(o.from, o.to, o.gridScale), SPARK, {reach: o.gridScale * 0.35, count: 6, dur: 220, t: t0 + D(120)})
+  return impact
 }
 
-const spawnAcidFx = (o: {from: Point; to: Point; gridScale: number; hit: boolean}): void => {
+const spawnAcidFx = (o: {from: Point; to: Point; gridScale: number; hit: boolean}): number => {
   const t0 = nowMs()
   const dist = Math.hypot(o.to.x - o.from.x, o.to.y - o.from.y)
   const travel = D(clamp(dist / 4.5, 120, 320))
@@ -276,6 +279,91 @@ const spawnAcidFx = (o: {from: Point; to: Point; gridScale: number; hit: boolean
   })
   spawnBurst(o.to, ACID, {reach: o.gridScale * 0.7, count: o.hit ? 14 : 8, dur: o.hit ? 420 : 260, t: t0 + travel})
   if (o.hit) spawnBurst(o.to, '#e7382b', {reach: o.gridScale * 0.45, count: 6, dur: 360, t: t0 + travel + D(40)})
+  return t0 + travel
+}
+
+// An expanding ring — a flourish for high-Effect hits.
+const spawnRing = (at: Point, color: string, reach: number, startMs: number, dur: number): void => {
+  add(startMs, dur, (ctx, t) => {
+    const p = clamp((t - startMs) / dur, 0, 1)
+    ctx.globalAlpha = (1 - p) * 0.85
+    ctx.strokeStyle = color
+    ctx.lineWidth = Math.max(1, 4 * (1 - p))
+    ctx.beginPath()
+    ctx.arc(at.x, at.y, reach * easeOut(p), 0, Math.PI * 2)
+    ctx.stroke()
+  })
+}
+
+// Floating combat-text callout at the point of impact. Misses read "MISS"; hits
+// escalate with the Cepheus Effect: a plain damage number, then HIT, SOLID HIT,
+// CRITICAL, and KILL — bigger, brighter, longer-lived, with ring flourishes.
+const spawnCombatText = (
+  at: Point,
+  info: {hit: boolean; effect: number; damage: number; killed: boolean},
+  startMs: number,
+  gridScale: number
+): void => {
+  let text: string
+  let color: string
+  let size: number
+  let epic: number // 0..1 drama
+  if (!info.hit) {
+    text = 'MISS'
+    color = '#aeb6ab'
+    size = gridScale * 0.5
+    epic = 0
+  } else if (info.killed) {
+    text = `KILL −${info.damage}`
+    color = '#ff5247'
+    size = gridScale * 0.82
+    epic = 1
+  } else if (info.effect >= 6) {
+    text = `CRITICAL −${info.damage}`
+    color = '#ffd35e'
+    size = gridScale * 0.8
+    epic = 1
+  } else if (info.effect >= 4) {
+    text = `SOLID HIT −${info.damage}`
+    color = '#ffae42'
+    size = gridScale * 0.62
+    epic = 0.6
+  } else if (info.effect >= 2) {
+    text = `HIT −${info.damage}`
+    color = '#ffd76a'
+    size = gridScale * 0.56
+    epic = 0.3
+  } else {
+    text = `−${info.damage}`
+    color = '#ece5d2'
+    size = gridScale * 0.52
+    epic = 0.12
+  }
+
+  const dur = D(850 + epic * 550)
+  const baseY = at.y - gridScale * 0.55
+  add(startMs, dur, (ctx, t) => {
+    const p = clamp((t - startMs) / dur, 0, 1)
+    const rise = gridScale * (0.5 + epic * 0.7) * easeOut(p)
+    const popDur = dur * 0.22
+    const pp = clamp((t - startMs) / popDur, 0, 1)
+    const overshoot = epic > 0.5 ? Math.sin(pp * Math.PI) * 0.2 : 0
+    const scale = 0.5 + 0.5 * easeOut(pp) + overshoot
+    ctx.globalAlpha = clamp(p < 0.62 ? 1 : 1 - (p - 0.62) / 0.38, 0, 1)
+    ctx.translate(at.x, baseY - rise)
+    ctx.scale(scale, scale)
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.font = `800 ${size}px "Orbitron", "JetBrains Mono", ui-sans-serif, sans-serif`
+    ctx.lineWidth = Math.max(2, size * 0.14)
+    ctx.strokeStyle = 'rgba(0,0,0,0.9)'
+    ctx.strokeText(text, 0, 0)
+    ctx.fillStyle = color
+    ctx.fillText(text, 0, 0)
+  })
+
+  if (epic >= 0.6) spawnRing(at, info.killed ? '#ff5247' : '#ffd35e', gridScale * 1.1, startMs, D(420))
+  if (epic >= 1) spawnRing(at, '#fff0b0', gridScale * 1.7, startMs + D(60), D(540))
 }
 
 // ---- audio (procedural; no assets) ---------------------------------------
@@ -414,21 +502,25 @@ export const spawnAttackFx = (o: {
   to: Point
   weapon: Weapon
   hit: boolean
+  effect: number
+  damage: number
+  killed: boolean
   targetFaction: 'pc' | 'monster'
   gridScale: number
 }): void => {
   playWeaponSound(soundProfile(o.weapon))
   const blood = gore(o.targetFaction)
+  let arrive: number
   if (o.weapon.id === 'spit') {
-    spawnAcidFx({from: o.from, to: o.to, gridScale: o.gridScale, hit: o.hit})
-    return
+    arrive = spawnAcidFx({from: o.from, to: o.to, gridScale: o.gridScale, hit: o.hit})
+  } else if (o.weapon.category === 'melee') {
+    arrive = spawnMeleeFx({from: o.from, to: o.to, gridScale: o.gridScale, hit: o.hit, bloodColor: blood})
+  } else {
+    const rounds = o.weapon.id === 'shotgun' ? 5 : o.weapon.id === 'autorifle' ? 3 : 1
+    const spread = o.weapon.id === 'shotgun' ? 0.5 : o.weapon.id === 'autorifle' ? 0.12 : 0
+    const stagger = o.weapon.id === 'autorifle' ? 55 : 0
+    arrive = spawnBullets({from: o.from, to: o.to, rounds, spread, stagger, gridScale: o.gridScale, hit: o.hit, bloodColor: blood})
   }
-  if (o.weapon.category === 'melee') {
-    spawnMeleeFx({from: o.from, to: o.to, gridScale: o.gridScale, hit: o.hit, bloodColor: blood})
-    return
-  }
-  const rounds = o.weapon.id === 'shotgun' ? 5 : o.weapon.id === 'autorifle' ? 3 : 1
-  const spread = o.weapon.id === 'shotgun' ? 0.5 : o.weapon.id === 'autorifle' ? 0.12 : 0
-  const stagger = o.weapon.id === 'autorifle' ? 55 : 0
-  spawnBullets({from: o.from, to: o.to, rounds, spread, stagger, gridScale: o.gridScale, hit: o.hit, bloodColor: blood})
+  // The hit/miss + Effect callout lands with the projectile.
+  spawnCombatText(o.to, {hit: o.hit, effect: o.effect, damage: o.damage, killed: o.killed}, arrive, o.gridScale)
 }

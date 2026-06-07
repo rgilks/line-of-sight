@@ -89,6 +89,7 @@ export type AttackFx = {
   targetId: string
   weaponId: string
   hit: boolean
+  effect: number // Cepheus Effect (roll − 8); drives how "epic" the hit callout is
   damage: number
   killed: boolean
 }

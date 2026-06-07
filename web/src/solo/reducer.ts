@@ -150,6 +150,7 @@ const applyAttack = (state: SoloState, targetId: string, rng: Rng): SoloState =>
     targetId,
     weaponId: weapon.id,
     hit: result.hit,
+    effect: result.effect,
     damage: result.damage,
     killed: !!(after && isDead(after))
   }
