@@ -53,7 +53,7 @@ import {
 } from './solo/model'
 import {buildWalkGrid, cellCenter, cellOf, isFloor, type Cell, type WalkGrid} from './solo/grid'
 import {reduce} from './solo/reducer'
-import {clearEffects, drawEffects, effectsActive, playUi, primeAudio, setFxTimeScale, spawnAttackFx, spawnDenied} from './solo/fx'
+import {clearEffects, drawEffects, effectsActive, playUi, primeAudio, setFxTimeScale, spawnAttackFx, spawnDenied, spawnHint} from './solo/fx'
 import type {AttackFx} from './solo/model'
 import './solo.css'
 
@@ -905,14 +905,23 @@ function actAt(clientX: number, clientY: number): void {
   }
   const hit = entityHitAt(point)
   if (hit) {
-    // Tapping an already-targeted foe fires (so a double-click attacks outright);
-    // otherwise the tap just targets it.
+    const isOwnTurn = hit.faction === 'pc' && hit.id === actor.id
+    // Double-click your own (active) token to end the turn — first tap selects you
+    // and shows the hint, the second tap ends it.
+    if (isOwnTurn && hit.id === selectedId) {
+      endTurn()
+      return
+    }
+    // Tapping an already-targeted foe fires (so a double-click attacks outright).
     if (hit.id === selectedId && canAttackTarget(hit)) {
       void onAttack(hit.id)
       return
     }
     selectedId = selectedId === hit.id ? null : hit.id
-    if (selectedId) playUi('select')
+    if (selectedId) {
+      playUi('select')
+      if (isOwnTurn) spawnHint(positionOf(hit), 'Double-click: end turn', state.map.gridScale)
+    }
     renderPanel()
     requestDraw()
     return
@@ -1504,7 +1513,7 @@ const renderPanel = (): void => {
     <footer class="solo-hud-foot">
       <button id="solo-new" class="solo-foot-btn" type="button">New deck</button>
       <label class="solo-foot-check"><input type="checkbox" id="solo-grid" ${showGrid ? 'checked' : ''}/> Grid</label>
-      <p class="solo-foot-hint">Move + one action, or run ${MINOR_ACTIONS_PER_ROUND * 6} m. Double-click or <b>F</b> to fire.</p>
+      <p class="solo-foot-hint">Move + one action, or run ${MINOR_ACTIONS_PER_ROUND * 6} m. Double-click a foe (or <b>F</b>) to fire; double-click yourself (or <b>Space</b>) to end the turn.</p>
     </footer>`
 
   for (const el of panel.querySelectorAll<HTMLElement>('[data-select]')) {

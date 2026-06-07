@@ -631,6 +631,26 @@ export const spawnDenied = (at: Point, text: string, gridScale: number): void =>
   })
 }
 
+/** A soft floating hint above a token (e.g. "Double-click: end turn"). */
+export const spawnHint = (at: Point, text: string, gridScale: number): void => {
+  const t0 = nowMs()
+  const dur = D(1700)
+  add(t0, dur, (ctx, t) => {
+    const p = clamp((t - t0) / dur, 0, 1)
+    ctx.globalAlpha = clamp(p < 0.78 ? 1 : 1 - (p - 0.78) / 0.22, 0, 1)
+    ctx.translate(at.x, at.y - gridScale * 0.85 - gridScale * 0.4 * easeOut(p))
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    const size = gridScale * 0.34
+    ctx.font = `700 ${size}px "Orbitron", "JetBrains Mono", ui-sans-serif, sans-serif`
+    ctx.lineWidth = Math.max(2, size * 0.18)
+    ctx.strokeStyle = 'rgba(0,0,0,0.9)'
+    ctx.strokeText(text, 0, 0)
+    ctx.fillStyle = '#8effb0'
+    ctx.fillText(text, 0, 0)
+  })
+}
+
 // ---- weapon → sound/visual mapping ---------------------------------------
 const soundProfile = (w: Weapon): SoundProfile => {
   if (w.id === 'shotgun') return 'shotgun'
