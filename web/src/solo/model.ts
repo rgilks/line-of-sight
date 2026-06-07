@@ -1,7 +1,10 @@
 // Single-player domain model. Pure data + tiny helpers; no DOM. The combat,
 // inventory, and gear fields grow in later phases — Phase 1 needs only enough to
 // place characters on the deck and roll initiative.
-import type {CounterKind} from '../../../core/rules'
+import {CEPHEUS_DEFAULT_MOVE_METERS, CEPHEUS_METERS_PER_SQUARE, type CounterKind} from '../../../core/rules'
+import type {Point} from '../../../core/los'
+import type {GeneratedMap} from '../synth/types'
+import type {WalkGrid} from './grid'
 
 export type Faction = 'pc' | 'monster'
 
@@ -46,3 +49,37 @@ export const isDown = (entity: Entity): boolean =>
 /** Dead when all three physical characteristics are 0. */
 export const isDead = (entity: Entity): boolean =>
   entity.stats.str <= 0 && entity.stats.dex <= 0 && entity.stats.end <= 0
+
+/** A living entity is on the board and able to act (not dead, not downed). */
+export const isActive = (entity: Entity): boolean => !isDead(entity) && !isDown(entity)
+
+export type DoorStates = Record<string, {open: boolean}>
+
+export type GamePhase = {t: 'playerTurn'} | {t: 'won'} | {t: 'lost'}
+
+// The whole single-player game state. Pure data; the reducer maps
+// (state, action) → state and the DOM shell renders it.
+export type SoloState = {
+  seed: number
+  map: GeneratedMap
+  grid: WalkGrid
+  doorStates: DoorStates
+  sightRadius: number
+  entities: Entity[] // initiative order
+  turnPtr: number
+  round: number
+  moveRemainingPx: number // movement budget left for the active entity this turn
+  phase: GamePhase
+  log: string[]
+}
+
+export type Action =
+  | {t: 'Move'; to: Point}
+  | {t: 'ToggleDoor'; doorId: string}
+  | {t: 'EndTurn'}
+
+export const activeEntity = (state: SoloState): Entity | undefined => state.entities[state.turnPtr]
+
+/** Per-turn movement budget in board pixels (Cepheus 6 m ÷ 1.5 m/square × gridScale). */
+export const moveBudgetPx = (gridScale: number): number =>
+  (CEPHEUS_DEFAULT_MOVE_METERS / CEPHEUS_METERS_PER_SQUARE) * gridScale

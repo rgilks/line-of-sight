@@ -151,6 +151,19 @@ body {
   color: var(--green);
 }
 
+.solo-turn {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--star);
+}
+
+.solo-log {
+  min-height: 14px;
+  font-size: 11px;
+  color: var(--green);
+  opacity: 0.85;
+}
+
 .solo-button {
   appearance: none;
   width: 100%;
@@ -167,6 +180,11 @@ body {
 
 .solo-button:hover {
   background: rgba(57, 255, 20, 0.16);
+}
+
+.solo-button-ghost {
+  border-color: var(--border);
+  background: transparent;
 }
 
 .solo-check {
