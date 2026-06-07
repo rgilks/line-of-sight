@@ -142,9 +142,23 @@ export const livingOf = (state: SoloState, faction: Faction): Entity[] =>
 export const withinReach = (a: Entity, b: Entity, gridScale: number, squares = 1.6): boolean =>
   Math.hypot(a.x - b.x, a.y - b.y) <= squares * gridScale
 
-/** Per-turn movement budget in board pixels (metres ÷ 1.5 m/square × gridScale). */
+/** One minor action's worth of movement in board pixels — the Cepheus 6 m move
+ * (metres ÷ 1.5 m/square × gridScale). */
 export const moveBudgetPx = (gridScale: number, moveMeters: number = CEPHEUS_DEFAULT_MOVE_METERS): number =>
   (moveMeters / CEPHEUS_METERS_PER_SQUARE) * gridScale
+
+// Cepheus action economy: each round a combatant has one significant action and
+// one minor action, OR three minor actions — i.e. a pool of MINOR_ACTIONS_PER_ROUND
+// minor actions where a significant action is worth SIGNIFICANT_ACTION_COST of them.
+// Moving up to 6 m is one minor action, so the whole round is a single budget:
+// spend it on movement (run up to 3 × 6 m), or trade two of it for a significant
+// action (attack / first aid / shove) and keep one minor (a 6 m step, reload, door…).
+export const MINOR_ACTIONS_PER_ROUND = 3
+export const SIGNIFICANT_ACTION_COST = 2
+
+/** The full movement/action budget at the start of a turn (all minor actions). */
+export const turnBudgetPx = (gridScale: number, moveMeters: number = CEPHEUS_DEFAULT_MOVE_METERS): number =>
+  MINOR_ACTIONS_PER_ROUND * moveBudgetPx(gridScale, moveMeters)
 
 /**
  * Can `viewer` see board point (x, y) — within its own sight radius and not

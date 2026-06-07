@@ -17,6 +17,8 @@ import {
   isDead,
   isDown,
   moveBudgetPx,
+  SIGNIFICANT_ACTION_COST,
+  turnBudgetPx,
   withinReach,
   type Action,
   type Entity,
@@ -31,6 +33,13 @@ const log = (state: SoloState, ...lines: string[]): SoloState => ({
 })
 
 const cellKey = (cx: number, cy: number): string => `${cx},${cy}`
+
+// Cepheus action economy (see model.ts). The active entity's turn is a single
+// budget (moveRemainingPx). A minor action costs one 6 m move's worth; a
+// significant action costs two. Movement spends it continuously.
+const minorCost = (state: SoloState, actor: Entity): number => moveBudgetPx(state.grid.gridScale, actor.moveMeters)
+const significantCost = (state: SoloState, actor: Entity): number => SIGNIFICANT_ACTION_COST * minorCost(state, actor)
+const enough = (state: SoloState, cost: number): boolean => state.moveRemainingPx + 0.5 >= cost
 
 // Cells blocked for movement: living entities (except `exclude`) and crates.
 const blockedCells = (state: SoloState, exclude: Entity): Set<string> => {
@@ -100,9 +109,11 @@ const applyToggleDoor = (state: SoloState, doorId: string): SoloState => {
   if (distanceToOccluder({x: actor.x, y: actor.y}, door) > doorReachForGrid(state.grid.gridScale)) {
     return log(state, 'Too far from that door.')
   }
+  const cost = minorCost(state, actor) // working a door is a minor action
+  if (!enough(state, cost)) return log(state, `${actor.label} has no actions left this turn.`)
   const open = !(state.doorStates[doorId]?.open ?? false)
   return log(
-    {...state, doorStates: {...state.doorStates, [doorId]: {open}}},
+    {...state, doorStates: {...state.doorStates, [doorId]: {open}}, moveRemainingPx: state.moveRemainingPx - cost},
     open ? `${actor.label} opens a door.` : `${actor.label} closes a door.`
   )
 }
@@ -111,6 +122,7 @@ const applyToggleDoor = (state: SoloState, doorId: string): SoloState => {
 const applyAttack = (state: SoloState, targetId: string, rng: Rng): SoloState => {
   const actor = activeEntity(state)
   if (!actor || !isActive(actor) || state.actionUsed) return state
+  if (!enough(state, significantCost(state, actor))) return log(state, `${actor.label} has no action left this turn.`)
   const target = entityById(state, targetId)
   if (!target || target.faction === actor.faction || isDead(target)) return state
 
@@ -155,13 +167,18 @@ const applyAttack = (state: SoloState, targetId: string, rng: Rng): SoloState =>
     killed: !!(after && isDead(after))
   }
 
-  return checkLoss(log({...state, entities, actionUsed: true, lastAttack}, ...lines))
+  return checkLoss(
+    log(
+      {...state, entities, actionUsed: true, moveRemainingPx: state.moveRemainingPx - significantCost(state, actor), lastAttack},
+      ...lines
+    )
+  )
 }
 
 // --- reload ----------------------------------------------------------------
 const applyReload = (state: SoloState): SoloState => {
   const actor = activeEntity(state)
-  if (!actor || !isActive(actor) || state.actionUsed) return state
+  if (!actor || !isActive(actor)) return state
   const weapon = weaponById(actor.weaponId)
   if (weapon.magazine === undefined) return state
   const need = weapon.magazine - actor.loadedRounds
@@ -170,6 +187,8 @@ const applyReload = (state: SoloState): SoloState => {
     (s) => s.kind === 'ammo' && s.weaponId === actor.weaponId && s.count > 0
   )
   if (stackIndex < 0) return log(state, `${actor.label} has no spare ammo.`)
+  const cost = minorCost(state, actor) // reloading is a minor action
+  if (!enough(state, cost)) return log(state, `${actor.label} has no actions left this turn.`)
   const take = Math.min(need, actor.inventory[stackIndex].count)
   const inventory = actor.inventory
     .map((s, i) => (i === stackIndex ? {...s, count: s.count - take} : s))
@@ -178,7 +197,7 @@ const applyReload = (state: SoloState): SoloState => {
     {
       ...state,
       entities: replace(state, actor.id, (e) => ({...e, loadedRounds: e.loadedRounds + take, inventory})),
-      actionUsed: true
+      moveRemainingPx: state.moveRemainingPx - cost
     },
     `${actor.label} reloads (${take} rounds).`
   )
@@ -188,6 +207,7 @@ const applyReload = (state: SoloState): SoloState => {
 const applyUseMedkit = (state: SoloState, targetId: string, rng: Rng): SoloState => {
   const actor = activeEntity(state)
   if (!actor || !isActive(actor) || state.actionUsed) return state
+  if (!enough(state, significantCost(state, actor))) return log(state, `${actor.label} has no action left this turn.`)
   const medIndex = actor.inventory.findIndex((s) => s.kind === 'medkit' && s.count > 0)
   if (medIndex < 0) return log(state, `${actor.label} has no medkit.`)
   const target = entityById(state, targetId)
@@ -205,7 +225,7 @@ const applyUseMedkit = (state: SoloState, targetId: string, rng: Rng): SoloState
     return next
   })
   return log(
-    {...state, entities, actionUsed: true},
+    {...state, entities, actionUsed: true, moveRemainingPx: state.moveRemainingPx - significantCost(state, actor)},
     aid.heal > 0 ? `${actor.label} treats ${target.label} (+${aid.heal}).` : `${actor.label}'s first aid fails.`
   )
 }
@@ -219,12 +239,14 @@ const mergeStack = (inventory: ItemStack[], stack: ItemStack): ItemStack[] => {
 
 const applyPickUp = (state: SoloState, groundItemId: string): SoloState => {
   const actor = activeEntity(state)
-  if (!actor || !isActive(actor) || state.actionUsed) return state
+  if (!actor || !isActive(actor)) return state
   const item = state.ground.find((g) => g.id === groundItemId)
   if (!item) return state
   if (Math.hypot(actor.x - item.x, actor.y - item.y) > 1.6 * state.grid.gridScale) {
     return log(state, 'Too far to pick that up.')
   }
+  const cost = minorCost(state, actor) // picking up is a minor action
+  if (!enough(state, cost)) return log(state, `${actor.label} has no actions left this turn.`)
   const label =
     item.stack.kind === 'ammo'
       ? `${item.stack.count} rounds`
@@ -234,7 +256,7 @@ const applyPickUp = (state: SoloState, groundItemId: string): SoloState => {
       ...state,
       entities: replace(state, actor.id, (e) => ({...e, inventory: mergeStack(e.inventory, item.stack)})),
       ground: state.ground.filter((g) => g.id !== groundItemId),
-      actionUsed: true
+      moveRemainingPx: state.moveRemainingPx - cost
     },
     `${actor.label} picks up ${label}.`
   )
@@ -262,6 +284,7 @@ const applyDrop = (state: SoloState, stackIndex: number): SoloState => {
 const applyPush = (state: SoloState, propId: string): SoloState => {
   const actor = activeEntity(state)
   if (!actor || !isActive(actor) || state.actionUsed) return state
+  if (!enough(state, significantCost(state, actor))) return log(state, `${actor.label} has no action left this turn.`)
   const prop = state.props.find((p) => p.id === propId)
   if (!prop) return state
   const ac = cellOf(state.grid, actor.x, actor.y)
@@ -277,7 +300,8 @@ const applyPush = (state: SoloState, propId: string): SoloState => {
     {
       ...state,
       props: state.props.map((p) => (p.id === propId ? {...p, x: at.x, y: at.y} : p)),
-      actionUsed: true
+      actionUsed: true,
+      moveRemainingPx: state.moveRemainingPx - significantCost(state, actor)
     },
     `${actor.label} shoves a crate.`
   )
@@ -302,7 +326,7 @@ const applyEndTurn = (state: SoloState): SoloState => {
     ...state,
     turnPtr: ptr,
     round,
-    moveRemainingPx: moveBudgetPx(state.grid.gridScale, state.entities[ptr]?.moveMeters),
+    moveRemainingPx: turnBudgetPx(state.grid.gridScale, state.entities[ptr]?.moveMeters),
     actionUsed: false
   })
 }
@@ -326,7 +350,7 @@ const applyAddWave = (state: SoloState, monsters: Entity[], rng: Rng): SoloState
       wave: state.wave + 1,
       round: state.round + 1,
       turnPtr: firstPc,
-      moveRemainingPx: moveBudgetPx(state.grid.gridScale, ordered[firstPc]?.moveMeters),
+      moveRemainingPx: turnBudgetPx(state.grid.gridScale, ordered[firstPc]?.moveMeters),
       actionUsed: false
     },
     `Wave ${state.wave + 1} boards!`

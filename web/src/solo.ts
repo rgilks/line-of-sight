@@ -37,7 +37,10 @@ import {
   isActive,
   isDead,
   isDown,
+  MINOR_ACTIONS_PER_ROUND,
   moveBudgetPx,
+  SIGNIFICANT_ACTION_COST,
+  turnBudgetPx,
   withinReach,
   type Entity,
   type GroundItem,
@@ -414,7 +417,7 @@ const newGame = (seed = Math.floor(Math.random() * 100000)): void => {
     round: 1,
     wave: 1,
     wavesTotal: WAVES_TOTAL,
-    moveRemainingPx: moveBudgetPx(grid.gridScale),
+    moveRemainingPx: turnBudgetPx(grid.gridScale),
     actionUsed: false,
     phase: {t: 'playerTurn'},
     log: ['Wave 1 boards. Hold the line.']
@@ -542,8 +545,8 @@ const fireAttackFx = (prev: AttackFx | undefined): boolean => {
 // once the dice clear — fire the weapon (sound + tracer/strike + impact burst).
 const onAttack = async (targetId: string): Promise<void> => {
   if (busy || !state || state.phase.t !== 'playerTurn') return
-  const actor = activeEntity(state)
-  if (!actor || actor.faction !== 'pc' || state.actionUsed) return
+  const target = entityById(state, targetId)
+  if (!target || !canAttackTarget(target)) return // also gates range / LOS / ammo / action budget
   busy = true
   renderPanel()
   showDice()
@@ -565,6 +568,7 @@ const canAttackTarget = (target: Entity): boolean => {
   if (busy || !state || state.phase.t !== 'playerTurn') return false
   const actor = activeEntity(state)
   if (!actor || actor.faction !== 'pc' || !isActive(actor) || state.actionUsed) return false
+  if (state.moveRemainingPx + 0.5 < SIGNIFICANT_ACTION_COST * moveBudgetPx(state.grid.gridScale, actor.moveMeters)) return false
   if (target.faction !== 'monster' || isDead(target) || !canSeePoint(state, actor, target.x, target.y)) return false
   const weapon = weaponById(actor.weaponId)
   if (weapon.rangeDm[rangeBandFor(Math.hypot(actor.x - target.x, actor.y - target.y), state.grid.gridScale)] === undefined) {
@@ -1240,6 +1244,12 @@ const renderPanel = (): void => {
   const weapon = actor ? weaponById(actor.weaponId) : null
   const selected = selectedId ? entityById(s, selectedId) : undefined
   const squares = actor ? Math.max(0, Math.round(s.moveRemainingPx / s.grid.gridScale)) : 0
+  // Action economy: a minor action costs one 6 m move's worth of budget; a
+  // significant action (attack / first aid / shove) costs two, and only one is
+  // allowed per round (actionUsed).
+  const minorPx = actor ? moveBudgetPx(s.grid.gridScale, actor.moveMeters) : 0
+  const canMinor = !!actor && isActive(actor) && s.moveRemainingPx + 0.5 >= minorPx
+  const canSignificant = !!actor && isActive(actor) && !s.actionUsed && s.moveRemainingPx + 0.5 >= SIGNIFICANT_ACTION_COST * minorPx
 
   // Attack availability against a selected enemy. The active character can only
   // fire on a foe IT can see — not one only an ally has line of sight to.
@@ -1252,7 +1262,7 @@ const renderPanel = (): void => {
     const band = rangeBandFor(Math.hypot(actor.x - enemy.x, actor.y - enemy.y), s.grid.gridScale)
     const inRange = weapon.rangeDm[band] !== undefined
     const hasAmmo = weapon.magazine === undefined || actor.loadedRounds > 0
-    canAttack = !s.actionUsed && isActive(actor) && inRange && hasAmmo
+    canAttack = canSignificant && inRange && hasAmmo
     attackLabel = `Attack ${enemy.label}`
     targetNote = `${enemy.label} · ${enemy.stats.end}/${enemy.statsMax.end} END · ${inRange ? band : `out of range (${band})`}${hasAmmo ? '' : ' · no ammo'}${canAttack ? ' · double-click or F to fire' : ''}`
   } else if (selectedEnemy) {
@@ -1262,25 +1272,23 @@ const renderPanel = (): void => {
   }
 
   const canReload =
-    !!actor &&
-    isActive(actor) &&
-    !s.actionUsed &&
+    canMinor &&
     weapon?.magazine !== undefined &&
+    !!actor &&
     actor.loadedRounds < (weapon.magazine ?? 0) &&
     actor.inventory.some((i) => i.kind === 'ammo' && i.weaponId === actor.weaponId && i.count > 0)
 
   const patient = selected && selected.faction === 'pc' && !isDead(selected) ? selected : actor
   const canMedkit =
+    canSignificant &&
     !!actor &&
-    isActive(actor) &&
-    !s.actionUsed &&
     actor.inventory.some((i) => i.kind === 'medkit' && i.count > 0) &&
     !!patient &&
     patient.stats.end < patient.statsMax.end &&
     (patient.id === actor.id || withinReach(actor, patient, s.grid.gridScale))
 
   const loot = actor ? s.ground.find((g) => Math.hypot(actor.x - g.x, actor.y - g.y) <= 1.6 * s.grid.gridScale) : undefined
-  const canPickup = !!actor && isActive(actor) && !s.actionUsed && !!loot
+  const canPickup = canMinor && !!loot
 
   const pushable = actor
     ? s.props.find((p) => {
@@ -1289,7 +1297,7 @@ const renderPanel = (): void => {
         return Math.abs(pc.cx - ac.cx) + Math.abs(pc.cy - ac.cy) === 1
       })
     : undefined
-  const canPush = !!actor && isActive(actor) && !s.actionUsed && !!pushable
+  const canPush = canSignificant && !!pushable
 
   const ammo = actor && weapon?.magazine !== undefined ? `${actor.loadedRounds}/${weapon.magazine}` : '—'
   const recentLog = s.log.slice(-6).map(escapeHtml).join('<br/>')
@@ -1298,7 +1306,7 @@ const renderPanel = (): void => {
   const turnLine = busy
     ? 'Hostiles acting…'
     : actor
-      ? `${actor.label}'s turn · ${squares} sq · ${weapon?.name ?? ''} ${ammo}`
+      ? `${actor.label}'s turn · ${squares} sq${s.actionUsed ? ' · acted' : ' · action ready'} · ${weapon?.name ?? ''} ${ammo}`
       : ''
 
   panel.innerHTML = `
@@ -1337,9 +1345,9 @@ const renderPanel = (): void => {
       <button id="solo-new" class="solo-button solo-button-ghost solo-button-sm">New deck</button>
       <label class="solo-check"><input type="checkbox" id="solo-grid" ${showGrid ? 'checked' : ''}/> Show floor grid</label>
     </section>
-    <p class="solo-hint">Double-click a foe to fire (or target it, then <b>F</b>). Tap the floor to
-    move, a squadmate to treat them, an adjacent door to open it. Press <b>Space</b> to end your
-    turn; drag to pan.</p>`
+    <p class="solo-hint">Each turn: move and take one action (attack, reload, medkit…), or skip the
+    action to <b>run</b> up to ${MINOR_ACTIONS_PER_ROUND * 6} m. Double-click a foe to fire (or target it,
+    then <b>F</b>); tap the floor to move; <b>Space</b> ends your turn; drag to pan.</p>`
     }`
 
   for (const el of panel.querySelectorAll<HTMLElement>('[data-select]')) {

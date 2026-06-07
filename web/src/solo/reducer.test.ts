@@ -3,7 +3,7 @@ import {defaultSpec, type GeneratedMap} from '../synth/types'
 import type {Occluder} from '../../../core/los'
 import type {Rng} from '../../../core/dice'
 import {buildWalkGrid} from './grid'
-import {moveBudgetPx, type Entity, type SoloState} from './model'
+import {moveBudgetPx, turnBudgetPx, type Entity, type SoloState} from './model'
 import {reduce} from './reducer'
 
 // A 10×10 open room (cells 1..8 are floor) at 30px/cell, no occluders unless
@@ -53,7 +53,7 @@ const makeState = (entities: Entity[], occluders: Occluder[] = []): SoloState =>
     round: 1,
     wave: 1,
     wavesTotal: 3,
-    moveRemainingPx: moveBudgetPx(grid.gridScale),
+    moveRemainingPx: turnBudgetPx(grid.gridScale),
     actionUsed: false,
     phase: {t: 'playerTurn'},
     log: []
@@ -93,14 +93,15 @@ describe('solo reducer — Move', () => {
     const state = makeState([pc('a', 2, 2, 0)])
     const next = reduce(state, {t: 'Move', to: {x: (4 + 0.5) * 30, y: (2 + 0.5) * 30}})
     expect(next.entities[0].x).toBe((4 + 0.5) * 30)
-    expect(next.moveRemainingPx).toBeCloseTo(moveBudgetPx(30) - 60)
+    expect(next.moveRemainingPx).toBeCloseTo(turnBudgetPx(30) - 60)
   })
 
   it('refuses a move beyond the movement budget', () => {
-    const state = makeState([pc('a', 1, 1, 0)])
+    // Only a sliver of budget left → a multi-cell move is refused.
+    const state = {...makeState([pc('a', 1, 1, 0)]), moveRemainingPx: 100}
     const next = reduce(state, {t: 'Move', to: {x: (8 + 0.5) * 30, y: (8 + 0.5) * 30}})
     expect(next.entities[0].x).toBe((1 + 0.5) * 30) // unchanged
-    expect(next.moveRemainingPx).toBe(state.moveRemainingPx)
+    expect(next.moveRemainingPx).toBe(100)
   })
 
   it('refuses a move onto a cell occupied by a squadmate', () => {
@@ -122,7 +123,7 @@ describe('solo reducer — EndTurn', () => {
     const afterFirst = reduce(state, {t: 'EndTurn'})
     expect(afterFirst.turnPtr).toBe(1)
     expect(afterFirst.round).toBe(1)
-    expect(afterFirst.moveRemainingPx).toBe(moveBudgetPx(30))
+    expect(afterFirst.moveRemainingPx).toBe(turnBudgetPx(30))
 
     const afterWrap = reduce(afterFirst, {t: 'EndTurn'})
     expect(afterWrap.turnPtr).toBe(0)
@@ -159,13 +160,25 @@ describe('solo reducer — combat actions', () => {
     expect(next.entities.find((e) => e.id === 'm')?.stats.end).toBe(10) // unchanged
   })
 
-  it('reloads from spare ammo up to the magazine', () => {
+  it('reloads from spare ammo up to the magazine (a minor action)', () => {
     const low = {...pc('a', 2, 2, 0), loadedRounds: 2, inventory: [{kind: 'ammo' as const, weaponId: 'autopistol', count: 45}]}
     const next = reduce(makeState([low]), {t: 'Reload'})
     const after = next.entities[0]
     expect(after.loadedRounds).toBe(15)
     expect(after.inventory[0].count).toBe(32) // 45 − 13 taken
-    expect(next.actionUsed).toBe(true)
+    expect(next.actionUsed).toBe(false) // reload is a minor — the significant action is still free
+    expect(next.moveRemainingPx).toBe(turnBudgetPx(30) - moveBudgetPx(30)) // spent one minor action
+  })
+
+  it('can run further when no action is taken (three minor moves)', () => {
+    const state = makeState([pc('a', 1, 1, 0)])
+    // A diagonal dash across the room (~6 cells) is fine on the full 3-minor budget…
+    const far = reduce(state, {t: 'Move', to: {x: (7 + 0.5) * 30, y: (7 + 0.5) * 30}})
+    expect(far.entities[0].x).toBe((7 + 0.5) * 30)
+    // …but the same distance is refused once two minors are already spent (only ~6 m left).
+    const tired = {...state, moveRemainingPx: moveBudgetPx(30)}
+    const blocked = reduce(tired, {t: 'Move', to: {x: (7 + 0.5) * 30, y: (7 + 0.5) * 30}})
+    expect(blocked.entities[0].x).toBe((1 + 0.5) * 30) // unchanged
   })
 })
 
