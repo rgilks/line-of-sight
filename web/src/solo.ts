@@ -477,6 +477,14 @@ const playerAct = (action: Parameters<typeof reduce>[1]): void => {
 }
 
 const showDice = (): void => {
+  // The overlay lives inside the scrollable board, so when the player has zoomed
+  // in and panned, a plain inset:0 overlay scrolls away with the content. Pin it
+  // over the *visible* viewport (offset by the current scroll) so the dice always
+  // land centred on screen at the same size, whatever the zoom/pan.
+  diceOverlay.style.left = `${boardViewport.scrollLeft}px`
+  diceOverlay.style.top = `${boardViewport.scrollTop}px`
+  diceOverlay.style.width = `${boardViewport.clientWidth}px`
+  diceOverlay.style.height = `${boardViewport.clientHeight}px`
   diceOverlay.style.display = 'block'
   diceRoller.resize()
 }

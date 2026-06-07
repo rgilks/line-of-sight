@@ -283,10 +283,13 @@ body {
   background: radial-gradient(circle at 50% 40%, #060906 0%, #000000 80%);
 }
 
-/* 3D dice overlay (cepheus-dice) shown during a to-hit roll. */
+/* 3D dice overlay (cepheus-dice) shown during a to-hit roll. It lives inside the
+   scrollable board; showDice() pins its left/top/width/height to the visible
+   viewport so the dice stay centred on screen at any zoom/pan. */
 #solo-dice {
   position: absolute;
-  inset: 0;
+  top: 0;
+  left: 0;
   display: none;
   z-index: 5;
   background: rgba(0, 0, 0, 0.6);
