@@ -484,6 +484,109 @@ const playWeaponSound = (profile: SoundProfile): void => {
   else playAcid(out, ac)
 }
 
+// ---- interaction sounds (retro/chiptune voices) --------------------------
+// A simple oscillator blip with an optional pitch glide.
+const blip = (
+  out: GainNode,
+  ac: AudioContext,
+  when: number,
+  o: {freq: number; to?: number; type?: OscillatorType; dur: number; vol: number}
+): void => {
+  const osc = ac.createOscillator()
+  osc.type = o.type ?? 'square'
+  osc.frequency.setValueAtTime(o.freq, when)
+  if (o.to) osc.frequency.exponentialRampToValueAtTime(o.to, when + o.dur)
+  const g = ac.createGain()
+  env(g.gain, when, o.vol, 0.005, o.dur)
+  osc.connect(g).connect(out)
+  osc.start(when)
+  osc.stop(when + o.dur + 0.05)
+}
+
+// A filtered noise burst (clicks, scrapes, servo whirrs).
+const noiseHit = (
+  out: GainNode,
+  ac: AudioContext,
+  when: number,
+  o: {dur: number; type: BiquadFilterType; freq: number; to?: number; q?: number; vol: number}
+): void => {
+  const src = ac.createBufferSource()
+  src.buffer = noiseBuf(ac, o.dur)
+  const f = ac.createBiquadFilter()
+  f.type = o.type
+  f.frequency.setValueAtTime(o.freq, when)
+  if (o.to) f.frequency.exponentialRampToValueAtTime(o.to, when + o.dur)
+  f.Q.value = o.q ?? 1
+  const g = ac.createGain()
+  env(g.gain, when, o.vol, 0.003, o.dur)
+  src.connect(f).connect(g).connect(out)
+  src.start(when)
+  src.stop(when + o.dur + 0.05)
+}
+
+export type UiSound =
+  | 'move'
+  | 'select'
+  | 'door'
+  | 'reload'
+  | 'medkit'
+  | 'pickup'
+  | 'push'
+  | 'endTurn'
+  | 'wave'
+  | 'win'
+  | 'lose'
+
+/** Play a short synthesised sound for a game interaction. */
+export const playUi = (kind: UiSound): void => {
+  const a = audio()
+  if (!a) return
+  const {ac, out} = a
+  const t = ac.currentTime
+  switch (kind) {
+    case 'move': // soft footstep
+      noiseHit(out, ac, t, {dur: 0.07, type: 'lowpass', freq: 520, vol: 0.1})
+      blip(out, ac, t, {freq: 120, to: 80, type: 'sine', dur: 0.06, vol: 0.06})
+      break
+    case 'select': // tiny tick
+      blip(out, ac, t, {freq: 880, type: 'square', dur: 0.04, vol: 0.07})
+      break
+    case 'door': // servo whirr
+      noiseHit(out, ac, t, {dur: 0.2, type: 'bandpass', freq: 500, to: 1500, q: 1.2, vol: 0.13})
+      break
+    case 'reload': // cha-chk
+      noiseHit(out, ac, t, {dur: 0.04, type: 'bandpass', freq: 2600, q: 1.5, vol: 0.16})
+      noiseHit(out, ac, t + 0.09, {dur: 0.05, type: 'bandpass', freq: 1800, q: 1.4, vol: 0.18})
+      blip(out, ac, t + 0.09, {freq: 130, to: 90, type: 'sine', dur: 0.05, vol: 0.08})
+      break
+    case 'medkit': // ascending heal chime
+      blip(out, ac, t, {freq: 523, type: 'sine', dur: 0.12, vol: 0.12})
+      blip(out, ac, t + 0.1, {freq: 659, type: 'sine', dur: 0.12, vol: 0.12})
+      blip(out, ac, t + 0.2, {freq: 784, type: 'sine', dur: 0.16, vol: 0.13})
+      break
+    case 'pickup': // bright rising blip
+      blip(out, ac, t, {freq: 660, to: 990, type: 'triangle', dur: 0.1, vol: 0.13})
+      break
+    case 'push': // low scrape
+      noiseHit(out, ac, t, {dur: 0.26, type: 'lowpass', freq: 360, to: 240, vol: 0.14})
+      break
+    case 'endTurn': // soft confirm
+      blip(out, ac, t, {freq: 300, to: 380, type: 'sine', dur: 0.1, vol: 0.12})
+      break
+    case 'wave': // danger alarm
+      blip(out, ac, t, {freq: 300, type: 'sawtooth', dur: 0.18, vol: 0.16})
+      blip(out, ac, t + 0.2, {freq: 230, type: 'sawtooth', dur: 0.22, vol: 0.16})
+      break
+    case 'win': // triumphant arpeggio
+      ;[523, 659, 784, 1046].forEach((f, i) => blip(out, ac, t + i * 0.12, {freq: f, type: 'square', dur: 0.16, vol: 0.14}))
+      break
+    case 'lose': // somber descent
+      blip(out, ac, t, {freq: 440, to: 330, type: 'sine', dur: 0.3, vol: 0.16})
+      blip(out, ac, t + 0.28, {freq: 294, to: 196, type: 'sine', dur: 0.5, vol: 0.16})
+      break
+  }
+}
+
 // ---- weapon → sound/visual mapping ---------------------------------------
 const soundProfile = (w: Weapon): SoundProfile => {
   if (w.id === 'shotgun') return 'shotgun'

@@ -47,7 +47,7 @@ import {
 } from './solo/model'
 import {buildWalkGrid, cellCenter, cellOf, isFloor, type Cell, type WalkGrid} from './solo/grid'
 import {reduce} from './solo/reducer'
-import {clearEffects, drawEffects, effectsActive, primeAudio, setFxTimeScale, spawnAttackFx} from './solo/fx'
+import {clearEffects, drawEffects, effectsActive, playUi, primeAudio, setFxTimeScale, spawnAttackFx} from './solo/fx'
 import type {AttackFx} from './solo/model'
 import './solo.css'
 
@@ -434,6 +434,7 @@ const newGame = (seed = Math.floor(Math.random() * 100000)): void => {
 const dispatch = (action: Parameters<typeof reduce>[1], rng?: () => number): void => {
   if (!state) return
   const before = new Map(state.entities.map((entity) => [entity.id, {x: entity.x, y: entity.y}]))
+  const wasLost = state.phase.t === 'lost'
   state = reduce(state, action, rng)
   for (const entity of state.entities) {
     const old = before.get(entity.id)
@@ -441,6 +442,7 @@ const dispatch = (action: Parameters<typeof reduce>[1], rng?: () => number): voi
       startEase(entity.id, renderPos.get(entity.id) ?? old, {x: entity.x, y: entity.y})
     }
   }
+  if (!wasLost && state.phase.t === 'lost') playUi('lose')
   renderPanel()
   requestDraw()
 }
@@ -452,10 +454,12 @@ const afterTurnUpkeep = (): void => {
   if (state.entities.some((entity) => entity.faction === 'monster' && !isDead(entity))) return
   if (state.wave >= state.wavesTotal) {
     state = {...state, phase: {t: 'won'}}
+    playUi('win')
     renderPanel()
     requestDraw()
     return
   }
+  playUi('wave')
   dispatch({t: 'AddWave', monsters: buildWave(state.map, state.grid, state.wave + 1)})
 }
 
@@ -556,6 +560,7 @@ const onAttack = async (targetId: string): Promise<void> => {
 // End the player's turn, then hand off to the monster AI.
 const endTurn = (): void => {
   if (busy || !state || state.phase.t !== 'playerTurn') return
+  playUi('endTurn')
   dispatch({t: 'EndTurn'})
   void runMonsters()
 }
@@ -839,17 +844,23 @@ function actAt(clientX: number, clientY: number): void {
   const point = boardPointFromXY(clientX, clientY)
   const doorId = doorHitAt(point)
   if (doorId) {
+    playUi('door')
     playerAct({t: 'ToggleDoor', doorId})
     return
   }
   const hit = entityHitAt(point)
   if (hit) {
     selectedId = selectedId === hit.id ? null : hit.id
+    if (selectedId) playUi('select')
     renderPanel()
     requestDraw()
     return
   }
+  const moverId = actor.id
+  const from = {x: actor.x, y: actor.y}
   playerAct({t: 'Move', to: point})
+  const moved = entityById(state, moverId)
+  if (moved && (moved.x !== from.x || moved.y !== from.y)) playUi('move')
 }
 
 // ---- rendering ------------------------------------------------------------
@@ -1242,15 +1253,27 @@ const renderPanel = (): void => {
   panel.querySelector<HTMLButtonElement>('#solo-attack')?.addEventListener('click', () => {
     if (enemy) void onAttack(enemy.id)
   })
-  panel.querySelector<HTMLButtonElement>('#solo-reload')?.addEventListener('click', () => playerAct({t: 'Reload'}))
+  panel.querySelector<HTMLButtonElement>('#solo-reload')?.addEventListener('click', () => {
+    playUi('reload')
+    playerAct({t: 'Reload'})
+  })
   panel.querySelector<HTMLButtonElement>('#solo-medkit')?.addEventListener('click', () => {
-    if (patient) playerAct({t: 'UseMedkit', targetId: patient.id})
+    if (patient) {
+      playUi('medkit')
+      playerAct({t: 'UseMedkit', targetId: patient.id})
+    }
   })
   panel.querySelector<HTMLButtonElement>('#solo-pickup')?.addEventListener('click', () => {
-    if (loot) playerAct({t: 'PickUp', groundItemId: loot.id})
+    if (loot) {
+      playUi('pickup')
+      playerAct({t: 'PickUp', groundItemId: loot.id})
+    }
   })
   panel.querySelector<HTMLButtonElement>('#solo-push')?.addEventListener('click', () => {
-    if (pushable) playerAct({t: 'PushProp', propId: pushable.id})
+    if (pushable) {
+      playUi('push')
+      playerAct({t: 'PushProp', propId: pushable.id})
+    }
   })
   panel.querySelector<HTMLButtonElement>('#solo-end')?.addEventListener('click', () => endTurn())
   panel.querySelector<HTMLButtonElement>('#solo-new')?.addEventListener('click', () => newGame())
