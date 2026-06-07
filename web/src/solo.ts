@@ -48,6 +48,18 @@ let showGrid = false
 let canvas: HTMLCanvasElement
 let ctx: CanvasRenderingContext2D
 let panel: HTMLDivElement
+let boardViewport: HTMLDivElement
+
+// Camera: the canvas backing store stays at map resolution; we zoom by sizing its
+// display box (map × zoom) inside a scrollable viewport and pan via scroll. Click
+// mapping reads the rendered rect, so it stays correct at any zoom.
+let zoom = 1
+const MIN_ZOOM = 0.15
+const MAX_ZOOM = 5
+let panPointer: {id: number; startX: number; startY: number; scrollLeft: number; scrollTop: number} | null = null
+let touchPan: {x: number; y: number; scrollLeft: number; scrollTop: number} | null = null
+let pinch: {startDist: number; startZoom: number; boardX: number; boardY: number} | null = null
+let touchMoved = false
 
 // ---- movement animation (tween) ------------------------------------------
 // Mirrors the multiplayer client's ease so glides feel identical. renderPos is
@@ -206,6 +218,7 @@ const newGame = (seed = Math.floor(Math.random() * 100000)): void => {
   canvas.width = map.width
   canvas.height = map.height
   sizeFogLayers(map.width, map.height)
+  fitBoardToViewport()
   renderPanel()
   requestDraw()
 }
@@ -225,12 +238,163 @@ const dispatch = (action: Parameters<typeof reduce>[1]): void => {
   requestDraw()
 }
 
+// ---- camera: zoom (wheel / pinch) + pan (drag / scroll) -------------------
+const updateCanvasDisplaySize = (): void => {
+  if (!state) return
+  canvas.style.width = `${state.map.width * zoom}px`
+  canvas.style.height = `${state.map.height * zoom}px`
+}
+
+const fitBoardToViewport = (): void => {
+  if (!state || !boardViewport) return
+  const pad = 24
+  const availWidth = boardViewport.clientWidth - pad
+  const availHeight = boardViewport.clientHeight - pad
+  if (availWidth <= 0 || availHeight <= 0) return
+  zoom = Math.min(
+    MAX_ZOOM,
+    Math.max(MIN_ZOOM, Math.min(availWidth / state.map.width, availHeight / state.map.height))
+  )
+  updateCanvasDisplaySize()
+  boardViewport.scrollLeft = 0
+  boardViewport.scrollTop = 0
+}
+
+const setZoom = (
+  next: number,
+  anchor?: {boardX: number; boardY: number; viewportX: number; viewportY: number}
+): void => {
+  zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, next))
+  updateCanvasDisplaySize()
+  if (anchor && boardViewport) {
+    boardViewport.scrollLeft = anchor.boardX * zoom - anchor.viewportX
+    boardViewport.scrollTop = anchor.boardY * zoom - anchor.viewportY
+  }
+}
+
+const handleWheel = (event: WheelEvent): void => {
+  if (!state || !boardViewport) return
+  event.preventDefault()
+  const rect = canvas.getBoundingClientRect()
+  const vp = boardViewport.getBoundingClientRect()
+  const factor = event.deltaY < 0 ? 1.12 : 1 / 1.12
+  setZoom(zoom * factor, {
+    boardX: ((event.clientX - rect.left) / rect.width) * state.map.width,
+    boardY: ((event.clientY - rect.top) / rect.height) * state.map.height,
+    viewportX: event.clientX - vp.left,
+    viewportY: event.clientY - vp.top
+  })
+}
+
+// Desktop pan: right/middle drag, or ⌘/Ctrl + left-drag (left alone is "act").
+const shouldStartPan = (event: PointerEvent): boolean =>
+  event.button === 1 || event.button === 2 || (event.button === 0 && (event.metaKey || event.ctrlKey))
+
+const onPanMove = (event: PointerEvent): void => {
+  if (!boardViewport || !panPointer || panPointer.id !== event.pointerId) return
+  event.preventDefault()
+  boardViewport.scrollLeft = panPointer.scrollLeft - (event.clientX - panPointer.startX)
+  boardViewport.scrollTop = panPointer.scrollTop - (event.clientY - panPointer.startY)
+}
+
+const endPan = (event: PointerEvent): void => {
+  if (!panPointer || panPointer.id !== event.pointerId) return
+  panPointer = null
+  boardViewport?.classList.remove('is-panning')
+  window.removeEventListener('pointermove', onPanMove)
+  window.removeEventListener('pointerup', endPan)
+  window.removeEventListener('pointercancel', endPan)
+}
+
+const onPanPointerDown = (event: PointerEvent): void => {
+  if (!boardViewport || !shouldStartPan(event)) return
+  event.preventDefault()
+  panPointer = {
+    id: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    scrollLeft: boardViewport.scrollLeft,
+    scrollTop: boardViewport.scrollTop
+  }
+  boardViewport.classList.add('is-panning')
+  window.addEventListener('pointermove', onPanMove)
+  window.addEventListener('pointerup', endPan)
+  window.addEventListener('pointercancel', endPan)
+}
+
+const blockContextMenu = (event: Event): void => event.preventDefault()
+
+// Touch: one finger pans (or taps to act), two fingers pinch-zoom.
+type TouchPt = {id: number; x: number; y: number}
+const touchList = (event: TouchEvent): TouchPt[] =>
+  Array.from(event.touches).map((t) => ({id: t.identifier, x: t.clientX, y: t.clientY}))
+
+const onTouchStart = (event: TouchEvent): void => {
+  if (!boardViewport || !state) return
+  const touches = touchList(event)
+  touchMoved = false
+  if (touches.length === 1) {
+    touchPan = {x: touches[0].x, y: touches[0].y, scrollLeft: boardViewport.scrollLeft, scrollTop: boardViewport.scrollTop}
+    pinch = null
+  } else if (touches.length >= 2) {
+    const rect = canvas.getBoundingClientRect()
+    const midX = (touches[0].x + touches[1].x) / 2
+    const midY = (touches[0].y + touches[1].y) / 2
+    pinch = {
+      startDist: Math.hypot(touches[0].x - touches[1].x, touches[0].y - touches[1].y),
+      startZoom: zoom,
+      boardX: ((midX - rect.left) / rect.width) * state.map.width,
+      boardY: ((midY - rect.top) / rect.height) * state.map.height
+    }
+    touchPan = null
+  }
+}
+
+const onTouchMove = (event: TouchEvent): void => {
+  if (!boardViewport) return
+  const touches = touchList(event)
+  if (pinch && touches.length >= 2) {
+    event.preventDefault()
+    touchMoved = true
+    const vp = boardViewport.getBoundingClientRect()
+    const midX = (touches[0].x + touches[1].x) / 2
+    const midY = (touches[0].y + touches[1].y) / 2
+    const dist = Math.hypot(touches[0].x - touches[1].x, touches[0].y - touches[1].y)
+    setZoom(pinch.startZoom * (dist / Math.max(1, pinch.startDist)), {
+      boardX: pinch.boardX,
+      boardY: pinch.boardY,
+      viewportX: midX - vp.left,
+      viewportY: midY - vp.top
+    })
+  } else if (touchPan && touches.length === 1) {
+    const dx = touches[0].x - touchPan.x
+    const dy = touches[0].y - touchPan.y
+    if (Math.hypot(dx, dy) > 6) touchMoved = true
+    if (touchMoved) {
+      event.preventDefault()
+      boardViewport.scrollLeft = touchPan.scrollLeft - dx
+      boardViewport.scrollTop = touchPan.scrollTop - dy
+    }
+  }
+}
+
+const onTouchEnd = (event: TouchEvent): void => {
+  if (!touchMoved && !pinch && event.changedTouches.length === 1) {
+    const t = event.changedTouches[0]
+    actAt(t.clientX, t.clientY)
+  }
+  if (event.touches.length === 0) {
+    touchPan = null
+    pinch = null
+  }
+}
+
 // ---- input ----------------------------------------------------------------
-const boardPointFromEvent = (event: MouseEvent): Point => {
+const boardPointFromXY = (clientX: number, clientY: number): Point => {
   const rect = canvas.getBoundingClientRect()
   return {
-    x: ((event.clientX - rect.left) / rect.width) * canvas.width,
-    y: ((event.clientY - rect.top) / rect.height) * canvas.height
+    x: ((clientX - rect.left) / rect.width) * canvas.width,
+    y: ((clientY - rect.top) / rect.height) * canvas.height
   }
 }
 
@@ -253,14 +417,23 @@ const doorHitAt = (point: Point): string | null => {
   return best?.id ?? null
 }
 
-const onBoardClick = (event: MouseEvent): void => {
+// Act at a screen point: toggle an adjacent door, else move the active PC there.
+function actAt(clientX: number, clientY: number): void {
   if (!state) return
   const actor = activeEntity(state)
   if (!actor || actor.faction !== 'pc') return
-  const point = boardPointFromEvent(event)
+  const point = boardPointFromXY(clientX, clientY)
   const doorId = doorHitAt(point)
   if (doorId) dispatch({t: 'ToggleDoor', doorId})
   else dispatch({t: 'Move', to: point})
+}
+
+// Mouse "act" is a plain left click (touch is handled by the touch listeners;
+// ⌘/Ctrl-left and right/middle are pan).
+const onActionPointerDown = (event: PointerEvent): void => {
+  if (event.pointerType === 'touch') return
+  if (event.button !== 0 || event.metaKey || event.ctrlKey) return
+  actAt(event.clientX, event.clientY)
 }
 
 // ---- rendering ------------------------------------------------------------
@@ -443,11 +616,19 @@ const mount = (): void => {
       <div class="solo-board"><canvas id="solo-canvas"></canvas></div>
     </div>`
   panel = app.querySelector('#solo-panel') as HTMLDivElement
+  boardViewport = app.querySelector('.solo-board') as HTMLDivElement
   canvas = app.querySelector('#solo-canvas') as HTMLCanvasElement
   const context = canvas.getContext('2d')
   if (!context) throw new Error('Canvas 2D is required.')
   ctx = context
-  canvas.addEventListener('click', onBoardClick)
+  canvas.addEventListener('pointerdown', onActionPointerDown)
+  canvas.addEventListener('pointerdown', onPanPointerDown)
+  canvas.addEventListener('wheel', handleWheel, {passive: false})
+  canvas.addEventListener('contextmenu', blockContextMenu)
+  canvas.addEventListener('touchstart', onTouchStart, {passive: false})
+  canvas.addEventListener('touchmove', onTouchMove, {passive: false})
+  canvas.addEventListener('touchend', onTouchEnd)
+  window.addEventListener('resize', updateCanvasDisplaySize)
 
   const seedParam = new URLSearchParams(location.search).get('seed')
   const seed = seedParam !== null && Number.isFinite(Number(seedParam)) ? Number(seedParam) : undefined
