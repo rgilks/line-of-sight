@@ -5,7 +5,7 @@
 import {distanceToOccluder, doorReachForGrid, visibilityPolygon} from '../../../core/los'
 import {orderByInitiative, pointInPolygon} from '../../../core/rules'
 import {roll2D6, type Rng} from '../../../core/dice'
-import {applyDamage, applyHeal, resolveAttack, resolveFirstAid} from './combat'
+import {applyDamage, applyHeal, attackLog, resolveAttack, resolveFirstAid} from './combat'
 import {weaponById} from './gear'
 import {cellCenter, cellOf, isFloor} from './grid'
 import {
@@ -191,11 +191,7 @@ const applyAttack = (state: SoloState, targetId: string, rng: Rng): SoloState =>
     return next
   })
 
-  const lines = [
-    result.hit
-      ? `${actor.label} hits ${target.label} for ${result.damage} (effect ${result.effect}).`
-      : `${actor.label} misses ${target.label}.`
-  ]
+  const lines = attackLog(actor, target, result)
   const after = entities.find((e) => e.id === targetId)
   if (after && isDead(after)) lines.push(`${target.label} is killed.`)
   else if (after && isDown(after)) lines.push(`${target.label} is down.`)
