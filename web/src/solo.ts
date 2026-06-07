@@ -23,7 +23,16 @@ import {
 } from '../../core/los'
 import {orderByInitiative} from '../../core/rules'
 import {PARTY} from './solo/characters'
-import {activeEntity, dexDm, isActive, moveBudgetPx, type Entity, type SoloState} from './solo/model'
+import {weaponById} from './solo/gear'
+import {
+  activeEntity,
+  dexDm,
+  isActive,
+  moveBudgetPx,
+  type Entity,
+  type ItemStack,
+  type SoloState
+} from './solo/model'
 import {buildWalkGrid, cellCenter, cellOf, isFloor, type Cell, type WalkGrid} from './solo/grid'
 import {reduce} from './solo/reducer'
 import './solo.css'
@@ -139,6 +148,12 @@ const spawnParty = (map: GeneratedMap, grid: WalkGrid): Entity[] => {
   const cells = nearestFloorCells(grid, center, PARTY.length)
   return PARTY.map((pre, index) => {
     const at = cellCenter(grid, (cells[index] ?? center).cx, (cells[index] ?? center).cy)
+    const weapon = weaponById(pre.weaponId)
+    const inventory: ItemStack[] = []
+    if (weapon.magazine && pre.spareAmmo > 0) {
+      inventory.push({kind: 'ammo', weaponId: pre.weaponId, count: pre.spareAmmo})
+    }
+    if (pre.medkits > 0) inventory.push({kind: 'medkit', count: pre.medkits})
     return {
       id: pre.id,
       faction: 'pc' as const,
@@ -148,6 +163,11 @@ const spawnParty = (map: GeneratedMap, grid: WalkGrid): Entity[] => {
       y: at.y,
       stats: {...pre.stats},
       statsMax: {...pre.stats},
+      skills: {...pre.skills},
+      weaponId: pre.weaponId,
+      armorId: pre.armorId,
+      inventory,
+      loadedRounds: weapon.magazine ?? 0,
       initiative: null,
       order: index
     }

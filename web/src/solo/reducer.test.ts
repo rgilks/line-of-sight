@@ -27,6 +27,11 @@ const pc = (id: string, cx: number, cy: number, order: number): Entity => ({
   y: (cy + 0.5) * 30,
   stats: {str: 7, dex: 7, end: 7},
   statsMax: {str: 7, dex: 7, end: 7},
+  skills: {'Gun Combat': 1},
+  weaponId: 'autopistol',
+  armorId: null,
+  inventory: [],
+  loadedRounds: 15,
   initiative: 7,
   order
 })

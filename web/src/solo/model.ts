@@ -8,9 +8,22 @@ import type {WalkGrid} from './grid'
 
 export type Faction = 'pc' | 'monster'
 
-// The three Cepheus physical characteristics. They double as hit points: damage
-// reduces END first, then STR or DEX; one at 0 ⇒ down, all three ⇒ dead.
+// The three Cepheus physical characteristics. They double as hit points (Cepheus
+// SRD): damage reduces END first, then STR or DEX. These mirror the lowercase
+// names the character generator uses (ccg Characteristics.{str,dex,end}), so a
+// generated character maps in directly.
 export type Stats = {str: number; dex: number; end: number}
+
+// Skills as a name → level map, parseable from ccg's `"Gun Combat-2"` strings via
+// parseCcgSkills (see ccg.ts). Names match ccg's parent skills ("Gun Combat",
+// "Melee Combat", "Medicine").
+export type Skills = Record<string, number>
+
+export type ItemKind = 'ammo' | 'medkit'
+// A stack of carried consumables. `weaponId` ties ammo to the weapon it reloads.
+export type ItemStack = {kind: ItemKind; weaponId?: string; count: number}
+// Loot lying on the deck floor until a character picks it up (board pixels).
+export type GroundItem = {id: string; x: number; y: number; stack: ItemStack}
 
 export type Entity = {
   id: string
@@ -22,9 +35,16 @@ export type Entity = {
   y: number
   stats: Stats
   statsMax: Stats
+  skills: Skills
+  weaponId: string
+  armorId: string | null
+  inventory: ItemStack[]
+  loadedRounds: number // rounds currently in the equipped ranged weapon
   // Combat bookkeeping.
   initiative: number | null
   order: number // stable join index; ties in initiative break by this
+  // monster-only behaviour hint (Phase 4 AI); PCs leave it undefined.
+  behaviour?: 'hunter' | 'lurker'
 }
 
 // Cepheus characteristic DM table: the modifier a characteristic value confers.
@@ -42,13 +62,14 @@ export const characteristicDm = (value: number): number => {
 /** A character's Dexterity DM — the initiative modifier (2D6 + DEX DM). */
 export const dexDm = (entity: Entity): number => characteristicDm(entity.stats.dex)
 
-/** Down (unconscious) when any one physical characteristic has hit 0. */
-export const isDown = (entity: Entity): boolean =>
-  entity.stats.str <= 0 || entity.stats.dex <= 0 || entity.stats.end <= 0
-
-/** Dead when all three physical characteristics are 0. */
+/** Dead when all three physical characteristics are 0 (Cepheus SRD). */
 export const isDead = (entity: Entity): boolean =>
   entity.stats.str <= 0 && entity.stats.dex <= 0 && entity.stats.end <= 0
+
+// Unconscious when STR or DEX is reduced to 0 (but not yet dead). END reaching 0
+// alone does NOT down a character — only STR/DEX do (Cepheus SRD).
+export const isDown = (entity: Entity): boolean =>
+  !isDead(entity) && (entity.stats.str <= 0 || entity.stats.dex <= 0)
 
 /** A living entity is on the board and able to act (not dead, not downed). */
 export const isActive = (entity: Entity): boolean => !isDead(entity) && !isDown(entity)
