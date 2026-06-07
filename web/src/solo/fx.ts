@@ -536,6 +536,7 @@ export type UiSound =
   | 'wave'
   | 'win'
   | 'lose'
+  | 'denied'
 
 /** Play a short synthesised sound for a game interaction. */
 export const playUi = (kind: UiSound): void => {
@@ -584,7 +585,50 @@ export const playUi = (kind: UiSound): void => {
       blip(out, ac, t, {freq: 440, to: 330, type: 'sine', dur: 0.3, vol: 0.16})
       blip(out, ac, t + 0.28, {freq: 294, to: 196, type: 'sine', dur: 0.5, vol: 0.16})
       break
+    case 'denied': // low "nope" buzz
+      blip(out, ac, t, {freq: 200, to: 130, type: 'square', dur: 0.13, vol: 0.12})
+      break
   }
+}
+
+/** A "can't go there" marker — a red cross at the cell plus the reason floating up. */
+export const spawnDenied = (at: Point, text: string, gridScale: number): void => {
+  const t0 = nowMs()
+  const r = gridScale * 0.46
+  add(t0, D(480), (ctx, t) => {
+    const p = clamp((t - t0) / D(480), 0, 1)
+    const a = 1 - p
+    ctx.lineCap = 'round'
+    ctx.globalAlpha = a * 0.9
+    ctx.strokeStyle = '#ff5a5a'
+    ctx.lineWidth = 3
+    ctx.beginPath()
+    ctx.moveTo(at.x - r, at.y - r)
+    ctx.lineTo(at.x + r, at.y + r)
+    ctx.moveTo(at.x + r, at.y - r)
+    ctx.lineTo(at.x - r, at.y + r)
+    ctx.stroke()
+    ctx.globalAlpha = a * 0.5
+    ctx.beginPath()
+    ctx.arc(at.x, at.y, r * (0.7 + 0.5 * easeOut(p)), 0, Math.PI * 2)
+    ctx.stroke()
+  })
+  if (!text) return
+  const dur = D(1200)
+  add(t0, dur, (ctx, t) => {
+    const p = clamp((t - t0) / dur, 0, 1)
+    ctx.globalAlpha = clamp(p < 0.72 ? 1 : 1 - (p - 0.72) / 0.28, 0, 1)
+    ctx.translate(at.x, at.y - gridScale * 0.7 - gridScale * 0.5 * easeOut(p))
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    const size = gridScale * 0.4
+    ctx.font = `700 ${size}px "Orbitron", "JetBrains Mono", ui-sans-serif, sans-serif`
+    ctx.lineWidth = Math.max(2, size * 0.16)
+    ctx.strokeStyle = 'rgba(0,0,0,0.9)'
+    ctx.strokeText(text, 0, 0)
+    ctx.fillStyle = '#ff8a8a'
+    ctx.fillText(text, 0, 0)
+  })
 }
 
 // ---- weapon → sound/visual mapping ---------------------------------------

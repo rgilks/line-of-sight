@@ -22,7 +22,7 @@ import {
   type DoorOccluder,
   type Point
 } from '../../core/los'
-import {orderByInitiative} from '../../core/rules'
+import {orderByInitiative, pointInPolygon} from '../../core/rules'
 import {PARTY} from './solo/characters'
 import {MONSTERS} from './solo/monsters'
 import {weaponById} from './solo/gear'
@@ -47,7 +47,7 @@ import {
 } from './solo/model'
 import {buildWalkGrid, cellCenter, cellOf, isFloor, type Cell, type WalkGrid} from './solo/grid'
 import {reduce} from './solo/reducer'
-import {clearEffects, drawEffects, effectsActive, playUi, primeAudio, setFxTimeScale, spawnAttackFx} from './solo/fx'
+import {clearEffects, drawEffects, effectsActive, playUi, primeAudio, setFxTimeScale, spawnAttackFx, spawnDenied} from './solo/fx'
 import type {AttackFx} from './solo/model'
 import './solo.css'
 
@@ -60,6 +60,7 @@ for (const image of counterPortraits.values()) image.addEventListener('load', re
 let state: SoloState | null = null
 let showGrid = false
 let selectedId: string | null = null // the entity the player has tapped (target / patient)
+let reachable: Array<{cx: number; cy: number}> = [] // cells the active PC can move to (recomputed per action)
 let monsterCounter = 0
 
 let canvas: HTMLCanvasElement
@@ -886,9 +887,19 @@ function actAt(clientX: number, clientY: number): void {
   }
   const moverId = actor.id
   const from = {x: actor.x, y: actor.y}
+  const logLen = state.log.length
   playerAct({t: 'Move', to: point})
   const moved = entityById(state, moverId)
-  if (moved && (moved.x !== from.x || moved.y !== from.y)) playUi('move')
+  if (moved && (moved.x !== from.x || moved.y !== from.y)) {
+    playUi('move')
+  } else if (state.log.length > logLen) {
+    // The move was refused — show why, right where they clicked.
+    const cell = cellOf(state.grid, point.x, point.y)
+    const at = cellCenter(state.grid, cell.cx, cell.cy)
+    spawnDenied(at, state.log[state.log.length - 1], state.map.gridScale)
+    playUi('denied')
+    requestDraw()
+  }
 }
 
 // ---- rendering ------------------------------------------------------------
@@ -963,17 +974,50 @@ const drawDoorStates = (s: SoloState): void => {
   }
 }
 
-const drawMoveRing = (s: SoloState): void => {
-  const actor = activeEntity(s)
-  if (!actor || actor.faction !== 'pc' || s.moveRemainingPx <= 1) return
-  const at = positionOf(actor)
+// Which floor cells the active PC can actually move to this turn: in budget, in
+// their own line of sight, on floor, and unoccupied — exactly the moves the
+// reducer accepts. Recomputed per action (cheap: one visibility polygon + a small
+// cell sweep), cached for the render loop.
+const computeReachable = (): void => {
+  reachable = []
+  if (!state || busy || state.phase.t !== 'playerTurn') return
+  const actor = activeEntity(state)
+  if (!actor || actor.faction !== 'pc' || !isActive(actor)) return
+  const gs = state.grid.gridScale
+  const budget = state.moveRemainingPx
+  if (budget < gs * 0.4) return
+  const poly = visibilityPolygon(actor.x, actor.y, state.map.width, state.map.height, state.sightRadius, state.map.occluders, state.doorStates)
+  if (poly.length < 3) return
+  const blocked = new Set<string>()
+  for (const e of state.entities) {
+    if (e.id === actor.id || isDead(e)) continue
+    const c = cellOf(state.grid, e.x, e.y)
+    blocked.add(`${c.cx},${c.cy}`)
+  }
+  for (const prop of state.props) {
+    const c = cellOf(state.grid, prop.x, prop.y)
+    blocked.add(`${c.cx},${c.cy}`)
+  }
+  const ac = cellOf(state.grid, actor.x, actor.y)
+  const reach = Math.ceil(budget / gs) + 1
+  for (let cy = ac.cy - reach; cy <= ac.cy + reach; cy += 1) {
+    for (let cx = ac.cx - reach; cx <= ac.cx + reach; cx += 1) {
+      if (cx === ac.cx && cy === ac.cy) continue
+      if (!isFloor(state.grid, cx, cy) || blocked.has(`${cx},${cy}`)) continue
+      const c = cellCenter(state.grid, cx, cy)
+      if (Math.hypot(c.x - actor.x, c.y - actor.y) > budget + 0.5) continue
+      if (!pointInPolygon({x: c.x, y: c.y}, poly)) continue
+      reachable.push({cx, cy})
+    }
+  }
+}
+
+const drawReachable = (s: SoloState): void => {
+  if (reachable.length === 0) return
+  const gs = s.grid.gridScale
   ctx.save()
-  ctx.strokeStyle = 'rgba(57, 255, 20, 0.55)'
-  ctx.lineWidth = 2
-  ctx.setLineDash([8, 7])
-  ctx.beginPath()
-  ctx.arc(at.x, at.y, s.moveRemainingPx, 0, Math.PI * 2)
-  ctx.stroke()
+  ctx.fillStyle = 'rgba(57, 255, 20, 0.13)'
+  for (const {cx, cy} of reachable) ctx.fillRect(cx * gs + 1, cy * gs + 1, gs - 2, gs - 2)
   ctx.restore()
 }
 
@@ -1100,7 +1144,7 @@ const draw = (): void => {
   if (showGrid) drawFloorDebug(s)
   drawFog(s)
   drawDoorStates(s)
-  drawMoveRing(s)
+  drawReachable(s)
 
   for (const item of s.ground) {
     if (visibleToSquad(s, item.x, item.y)) drawGroundItem(s, item)
@@ -1310,6 +1354,7 @@ const renderPanel = (): void => {
     requestDraw()
   })
   updateEndFab()
+  computeReachable()
 }
 
 // ---- mount ----------------------------------------------------------------
