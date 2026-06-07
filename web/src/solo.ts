@@ -25,7 +25,7 @@ import {
 import {orderByInitiative, pointInPolygon} from '../../core/rules'
 import {PARTY} from './solo/characters'
 import {MONSTERS} from './solo/monsters'
-import {weaponById} from './solo/gear'
+import {ARMORS, weaponById} from './solo/gear'
 import {rangeBandFor} from './solo/combat'
 import {decideMonster} from './solo/ai'
 import {createDiceRoller, type DiceRoller} from '@rgilks/cepheus-dice'
@@ -1182,9 +1182,27 @@ const draw = (): void => {
 const escapeHtml = (text: string): string =>
   text.replace(/[&<>]/g, (c) => (c === '&' ? '&amp;' : c === '<' ? '&lt;' : '&gt;'))
 
+// --- Traveller-style character read-outs for the rail --------------------
+const hexDigit = (n: number): string => Math.max(0, Math.round(n)).toString(16).toUpperCase()
+// UPP from the three physical characteristics we model (STR DEX END), in hex —
+// reflects current values, so wounds show up in the profile.
+const uppOf = (e: Entity): string => `${hexDigit(e.stats.str)}${hexDigit(e.stats.dex)}${hexDigit(e.stats.end)}`
+const skillsOf = (e: Entity): string =>
+  Object.entries(e.skills)
+    .sort((a, b) => b[1] - a[1])
+    .map(([name, level]) => `${name}-${level}`)
+    .join(', ') || 'no skills'
+const gearOf = (e: Entity): string => {
+  const w = weaponById(e.weaponId)
+  const ammo = w.magazine !== undefined ? ` ${e.loadedRounds}/${w.magazine}` : ''
+  const armour = e.armorId ? `${ARMORS[e.armorId]?.name ?? '—'} AR${ARMORS[e.armorId]?.ar ?? 0}` : 'unarmoured'
+  return `${w.name}${ammo} · ${armour}`
+}
+
 // The initiative rail: every combatant in turn order — the squad (always) plus
 // living enemies the squad can currently see (hidden foes stay off the list, in
-// keeping with the board's fog).
+// keeping with the board's fog). Squad rows carry a Traveller-style read-out: UPP
+// (STR DEX END in hex), skills, and the weapon/armour they carry.
 const combatantRailHtml = (s: SoloState): string =>
   s.entities
     .filter((e) => e.faction === 'pc' || (!isDead(e) && visibleToSquad(s, e.x, e.y)))
@@ -1195,10 +1213,16 @@ const combatantRailHtml = (s: SoloState): string =>
       const selected = e.id === selectedId ? ' is-selected' : ''
       const condition = isDead(e) ? ' · KIA' : isDown(e) ? ' · DOWN' : ''
       const hp = vitalityRatio(e)
+      const meta =
+        e.faction === 'pc'
+          ? `<div class="solo-meta"><span class="solo-upp" title="STR DEX END (hex)">UPP ${uppOf(e)}</span> · ${escapeHtml(skillsOf(e))}</div>
+             <div class="solo-meta">${escapeHtml(gearOf(e))}</div>`
+          : ''
       return `<li class="solo-combatant${foe}${active}${selected}" data-select="${e.id}">
         <img class="solo-combatant-portrait" src="${def?.portrait ?? ''}" alt="" />
         <div class="solo-combatant-main">
           <span class="solo-combatant-label">${e.label}${condition}</span>
+          ${meta}
           <div class="solo-bar"><div class="solo-bar-fill" style="width:${Math.round(hp * 100)}%;background:${healthColor(hp)}"></div></div>
         </div>
         <span class="solo-combatant-score">${e.initiative ?? '—'}</span>
