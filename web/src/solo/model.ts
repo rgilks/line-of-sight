@@ -43,6 +43,8 @@ export type Entity = {
   armorId: string | null
   inventory: ItemStack[]
   loadedRounds: number // rounds currently in the equipped ranged weapon
+  /** Per-round movement in metres; defaults to the Cepheus 6 m. Monsters vary. */
+  moveMeters?: number
   // Combat bookkeeping.
   initiative: number | null
   order: number // stable join index; ties in initiative break by this
@@ -94,6 +96,8 @@ export type SoloState = {
   props: Prop[] // pushable crates / barricade material
   turnPtr: number
   round: number
+  wave: number // current wave number (1-based)
+  wavesTotal: number // survive this many waves to win
   moveRemainingPx: number // movement budget left for the active entity this turn
   actionUsed: boolean // the active entity has spent its one significant action
   phase: GamePhase
@@ -109,6 +113,7 @@ export type Action =
   | {t: 'PickUp'; groundItemId: string}
   | {t: 'Drop'; stackIndex: number}
   | {t: 'PushProp'; propId: string}
+  | {t: 'AddWave'; monsters: Entity[]}
   | {t: 'EndTurn'}
 
 export const activeEntity = (state: SoloState): Entity | undefined => state.entities[state.turnPtr]
@@ -123,6 +128,6 @@ export const livingOf = (state: SoloState, faction: Faction): Entity[] =>
 export const withinReach = (a: Entity, b: Entity, gridScale: number, squares = 1.6): boolean =>
   Math.hypot(a.x - b.x, a.y - b.y) <= squares * gridScale
 
-/** Per-turn movement budget in board pixels (Cepheus 6 m ÷ 1.5 m/square × gridScale). */
-export const moveBudgetPx = (gridScale: number): number =>
-  (CEPHEUS_DEFAULT_MOVE_METERS / CEPHEUS_METERS_PER_SQUARE) * gridScale
+/** Per-turn movement budget in board pixels (metres ÷ 1.5 m/square × gridScale). */
+export const moveBudgetPx = (gridScale: number, moveMeters: number = CEPHEUS_DEFAULT_MOVE_METERS): number =>
+  (moveMeters / CEPHEUS_METERS_PER_SQUARE) * gridScale

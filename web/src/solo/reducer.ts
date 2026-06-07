@@ -3,13 +3,14 @@
 // pass a seeded rng to replay a fight deterministically. Animation/timing lives in
 // the DOM shell (solo.ts), never here.
 import {distanceToOccluder, doorReachForGrid, visibilityPolygon} from '../../../core/los'
-import {pointInPolygon} from '../../../core/rules'
-import type {Rng} from '../../../core/dice'
+import {orderByInitiative, pointInPolygon} from '../../../core/rules'
+import {roll2D6, type Rng} from '../../../core/dice'
 import {applyDamage, applyHeal, resolveAttack, resolveFirstAid} from './combat'
 import {weaponById} from './gear'
 import {cellCenter, cellOf, isFloor} from './grid'
 import {
   activeEntity,
+  dexDm,
   entityById,
   isActive,
   isDead,
@@ -283,9 +284,35 @@ const applyEndTurn = (state: SoloState): SoloState => {
     ...state,
     turnPtr: ptr,
     round,
-    moveRemainingPx: moveBudgetPx(state.grid.gridScale),
+    moveRemainingPx: moveBudgetPx(state.grid.gridScale, state.entities[ptr]?.moveMeters),
     actionUsed: false
   })
+}
+
+// A fresh wave boards: add the monsters, re-roll initiative for everyone, and
+// hand the turn to the first living PC.
+const applyAddWave = (state: SoloState, monsters: Entity[], rng: Rng): SoloState => {
+  const rolled = [...state.entities, ...monsters].map((entity) => {
+    const [a, b] = roll2D6(rng)
+    return {...entity, initiative: a + b + dexDm(entity)}
+  })
+  const ordered = orderByInitiative(rolled)
+  const firstPc = Math.max(
+    0,
+    ordered.findIndex((entity) => entity.faction === 'pc' && isActive(entity))
+  )
+  return log(
+    {
+      ...state,
+      entities: ordered,
+      wave: state.wave + 1,
+      round: state.round + 1,
+      turnPtr: firstPc,
+      moveRemainingPx: moveBudgetPx(state.grid.gridScale, ordered[firstPc]?.moveMeters),
+      actionUsed: false
+    },
+    `Wave ${state.wave + 1} boards!`
+  )
 }
 
 export const reduce = (state: SoloState, action: Action, rng: Rng = Math.random): SoloState => {
@@ -306,6 +333,8 @@ export const reduce = (state: SoloState, action: Action, rng: Rng = Math.random)
       return applyDrop(state, action.stackIndex)
     case 'PushProp':
       return applyPush(state, action.propId)
+    case 'AddWave':
+      return applyAddWave(state, action.monsters, rng)
     case 'EndTurn':
       return applyEndTurn(state)
   }

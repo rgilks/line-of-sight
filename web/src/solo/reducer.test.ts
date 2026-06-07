@@ -51,6 +51,8 @@ const makeState = (entities: Entity[], occluders: Occluder[] = []): SoloState =>
     props: [],
     turnPtr: 0,
     round: 1,
+    wave: 1,
+    wavesTotal: 3,
     moveRemainingPx: moveBudgetPx(grid.gridScale),
     actionUsed: false,
     phase: {t: 'playerTurn'},

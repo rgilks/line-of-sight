@@ -27,6 +27,7 @@ import {PARTY} from './solo/characters'
 import {MONSTERS} from './solo/monsters'
 import {weaponById} from './solo/gear'
 import {rangeBandFor} from './solo/combat'
+import {decideMonster} from './solo/ai'
 import {
   activeEntity,
   dexDm,
@@ -47,6 +48,7 @@ import {reduce} from './solo/reducer'
 import './solo.css'
 
 const SIGHT_RADIUS = 700
+const WAVES_TOTAL = 3
 
 preloadCounterPortraits()
 for (const image of counterPortraits.values()) image.addEventListener('load', requestDraw)
@@ -79,10 +81,25 @@ const MOVE_EASE_MS = 320
 type Anim = {fromX: number; fromY: number; toX: number; toY: number; start: number}
 const renderPos = new Map<string, Point>()
 const anim = new Map<string, Anim>()
+const tweenWaiters = new Map<string, Array<() => void>>()
 let rafId = 0
+let busy = false // true while the monster AI is taking its turns (locks player input)
 
 const now = (): number => performance.now()
 const positionOf = (entity: Entity): Point => renderPos.get(entity.id) ?? {x: entity.x, y: entity.y}
+const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
+
+// Resolves once entity `id`'s in-flight glide finishes (or immediately if none).
+const waitTween = (id: string): Promise<void> =>
+  new Promise((resolve) => {
+    if (!anim.has(id)) {
+      resolve()
+      return
+    }
+    const waiters = tweenWaiters.get(id) ?? []
+    waiters.push(resolve)
+    tweenWaiters.set(id, waiters)
+  })
 
 const startEase = (id: string, from: Point, to: Point): void => {
   anim.set(id, {fromX: from.x, fromY: from.y, toX: to.x, toY: to.y, start: now()})
@@ -95,8 +112,16 @@ const stepRenderPos = (t: number): boolean => {
     const progress = Math.min(1, (t - a.start) / MOVE_EASE_MS)
     const eased = 1 - (1 - progress) ** 3
     renderPos.set(id, {x: a.fromX + (a.toX - a.fromX) * eased, y: a.fromY + (a.toY - a.fromY) * eased})
-    if (progress >= 1) anim.delete(id)
-    else moving = true
+    if (progress >= 1) {
+      anim.delete(id)
+      const waiters = tweenWaiters.get(id)
+      if (waiters) {
+        tweenWaiters.delete(id)
+        for (const resolve of waiters) resolve()
+      }
+    } else {
+      moving = true
+    }
   }
   return moving
 }
@@ -218,32 +243,51 @@ const monsterEntity = (block: (typeof MONSTERS)[number], x: number, y: number): 
     armorId: block.armorId,
     inventory: [],
     loadedRounds: 0,
+    moveMeters: block.moveMeters,
     initiative: null,
     order: 100 + monsterCounter,
     behaviour: block.behaviour
   }
 }
 
-// Phase 3B: a few stationary aliens to shoot, in rooms NEAR the squad (skipping
-// their start room) so a door away there's something to engage. Phase 4 replaces
-// this with airlock wave spawning + AI that hunts the squad.
-const spawnMonsters = (map: GeneratedMap, grid: WalkGrid): Entity[] => {
-  const mid = {x: map.width / 2, y: map.height / 2}
-  const near = [...map.rooms]
-    .filter((room) => room.w * room.h >= 4)
-    .sort((a, b) => {
-      const ca = roomCenterPx(map, a)
-      const cb = roomCenterPx(map, b)
-      return Math.hypot(ca.x - mid.x, ca.y - mid.y) - Math.hypot(cb.x - mid.x, cb.y - mid.y)
-    })
-    .slice(1) // skip the squad's start room (nearest to centre)
+// The interior floor cell just inside each hull airlock — where boarding waves
+// appear. Marches inward from each airlock door (ids 'airlock-n/s/w/e…').
+const airlockSpawnCells = (map: GeneratedMap, grid: WalkGrid): Cell[] => {
+  const cells: Cell[] = []
+  const seen = new Set<string>()
+  for (const o of map.occluders) {
+    if (o.type !== 'door' || !o.id.startsWith('airlock')) continue
+    const dirChar = o.id.charAt('airlock-'.length)
+    const dir =
+      dirChar === 'n' ? {x: 0, y: 1} : dirChar === 's' ? {x: 0, y: -1} : dirChar === 'w' ? {x: 1, y: 0} : {x: -1, y: 0}
+    const midX = (o.x1 + o.x2) / 2
+    const midY = (o.y1 + o.y2) / 2
+    for (let k = 1; k <= 8; k += 1) {
+      const c = cellOf(grid, midX + dir.x * k * grid.gridScale, midY + dir.y * k * grid.gridScale)
+      if (isFloor(grid, c.cx, c.cy)) {
+        const key = `${c.cx},${c.cy}`
+        if (!seen.has(key)) {
+          seen.add(key)
+          cells.push(c)
+        }
+        break
+      }
+    }
+  }
+  return cells
+}
+
+// Build wave `n`: aliens at the airlocks (more, and a heavier mix, each wave).
+// They path inward toward the squad on their turns.
+const buildWave = (map: GeneratedMap, grid: WalkGrid, n: number): Entity[] => {
+  const cells = airlockSpawnCells(map, grid)
+  if (cells.length === 0) return []
+  const count = Math.min(2 + n, 6, cells.length)
   const out: Entity[] = []
-  for (let i = 0; i < MONSTERS.length && i < near.length; i += 1) {
-    const center = roomCenterPx(map, near[i])
-    const start = cellOf(grid, center.x, center.y)
-    const cell = nearestFloorCells(grid, start, 1)[0] ?? start
+  for (let i = 0; i < count; i += 1) {
+    const cell = cells[i % cells.length]
     const at = cellCenter(grid, cell.cx, cell.cy)
-    out.push(monsterEntity(MONSTERS[i], at.x, at.y))
+    out.push(monsterEntity(MONSTERS[(i + n) % MONSTERS.length], at.x, at.y))
   }
   return out
 }
@@ -320,24 +364,31 @@ const newGame = (seed = Math.floor(Math.random() * 100000)): void => {
   const map = generateMap(defaultSpec(seed))
   const grid = buildWalkGrid(map)
   monsterCounter = 0
-  const entities = rollInitiative([...spawnParty(map, grid), ...spawnMonsters(map, grid)])
+  const entities = rollInitiative([...spawnParty(map, grid), ...buildWave(map, grid, 1)])
   const firstPc = entities.findIndex((entity) => entity.faction === 'pc' && isActive(entity))
   selectedId = null
+  busy = false
   state = {
     seed,
     map,
     grid,
-    doorStates: {},
+    // Doors open at start so the horde can roam; the squad closes a door (or shoves
+    // a crate into it) to wall monsters out.
+    doorStates: Object.fromEntries(
+      map.occluders.filter((o) => o.type === 'door').map((d) => [d.id, {open: true}])
+    ),
     sightRadius: SIGHT_RADIUS,
     entities,
     ground: scatterLoot(map, grid),
     props: makeProps(map, grid, entities),
     turnPtr: firstPc >= 0 ? firstPc : 0,
     round: 1,
+    wave: 1,
+    wavesTotal: WAVES_TOTAL,
     moveRemainingPx: moveBudgetPx(grid.gridScale),
     actionUsed: false,
     phase: {t: 'playerTurn'},
-    log: []
+    log: ['Wave 1 boards. Hold the line.']
   }
   renderPos.clear()
   anim.clear()
@@ -350,22 +401,11 @@ const newGame = (seed = Math.floor(Math.random() * 100000)): void => {
   requestDraw()
 }
 
-// Phase 3B: monsters are stationary targets with no AI yet, so auto-skip their
-// turns. Phase 4 replaces this with the AI driver (path + attack via tweens).
-const advancePastMonsters = (): void => {
-  let guard = 0
-  while (state && state.phase.t === 'playerTurn' && activeEntity(state)?.faction === 'monster' && guard < 64) {
-    state = reduce(state, {t: 'EndTurn'})
-    guard += 1
-  }
-}
-
 // ---- dispatch: reduce + animate the result --------------------------------
 const dispatch = (action: Parameters<typeof reduce>[1]): void => {
   if (!state) return
   const before = new Map(state.entities.map((entity) => [entity.id, {x: entity.x, y: entity.y}]))
   state = reduce(state, action)
-  advancePastMonsters()
   for (const entity of state.entities) {
     const old = before.get(entity.id)
     if (old && (old.x !== entity.x || old.y !== entity.y)) {
@@ -374,6 +414,61 @@ const dispatch = (action: Parameters<typeof reduce>[1]): void => {
   }
   renderPanel()
   requestDraw()
+}
+
+// When the squad has cleared every monster, spawn the next wave at the airlocks —
+// or, if the final wave is down, win.
+const afterTurnUpkeep = (): void => {
+  if (!state || state.phase.t !== 'playerTurn') return
+  if (state.entities.some((entity) => entity.faction === 'monster' && !isDead(entity))) return
+  if (state.wave >= state.wavesTotal) {
+    state = {...state, phase: {t: 'won'}}
+    renderPanel()
+    requestDraw()
+    return
+  }
+  dispatch({t: 'AddWave', monsters: buildWave(state.map, state.grid, state.wave + 1)})
+}
+
+// Run monster turns to completion: each plans (decideMonster), glides its steps,
+// then attacks. Player input is locked meanwhile.
+const runMonsters = async (): Promise<void> => {
+  busy = true
+  renderPanel()
+  afterTurnUpkeep()
+  let guard = 0
+  while (state && state.phase.t === 'playerTurn' && activeEntity(state)?.faction === 'monster' && guard < 400) {
+    guard += 1
+    const id = (activeEntity(state) as Entity).id
+    const plan = decideMonster(state, id)
+    for (const cell of plan.moves) {
+      if (!state) break
+      dispatch({t: 'Move', to: cellCenter(state.grid, cell.cx, cell.cy)})
+      await waitTween(id)
+    }
+    if (state && state.phase.t === 'playerTurn' && plan.attackTargetId) {
+      dispatch({t: 'Attack', targetId: plan.attackTargetId})
+      await delay(220)
+    }
+    if (state) dispatch({t: 'EndTurn'})
+    afterTurnUpkeep()
+  }
+  busy = false
+  renderPanel()
+  requestDraw()
+}
+
+// A player action during their own turn (movement, an action, a door, a push).
+const playerAct = (action: Parameters<typeof reduce>[1]): void => {
+  if (busy || !state || state.phase.t !== 'playerTurn') return
+  dispatch(action)
+}
+
+// End the player's turn, then hand off to the monster AI.
+const endTurn = (): void => {
+  if (busy || !state || state.phase.t !== 'playerTurn') return
+  dispatch({t: 'EndTurn'})
+  void runMonsters()
 }
 
 // ---- camera: zoom (wheel / pinch) + pan (drag / scroll) -------------------
@@ -584,13 +679,13 @@ const entityHitAt = (point: Point): Entity | null => {
 // Act at a screen point: toggle an adjacent door, select a tapped entity (target /
 // patient), else move the active PC there.
 function actAt(clientX: number, clientY: number): void {
-  if (!state) return
+  if (!state || busy) return
   const actor = activeEntity(state)
   if (!actor || actor.faction !== 'pc') return
   const point = boardPointFromXY(clientX, clientY)
   const doorId = doorHitAt(point)
   if (doorId) {
-    dispatch({t: 'ToggleDoor', doorId})
+    playerAct({t: 'ToggleDoor', doorId})
     return
   }
   const hit = entityHitAt(point)
@@ -600,7 +695,7 @@ function actAt(clientX: number, clientY: number): void {
     requestDraw()
     return
   }
-  dispatch({t: 'Move', to: point})
+  playerAct({t: 'Move', to: point})
 }
 
 // Mouse "act" is a plain left click (touch is handled by the touch listeners;
@@ -662,16 +757,18 @@ const drawFog = (s: SoloState): void => {
 const drawDoorStates = (s: SoloState): void => {
   const reach = doorReachForGrid(s.grid.gridScale)
   const actor = activeEntity(s)
+  // Only hint doors the active PC can actually reach (open = solid "close me",
+  // closed = dashed "open me"); far doors just read as gaps/lines in the deck art.
   for (const occluder of s.map.occluders) {
     if (occluder.type !== 'door') continue
     const door = occluder as DoorOccluder
+    const reachable = actor != null && actor.faction === 'pc' && distanceToOccluder({x: actor.x, y: actor.y}, door) <= reach
+    if (!reachable) continue
     const open = s.doorStates[door.id]?.open ?? false
-    const reachable = actor != null && distanceToOccluder({x: actor.x, y: actor.y}, door) <= reach
-    if (!open && !reachable) continue
     ctx.save()
     ctx.lineCap = 'round'
-    ctx.strokeStyle = open ? 'rgba(57, 255, 20, 0.9)' : 'rgba(57, 255, 20, 0.5)'
-    ctx.lineWidth = open ? 9 : 5
+    ctx.strokeStyle = open ? 'rgba(57, 255, 20, 0.85)' : 'rgba(255, 159, 28, 0.85)'
+    ctx.lineWidth = open ? 8 : 6
     if (!open) ctx.setLineDash([6, 5])
     ctx.beginPath()
     ctx.moveTo(door.x1, door.y1)
@@ -897,7 +994,13 @@ const renderPanel = (): void => {
 
   const ammo = actor && weapon?.magazine !== undefined ? `${actor.loadedRounds}/${weapon.magazine}` : '—'
   const recentLog = s.log.slice(-6).map(escapeHtml).join('<br/>')
-  const lost = s.phase.t === 'lost'
+  const over = s.phase.t === 'lost' || s.phase.t === 'won'
+  const overText = s.phase.t === 'won' ? 'Survived — the deck is clear.' : 'Squad lost.'
+  const turnLine = busy
+    ? 'Hostiles acting…'
+    : actor
+      ? `${actor.label}'s turn · ${squares} sq · ${weapon?.name ?? ''} ${ammo}`
+      : ''
 
   panel.innerHTML = `
     <header class="solo-brand">
@@ -905,7 +1008,7 @@ const renderPanel = (): void => {
       <div class="solo-brand-text">
         <span class="solo-brand-eyebrow">CEPHEUS</span>
         <span class="solo-brand-tool">Survive the Horde</span>
-        <span class="solo-brand-role">Round ${s.round} · seed ${s.seed}</span>
+        <span class="solo-brand-role">Round ${s.round} · Wave ${s.wave}/${s.wavesTotal} · seed ${s.seed}</span>
       </div>
     </header>
     <section class="solo-section">
@@ -913,11 +1016,11 @@ const renderPanel = (): void => {
       <ol class="solo-combat-list">${squadRailHtml(s)}</ol>
     </section>
     ${
-      lost
-        ? `<section class="solo-section"><div class="solo-banner">Squad lost.</div>
+      over
+        ? `<section class="solo-section"><div class="solo-banner${s.phase.t === 'won' ? ' is-won' : ''}">${overText}</div>
            <button id="solo-new" class="solo-button">New game</button></section>`
         : `<section class="solo-section">
-      <div class="solo-turn">${actor ? `${actor.label}'s turn · ${squares} sq · ${weapon?.name ?? ''} ${ammo}` : ''}</div>
+      <div class="solo-turn">${turnLine}</div>
       ${targetNote ? `<div class="solo-target">${escapeHtml(targetNote)}</div>` : ''}
       <div class="solo-actions">
         ${btn('solo-attack', attackLabel, canAttack)}
@@ -948,19 +1051,19 @@ const renderPanel = (): void => {
     })
   }
   panel.querySelector<HTMLButtonElement>('#solo-attack')?.addEventListener('click', () => {
-    if (enemy) dispatch({t: 'Attack', targetId: enemy.id})
+    if (enemy) playerAct({t: 'Attack', targetId: enemy.id})
   })
-  panel.querySelector<HTMLButtonElement>('#solo-reload')?.addEventListener('click', () => dispatch({t: 'Reload'}))
+  panel.querySelector<HTMLButtonElement>('#solo-reload')?.addEventListener('click', () => playerAct({t: 'Reload'}))
   panel.querySelector<HTMLButtonElement>('#solo-medkit')?.addEventListener('click', () => {
-    if (patient) dispatch({t: 'UseMedkit', targetId: patient.id})
+    if (patient) playerAct({t: 'UseMedkit', targetId: patient.id})
   })
   panel.querySelector<HTMLButtonElement>('#solo-pickup')?.addEventListener('click', () => {
-    if (loot) dispatch({t: 'PickUp', groundItemId: loot.id})
+    if (loot) playerAct({t: 'PickUp', groundItemId: loot.id})
   })
   panel.querySelector<HTMLButtonElement>('#solo-push')?.addEventListener('click', () => {
-    if (pushable) dispatch({t: 'PushProp', propId: pushable.id})
+    if (pushable) playerAct({t: 'PushProp', propId: pushable.id})
   })
-  panel.querySelector<HTMLButtonElement>('#solo-end')?.addEventListener('click', () => dispatch({t: 'EndTurn'}))
+  panel.querySelector<HTMLButtonElement>('#solo-end')?.addEventListener('click', () => endTurn())
   panel.querySelector<HTMLButtonElement>('#solo-new')?.addEventListener('click', () => newGame())
   panel.querySelector<HTMLInputElement>('#solo-grid')?.addEventListener('change', (event) => {
     showGrid = (event.target as HTMLInputElement).checked
@@ -1019,6 +1122,30 @@ if (import.meta.env.DEV) {
     },
     select: (id: string | null) => {
       selectedId = id
+      renderPanel()
+      requestDraw()
+    },
+    endTurn: async () => {
+      endTurn()
+      // give the async monster driver time to finish (tweens + beats)
+      for (let i = 0; i < 200 && busy; i += 1) await delay(30)
+    },
+    // Fast-forward `n` turns synchronously (no tweens): PCs idle, monsters use the
+    // real AI + reducer, waves spawn on clear. For headless verification only.
+    simulate: (n: number) => {
+      for (let k = 0; k < n && state && state.phase.t === 'playerTurn'; k += 1) {
+        const actor = activeEntity(state)
+        if (actor?.faction === 'monster') {
+          const plan = decideMonster(state, actor.id)
+          for (const cell of plan.moves) state = reduce(state, {t: 'Move', to: cellCenter(state.grid, cell.cx, cell.cy)})
+          if (plan.attackTargetId) state = reduce(state, {t: 'Attack', targetId: plan.attackTargetId})
+        }
+        state = reduce(state, {t: 'EndTurn'})
+        if (state.phase.t === 'playerTurn' && !state.entities.some((e) => e.faction === 'monster' && !isDead(e))) {
+          if (state.wave >= state.wavesTotal) state = {...state, phase: {t: 'won'}}
+          else state = reduce(state, {t: 'AddWave', monsters: buildWave(state.map, state.grid, state.wave + 1)})
+        }
+      }
       renderPanel()
       requestDraw()
     }

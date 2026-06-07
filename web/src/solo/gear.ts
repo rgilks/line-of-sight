@@ -28,7 +28,8 @@ export const WEAPONS: Record<string, Weapon> = {
     category: 'melee',
     skill: 'Melee Combat',
     damage: '2d6',
-    rangeDm: {personal: 0}
+    // Reaches adjacent squares: orthogonal (1.5 m) reads as 'close', diagonal (~2.1 m) too.
+    rangeDm: {personal: 0, close: 0}
   },
   autopistol: {
     id: 'autopistol',
@@ -64,7 +65,7 @@ export const WEAPONS: Record<string, Weapon> = {
     category: 'melee',
     skill: 'Melee Combat',
     damage: '2d6',
-    rangeDm: {personal: 0}
+    rangeDm: {personal: 0, close: 0}
   },
   maw: {
     id: 'maw',
@@ -72,7 +73,7 @@ export const WEAPONS: Record<string, Weapon> = {
     category: 'melee',
     skill: 'Melee Combat',
     damage: '3d6',
-    rangeDm: {personal: 0}
+    rangeDm: {personal: 0, close: 0}
   },
   spit: {
     id: 'spit',
