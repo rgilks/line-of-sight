@@ -1135,7 +1135,10 @@ const mount = (): void => {
   diceOverlay = document.createElement('div')
   diceOverlay.id = 'solo-dice'
   boardViewport.appendChild(diceOverlay)
-  diceRoller = createDiceRoller(diceOverlay, {colors: {body: '#ecd5bb', pip: '#1c1c1c'}})
+  diceRoller = createDiceRoller(diceOverlay, {
+    colors: {body: '#ecd5bb', pip: '#222222'},
+    modelUrl: '/gltf/dice.gltf'
+  })
 
   const seedParam = new URLSearchParams(location.search).get('seed')
   const seed = seedParam !== null && Number.isFinite(Number(seedParam)) ? Number(seedParam) : undefined
