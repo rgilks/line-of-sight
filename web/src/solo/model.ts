@@ -81,6 +81,18 @@ export const isActive = (entity: Entity): boolean => !isDead(entity) && !isDown(
 
 export type DoorStates = Record<string, {open: boolean}>
 
+// The last resolved attack, recorded by the reducer purely so the DOM shell can
+// fire the matching sound + projectile + impact effect. A new object is created
+// per shot, so the driver can detect a fresh attack by reference identity.
+export type AttackFx = {
+  attackerId: string
+  targetId: string
+  weaponId: string
+  hit: boolean
+  damage: number
+  killed: boolean
+}
+
 export type GamePhase = {t: 'playerTurn'} | {t: 'won'} | {t: 'lost'}
 
 // The whole single-player game state. Pure data; the reducer maps
@@ -102,6 +114,7 @@ export type SoloState = {
   actionUsed: boolean // the active entity has spent its one significant action
   phase: GamePhase
   log: string[]
+  lastAttack?: AttackFx // most recent shot/strike, for attack-effect playback (presentation only)
 }
 
 export type Action =

@@ -46,6 +46,8 @@ import {
 } from './solo/model'
 import {buildWalkGrid, cellCenter, cellOf, isFloor, type Cell, type WalkGrid} from './solo/grid'
 import {reduce} from './solo/reducer'
+import {clearEffects, drawEffects, effectsActive, primeAudio, setFxTimeScale, spawnAttackFx} from './solo/fx'
+import type {AttackFx} from './solo/model'
 import './solo.css'
 
 const SIGHT_RADIUS = 700
@@ -150,7 +152,7 @@ const frame = (t: number): void => {
   rafId = 0
   const moving = stepRenderPos(t)
   draw()
-  if (moving) ensureRaf()
+  if (moving || effectsActive(t)) ensureRaf()
 }
 
 // ---- offscreen fog layers (sized per map) --------------------------------
@@ -404,6 +406,7 @@ const newGame = (seed = Math.floor(Math.random() * 100000)): void => {
   }
   renderPos.clear()
   anim.clear()
+  clearEffects()
   for (const entity of entities) renderPos.set(entity.id, {x: entity.x, y: entity.y})
   canvas.width = map.width
   canvas.height = map.height
@@ -459,8 +462,9 @@ const runMonsters = async (): Promise<void> => {
       await waitTween(id)
     }
     if (state && state.phase.t === 'playerTurn' && plan.attackTargetId) {
+      const prevFx = state.lastAttack
       dispatch({t: 'Attack', targetId: plan.attackTargetId})
-      await delay(220)
+      await delay(fireAttackFx(prevFx) ? 560 : 220)
     }
     if (state) dispatch({t: 'EndTurn'})
     afterTurnUpkeep()
@@ -492,7 +496,28 @@ const hideDice = (): void => {
   diceOverlay.style.display = 'none'
 }
 
-// An attack: roll the 3D dice, then resolve the to-hit with the settled faces.
+// If the just-dispatched action resolved a fresh attack (a new lastAttack object),
+// play its weapon sound + projectile/strike + impact effect. Returns whether it fired.
+const fireAttackFx = (prev: AttackFx | undefined): boolean => {
+  const fa = state?.lastAttack
+  if (!state || !fa || fa === prev) return false
+  const attacker = entityById(state, fa.attackerId)
+  const target = entityById(state, fa.targetId)
+  if (!attacker || !target) return false
+  spawnAttackFx({
+    from: positionOf(attacker),
+    to: positionOf(target),
+    weapon: weaponById(fa.weaponId),
+    hit: fa.hit,
+    targetFaction: target.faction,
+    gridScale: state.map.gridScale
+  })
+  requestDraw()
+  return true
+}
+
+// An attack: roll the 3D dice, resolve the to-hit with the settled faces, then —
+// once the dice clear — fire the weapon (sound + tracer/strike + impact burst).
 const onAttack = async (targetId: string): Promise<void> => {
   if (busy || !state || state.phase.t !== 'playerTurn') return
   const actor = activeEntity(state)
@@ -500,10 +525,12 @@ const onAttack = async (targetId: string): Promise<void> => {
   busy = true
   renderPanel()
   showDice()
+  const prevFx = state.lastAttack
   const {faces} = await diceRoller.roll(2)
   dispatch({t: 'Attack', targetId}, queuedFaces([...faces]))
-  await delay(800)
+  await delay(550)
   hideDice()
+  if (fireAttackFx(prevFx)) await delay(720)
   busy = false
   renderPanel()
   requestDraw()
@@ -955,6 +982,9 @@ const draw = (): void => {
     )
     if (entity.id === selectedId) drawSelectionRing(at, entity.faction, s.map.gridScale)
   }
+
+  // Combat effects (muzzle flashes, tracers, slashes, impact bursts) on top.
+  drawEffects(ctx)
 }
 
 // ---- panel ----------------------------------------------------------------
@@ -1139,6 +1169,8 @@ const mount = (): void => {
   canvas.addEventListener('touchmove', onTouchMove, {passive: false})
   canvas.addEventListener('touchend', onTouchEnd)
   window.addEventListener('resize', updateCanvasDisplaySize)
+  // Unlock the Web Audio context on the first interaction so weapon sounds play.
+  window.addEventListener('pointerdown', () => primeAudio(), {once: true})
 
   diceOverlay = document.createElement('div')
   diceOverlay.id = 'solo-dice'
@@ -1210,6 +1242,25 @@ if (import.meta.env.DEV) {
       showDice()
       await diceRoller.roll(n)
     },
-    hideDice
+    hideDice,
+    // Slow effects down (or back to 1) for inspection.
+    fxTimeScale: (s = 1) => setFxTimeScale(s),
+    // Preview a weapon's attack effect (sound + projectile/strike + impact) across
+    // the middle of the map, no combat needed (visual tuning only).
+    previewFx: (weaponId = 'autorifle', hit = true) => {
+      if (!state) return
+      const cx = state.map.width / 2
+      const cy = state.map.height / 2
+      const span = state.map.gridScale * 3.5
+      spawnAttackFx({
+        from: {x: cx - span, y: cy},
+        to: {x: cx + span, y: cy},
+        weapon: weaponById(weaponId),
+        hit,
+        targetFaction: 'monster',
+        gridScale: state.map.gridScale
+      })
+      requestDraw()
+    }
   }
 }

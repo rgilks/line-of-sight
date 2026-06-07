@@ -137,7 +137,17 @@ const applyAttack = (state: SoloState, targetId: string, rng: Rng): SoloState =>
   if (after && isDead(after)) lines.push(`${target.label} is killed.`)
   else if (after && isDown(after)) lines.push(`${target.label} is down.`)
 
-  return checkLoss(log({...state, entities, actionUsed: true}, ...lines))
+  // Record the shot so the DOM shell can play the matching sound + visual effect.
+  const lastAttack = {
+    attackerId: actor.id,
+    targetId,
+    weaponId: weapon.id,
+    hit: result.hit,
+    damage: result.damage,
+    killed: !!(after && isDead(after))
+  }
+
+  return checkLoss(log({...state, entities, actionUsed: true, lastAttack}, ...lines))
 }
 
 // --- reload ----------------------------------------------------------------
