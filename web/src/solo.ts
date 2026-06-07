@@ -39,6 +39,7 @@ import {
   type Entity,
   type GroundItem,
   type ItemStack,
+  type Prop,
   type SoloState
 } from './solo/model'
 import {buildWalkGrid, cellCenter, cellOf, isFloor, type Cell, type WalkGrid} from './solo/grid'
@@ -268,6 +269,44 @@ const scatterLoot = (map: GeneratedMap, grid: WalkGrid): GroundItem[] => {
   return out
 }
 
+// Solid, pushable crates: promote the generator's 'crate' furniture (cargo rooms)
+// AND scatter a few loose crates in other rooms so every deck has barricade
+// material. One prop per cell; skips cells a character stands on. Crate
+// decorations are dropped from the rendered map so they don't double-draw.
+const MAX_PROPS = 10
+const makeProps = (map: GeneratedMap, grid: WalkGrid, entities: Entity[]): Prop[] => {
+  const occupied = new Set(
+    entities.map((e) => {
+      const c = cellOf(grid, e.x, e.y)
+      return `${c.cx},${c.cy}`
+    })
+  )
+  const props: Prop[] = []
+  const used = new Set<string>()
+  const tryAdd = (cx: number, cy: number): void => {
+    const key = `${cx},${cy}`
+    if (props.length >= MAX_PROPS || used.has(key) || occupied.has(key) || !isFloor(grid, cx, cy)) return
+    used.add(key)
+    const at = cellCenter(grid, cx, cy)
+    props.push({id: `crate-${props.length}`, x: at.x, y: at.y})
+  }
+
+  // 1. Promote any cargo-room crate furniture.
+  const crates = map.decorations.filter((d) => d.kind === 'crate')
+  map.decorations = map.decorations.filter((d) => d.kind !== 'crate')
+  for (const crate of crates) {
+    tryAdd(Math.floor((crate.x + crate.w / 2) / grid.gridScale), Math.floor((crate.y + crate.h / 2) / grid.gridScale))
+  }
+
+  // 2. Guarantee barricade material: a loose crate near the centre of several rooms.
+  const rooms = [...map.rooms].filter((room) => room.w * room.h >= 4)
+  for (let i = 0; i < rooms.length && props.length < 6; i += 1) {
+    const room = rooms[(i * 5 + 2) % rooms.length]
+    tryAdd(Math.floor(room.x + room.w / 2), Math.floor(room.y + room.h / 2))
+  }
+  return props
+}
+
 const rollInitiative = (entities: Entity[]): Entity[] => {
   for (const entity of entities) {
     const [a, b] = roll2D6()
@@ -292,6 +331,7 @@ const newGame = (seed = Math.floor(Math.random() * 100000)): void => {
     sightRadius: SIGHT_RADIUS,
     entities,
     ground: scatterLoot(map, grid),
+    props: makeProps(map, grid, entities),
     turnPtr: firstPc >= 0 ? firstPc : 0,
     round: 1,
     moveRemainingPx: moveBudgetPx(grid.gridScale),
@@ -715,10 +755,33 @@ const drawTargetingLine = (from: Point, to: Point): void => {
   ctx.restore()
 }
 
+const drawProps = (s: SoloState): void => {
+  const sz = s.map.gridScale * 0.74
+  for (const prop of s.props) {
+    ctx.save()
+    ctx.translate(prop.x, prop.y)
+    ctx.fillStyle = 'rgba(96, 74, 38, 0.92)'
+    ctx.strokeStyle = 'rgba(255, 200, 120, 0.9)'
+    ctx.lineWidth = 2
+    ctx.beginPath()
+    ctx.rect(-sz / 2, -sz / 2, sz, sz)
+    ctx.fill()
+    ctx.stroke()
+    ctx.beginPath()
+    ctx.moveTo(-sz / 2, -sz / 2)
+    ctx.lineTo(sz / 2, sz / 2)
+    ctx.moveTo(sz / 2, -sz / 2)
+    ctx.lineTo(-sz / 2, sz / 2)
+    ctx.stroke()
+    ctx.restore()
+  }
+}
+
 const draw = (): void => {
   if (!state || !ctx) return
   const s = state
   renderMap(ctx, s.map)
+  drawProps(s)
   if (showGrid) drawFloorDebug(s)
   drawFog(s)
   drawDoorStates(s)
@@ -823,6 +886,15 @@ const renderPanel = (): void => {
   const loot = actor ? s.ground.find((g) => Math.hypot(actor.x - g.x, actor.y - g.y) <= 1.6 * s.grid.gridScale) : undefined
   const canPickup = !!actor && isActive(actor) && !s.actionUsed && !!loot
 
+  const pushable = actor
+    ? s.props.find((p) => {
+        const ac = cellOf(s.grid, actor.x, actor.y)
+        const pc = cellOf(s.grid, p.x, p.y)
+        return Math.abs(pc.cx - ac.cx) + Math.abs(pc.cy - ac.cy) === 1
+      })
+    : undefined
+  const canPush = !!actor && isActive(actor) && !s.actionUsed && !!pushable
+
   const ammo = actor && weapon?.magazine !== undefined ? `${actor.loadedRounds}/${weapon.magazine}` : '—'
   const recentLog = s.log.slice(-6).map(escapeHtml).join('<br/>')
   const lost = s.phase.t === 'lost'
@@ -852,6 +924,7 @@ const renderPanel = (): void => {
         ${btn('solo-reload', 'Reload', canReload, true)}
         ${btn('solo-medkit', 'Medkit', canMedkit, true)}
         ${btn('solo-pickup', 'Pick up', canPickup, true)}
+        ${btn('solo-push', 'Push crate', canPush, true)}
       </div>
       <button id="solo-end" class="solo-button">End turn ↻</button>
     </section>
@@ -883,6 +956,9 @@ const renderPanel = (): void => {
   })
   panel.querySelector<HTMLButtonElement>('#solo-pickup')?.addEventListener('click', () => {
     if (loot) dispatch({t: 'PickUp', groundItemId: loot.id})
+  })
+  panel.querySelector<HTMLButtonElement>('#solo-push')?.addEventListener('click', () => {
+    if (pushable) dispatch({t: 'PushProp', propId: pushable.id})
   })
   panel.querySelector<HTMLButtonElement>('#solo-end')?.addEventListener('click', () => dispatch({t: 'EndTurn'}))
   panel.querySelector<HTMLButtonElement>('#solo-new')?.addEventListener('click', () => newGame())

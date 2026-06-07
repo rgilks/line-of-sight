@@ -24,6 +24,9 @@ export type ItemKind = 'ammo' | 'medkit'
 export type ItemStack = {kind: ItemKind; weaponId?: string; count: number}
 // Loot lying on the deck floor until a character picks it up (board pixels).
 export type GroundItem = {id: string; x: number; y: number; stack: ItemStack}
+// A solid, pushable crate occupying one cell. Blocks movement (and Phase-4 monster
+// pathing), so the squad can shove crates into doorways to build barricades.
+export type Prop = {id: string; x: number; y: number}
 
 export type Entity = {
   id: string
@@ -88,6 +91,7 @@ export type SoloState = {
   sightRadius: number
   entities: Entity[] // PCs + monsters, in initiative order
   ground: GroundItem[] // loot on the floor
+  props: Prop[] // pushable crates / barricade material
   turnPtr: number
   round: number
   moveRemainingPx: number // movement budget left for the active entity this turn
@@ -104,6 +108,7 @@ export type Action =
   | {t: 'UseMedkit'; targetId: string}
   | {t: 'PickUp'; groundItemId: string}
   | {t: 'Drop'; stackIndex: number}
+  | {t: 'PushProp'; propId: string}
   | {t: 'EndTurn'}
 
 export const activeEntity = (state: SoloState): Entity | undefined => state.entities[state.turnPtr]

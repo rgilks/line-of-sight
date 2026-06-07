@@ -48,6 +48,7 @@ const makeState = (entities: Entity[], occluders: Occluder[] = []): SoloState =>
     sightRadius: 1000,
     entities,
     ground: [],
+    props: [],
     turnPtr: 0,
     round: 1,
     moveRemainingPx: moveBudgetPx(grid.gridScale),
@@ -153,6 +154,30 @@ describe('solo reducer — combat actions', () => {
     expect(after.loadedRounds).toBe(15)
     expect(after.inventory[0].count).toBe(32) // 45 − 13 taken
     expect(next.actionUsed).toBe(true)
+  })
+})
+
+describe('solo reducer — PushProp', () => {
+  it('shoves an adjacent crate one cell away onto open floor', () => {
+    const actor = pc('a', 2, 2, 0)
+    const state = {...makeState([actor]), props: [{id: 'crate-0', x: (3 + 0.5) * 30, y: (2 + 0.5) * 30}]}
+    const next = reduce(state, {t: 'PushProp', propId: 'crate-0'})
+    expect(next.props[0].x).toBe((4 + 0.5) * 30) // pushed one cell further east
+    expect(next.actionUsed).toBe(true)
+  })
+
+  it('refuses to push a crate against a wall', () => {
+    const actor = pc('a', 7, 7, 0) // by the SE corner of the 1..8 room
+    const state = {...makeState([actor]), props: [{id: 'crate-0', x: (8 + 0.5) * 30, y: (7 + 0.5) * 30}]}
+    const next = reduce(state, {t: 'PushProp', propId: 'crate-0'}) // cell 9 is hull wall
+    expect(next.props[0].x).toBe((8 + 0.5) * 30) // unchanged
+  })
+
+  it('blocks movement onto a crate cell', () => {
+    const actor = pc('a', 2, 2, 0)
+    const state = {...makeState([actor]), props: [{id: 'crate-0', x: (3 + 0.5) * 30, y: (2 + 0.5) * 30}]}
+    const next = reduce(state, {t: 'Move', to: {x: (3 + 0.5) * 30, y: (2 + 0.5) * 30}})
+    expect(next.entities[0].x).toBe((2 + 0.5) * 30) // didn't move onto the crate
   })
 })
 

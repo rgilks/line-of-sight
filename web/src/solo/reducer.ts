@@ -30,12 +30,16 @@ const log = (state: SoloState, ...lines: string[]): SoloState => ({
 
 const cellKey = (cx: number, cy: number): string => `${cx},${cy}`
 
-// Cells occupied by any living entity other than `exclude` (blocks movement).
-const occupiedCells = (state: SoloState, exclude: Entity): Set<string> => {
+// Cells blocked for movement: living entities (except `exclude`) and crates.
+const blockedCells = (state: SoloState, exclude: Entity): Set<string> => {
   const set = new Set<string>()
   for (const entity of state.entities) {
     if (entity === exclude || isDead(entity)) continue
     const cell = cellOf(state.grid, entity.x, entity.y)
+    set.add(cellKey(cell.cx, cell.cy))
+  }
+  for (const prop of state.props) {
+    const cell = cellOf(state.grid, prop.x, prop.y)
     set.add(cellKey(cell.cx, cell.cy))
   }
   return set
@@ -76,7 +80,7 @@ const applyMove = (state: SoloState, to: {x: number; y: number}): SoloState => {
   if (distance < 0.5) return state
   if (distance > state.moveRemainingPx + 0.5) return log(state, 'Out of movement this turn.')
   if (!canSee(state, actor, dest.x, dest.y)) return log(state, "Can't move where you can't see.")
-  if (occupiedCells(state, actor).has(cellKey(cell.cx, cell.cy))) return log(state, 'Something is in the way.')
+  if (blockedCells(state, actor).has(cellKey(cell.cx, cell.cy))) return log(state, 'Something is in the way.')
 
   return {
     ...state,
@@ -233,6 +237,33 @@ const applyDrop = (state: SoloState, stackIndex: number): SoloState => {
   )
 }
 
+// --- crates / barricades ---------------------------------------------------
+// Shove an adjacent crate one cell directly away from the actor onto open floor.
+// Costs the significant action. Push crates into doorways to wall off the horde.
+const applyPush = (state: SoloState, propId: string): SoloState => {
+  const actor = activeEntity(state)
+  if (!actor || !isActive(actor) || state.actionUsed) return state
+  const prop = state.props.find((p) => p.id === propId)
+  if (!prop) return state
+  const ac = cellOf(state.grid, actor.x, actor.y)
+  const pc = cellOf(state.grid, prop.x, prop.y)
+  if (Math.abs(pc.cx - ac.cx) + Math.abs(pc.cy - ac.cy) !== 1) {
+    return log(state, 'Stand right next to the crate to push it.')
+  }
+  const dest = {cx: pc.cx + Math.sign(pc.cx - ac.cx), cy: pc.cy + Math.sign(pc.cy - ac.cy)}
+  if (!isFloor(state.grid, dest.cx, dest.cy)) return log(state, "The crate won't budge — something behind it.")
+  if (blockedCells(state, actor).has(cellKey(dest.cx, dest.cy))) return log(state, 'Something is blocking the crate.')
+  const at = cellCenter(state.grid, dest.cx, dest.cy)
+  return log(
+    {
+      ...state,
+      props: state.props.map((p) => (p.id === propId ? {...p, x: at.x, y: at.y} : p)),
+      actionUsed: true
+    },
+    `${actor.label} shoves a crate.`
+  )
+}
+
 // --- turn order ------------------------------------------------------------
 // Advance to the next living, conscious entity (PC or monster); wrap → next round.
 const applyEndTurn = (state: SoloState): SoloState => {
@@ -273,6 +304,8 @@ export const reduce = (state: SoloState, action: Action, rng: Rng = Math.random)
       return applyPickUp(state, action.groundItemId)
     case 'Drop':
       return applyDrop(state, action.stackIndex)
+    case 'PushProp':
+      return applyPush(state, action.propId)
     case 'EndTurn':
       return applyEndTurn(state)
   }
