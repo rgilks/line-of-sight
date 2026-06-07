@@ -120,6 +120,7 @@ const anim = new Map<string, Anim>()
 const tweenWaiters = new Map<string, Array<() => void>>()
 let rafId = 0
 let busy = false // true while the monster AI is taking its turns (locks player input)
+let diceUp = false // true while the dice overlay is shown (hold the camera)
 
 const now = (): number => performance.now()
 const positionOf = (entity: Entity): Point => renderPos.get(entity.id) ?? {x: entity.x, y: entity.y}
@@ -173,6 +174,12 @@ const ensureRaf = (): void => {
 const frame = (t: number): void => {
   rafId = 0
   const moving = stepRenderPos(t)
+  // Follow the active token as it glides (the camera keeps it framed with the
+  // nearest enemy). Skip while the dice overlay is up so it doesn't drift.
+  if (moving && state && !diceUp) {
+    const actor = activeEntity(state)
+    if (actor && anim.has(actor.id)) focusOnActive()
+  }
   draw()
   if (moving || effectsActive(t)) ensureRaf()
 }
@@ -302,15 +309,17 @@ const airlockSpawnCells = (map: GeneratedMap, grid: WalkGrid): Cell[] => {
       dirChar === 'n' ? {x: 0, y: 1} : dirChar === 's' ? {x: 0, y: -1} : dirChar === 'w' ? {x: 1, y: 0} : {x: -1, y: 0}
     const midX = (o.x1 + o.x2) / 2
     const midY = (o.y1 + o.y2) / 2
-    for (let k = 1; k <= 8; k += 1) {
+    // Collect up to 3 floor cells marching inward, so each airlock is a wider
+    // boarding point — more distinct spawn squares for a real horde.
+    let got = 0
+    for (let k = 1; k <= 8 && got < 3; k += 1) {
       const c = cellOf(grid, midX + dir.x * k * grid.gridScale, midY + dir.y * k * grid.gridScale)
-      if (isFloor(grid, c.cx, c.cy)) {
-        const key = `${c.cx},${c.cy}`
-        if (!seen.has(key)) {
-          seen.add(key)
-          cells.push(c)
-        }
-        break
+      if (!isFloor(grid, c.cx, c.cy)) continue
+      const key = `${c.cx},${c.cy}`
+      if (!seen.has(key)) {
+        seen.add(key)
+        cells.push(c)
+        got += 1
       }
     }
   }
@@ -322,7 +331,8 @@ const airlockSpawnCells = (map: GeneratedMap, grid: WalkGrid): Cell[] => {
 const buildWave = (map: GeneratedMap, grid: WalkGrid, n: number): Entity[] => {
   const cells = airlockSpawnCells(map, grid)
   if (cells.length === 0) return []
-  const count = Math.min(2 + n, 6, cells.length)
+  // A boarding horde: one alien per distinct spawn square, scaling up each wave.
+  const count = Math.min(cells.length, 4 + n * 2)
   const out: Entity[] = []
   for (let i = 0; i < count; i += 1) {
     const cell = cells[i % cells.length]
@@ -522,10 +532,12 @@ const showDice = (): void => {
   diceOverlay.style.width = `${boardViewport.clientWidth}px`
   diceOverlay.style.height = `${boardViewport.clientHeight}px`
   diceOverlay.style.display = 'block'
+  diceUp = true
   diceRoller.resize()
 }
 const hideDice = (): void => {
   diceOverlay.style.display = 'none'
+  diceUp = false
 }
 
 // If the just-dispatched action resolved a fresh attack (a new lastAttack object),
@@ -698,13 +710,59 @@ const focusOnPoint = (x: number, y: number): void => {
   boardViewport.scrollTop = Math.min(maxScrollY, Math.max(0, y * zoom - availH / 2))
 }
 
-// Centre on whoever currently holds the initiative.
+// The living enemy nearest the actor (for PCs, only ones the squad can see).
+const nearestEnemyOf = (s: SoloState, actor: Entity): Entity | undefined => {
+  let best: Entity | undefined
+  let bestD = Infinity
+  for (const e of s.entities) {
+    if (e.faction === actor.faction || isDead(e)) continue
+    if (actor.faction === 'pc' && !visibleToSquad(s, e.x, e.y)) continue
+    const d = Math.hypot(e.x - actor.x, e.y - actor.y)
+    if (d < bestD) {
+      bestD = d
+      best = e
+    }
+  }
+  return best
+}
+
+// Centre on whoever holds the initiative — but pan to keep the nearest enemy in
+// view too, even if that pushes the active character toward an edge.
 const focusOnActive = (): void => {
-  if (!state) return
+  if (!state || !boardViewport) return
   const actor = activeEntity(state)
   if (!actor) return
+  const availW = boardViewport.clientWidth
+  const availH = boardViewport.clientHeight
+  if (availW <= 0 || availH <= 0) return
   const at = renderPos.get(actor.id) ?? {x: actor.x, y: actor.y}
-  focusOnPoint(at.x, at.y)
+  const enemy = nearestEnemyOf(state, actor)
+  if (!enemy) {
+    focusOnPoint(at.x, at.y)
+    return
+  }
+  const z = zoom
+  const ep = renderPos.get(enemy.id) ?? {x: enemy.x, y: enemy.y}
+  let left = at.x * z - availW / 2 // start centred on the character
+  let top = at.y * z - availH / 2
+  const m = Math.min(availW, availH) * 0.16 // keep the enemy this far inside the edge
+  const cm = Math.min(availW, availH) * 0.1 // but never let the character leave the view
+  const ex = ep.x * z
+  const ey = ep.y * z
+  const ax = at.x * z
+  const ay = at.y * z
+  if (ex < left + m) left = ex - m // shift to bring the enemy on-screen…
+  else if (ex > left + availW - m) left = ex - availW + m
+  if (ey < top + m) top = ey - m
+  else if (ey > top + availH - m) top = ey - availH + m
+  if (ax < left + cm) left = ax - cm // …but not so far the character drops off it
+  else if (ax > left + availW - cm) left = ax - availW + cm
+  if (ay < top + cm) top = ay - cm
+  else if (ay > top + availH - cm) top = ay - availH + cm
+  const maxLeft = Math.max(0, state.map.width * z - availW)
+  const maxTop = Math.max(0, state.map.height * z - availH)
+  boardViewport.scrollLeft = Math.min(maxLeft, Math.max(0, left))
+  boardViewport.scrollTop = Math.min(maxTop, Math.max(0, top))
 }
 
 const setZoom = (

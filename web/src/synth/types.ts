@@ -76,13 +76,13 @@ export type GeneratedMap = {
 // sidecar/LOS pipeline share one definition.
 export type {Occluder} from '../../../core/los'
 
-// A sensible default deck: a ~28x28 cell grid at 36px/cell (~1000px square, the
-// geomorph tile size), civilian, with a 2-cell corridor cross and 2-cell hull
-// margin. The LLM steering layer will emit specs like this from a brief.
+// A sensible default deck: a 56x56 cell grid at 36px/cell (~2000px square — four
+// geomorph tiles to a side), civilian, with a 2-cell corridor cross and 2-cell
+// hull margin. The LLM steering layer will emit specs like this from a brief.
 export const defaultSpec = (seed: number): MapSpec => ({
   seed,
-  cols: 28,
-  rows: 28,
+  cols: 56,
+  rows: 56,
   gridScale: 36,
   theme: 'civilian',
   minRoom: 3,

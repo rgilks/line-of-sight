@@ -165,7 +165,12 @@ const buildLayout = (rng: Rng, spec: MapSpec): Layout => {
   const field: Rect = {x: m, y: m, w: spec.cols - 2 * m, h: spec.rows - 2 * m}
   const cw = Math.max(1, spec.corridorWidth)
 
-  const {nV, nH} = pickArchetype(rng)
+  // Scale the corridor band count with deck size so a larger deck keeps its
+  // connective tissue (and more airlocks open onto the hull).
+  const sizeFactor = Math.max(1, Math.round(Math.min(spec.cols, spec.rows) / 28))
+  const arch = pickArchetype(rng)
+  const nV = arch.nV * sizeFactor
+  const nH = arch.nH * sizeFactor
   const vStarts = bandPositions(rng, field.w, nV, cw, spec.minRoom)
   const hStarts = bandPositions(rng, field.h, nH, cw, spec.minRoom)
   // Guarantee at least one band so there is circulation and an airlock.
