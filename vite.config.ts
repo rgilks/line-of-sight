@@ -24,7 +24,8 @@ export default defineConfig({
       input: {
         index: entry('index.html'),
         play: entry('play.html'),
-        edit: entry('edit.html')
+        edit: entry('edit.html'),
+        solo: entry('solo.html')
       }
     }
   },
