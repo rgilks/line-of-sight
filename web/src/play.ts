@@ -11,7 +11,7 @@
 import {effect, signal} from '@preact/signals'
 import {counterTokenSize, drawCounterToken} from './counter-render'
 import {drawReachableDoorAffordance} from './door-affordance'
-import {distanceToOccluder, visibilityPolygon, type Occluder, type Point} from './los-core'
+import {distanceToOccluder, visibilityPolygon, type Occluder, type Point} from '../../core/los'
 import {counterDefinitions, counterPortraits, preloadCounterPortraits} from './state'
 import {
   activeCombatant,

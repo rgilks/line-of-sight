@@ -4,7 +4,7 @@ import {
   visibilityPolygon,
   type DoorOccluder,
   type Point
-} from './los-core'
+} from '../../core/los'
 import type {Token} from './types'
 import {
   boardSize,

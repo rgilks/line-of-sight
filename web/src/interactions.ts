@@ -1,6 +1,6 @@
 import type {JSX} from 'preact'
-import type {DoorOccluder, Occluder, Point} from './los-core'
-import {distanceToOccluder} from './los-core'
+import type {DoorOccluder, Occluder, Point} from '../../core/los'
+import {distanceToOccluder} from '../../core/los'
 import type {CounterGroupId, EditDrag, EditHandle, Token} from './types'
 import {
   boardSize,

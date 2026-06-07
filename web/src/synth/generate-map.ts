@@ -16,7 +16,7 @@
 // Walls + doors + hull are the line-of-sight occluders; furniture is decorative
 // only and never blocks sight (the geomorph convention) — so LOS is exact by
 // construction regardless of how richly rooms are decorated.
-import type {Occluder} from '../los-core'
+import type {Occluder} from '../../../core/los'
 import {chance, makeRng, pick, randInt, shuffle, type Rng} from './rng'
 import type {Decoration, GeneratedMap, MapSpec, Rect, Room, RoomType} from './types'
 

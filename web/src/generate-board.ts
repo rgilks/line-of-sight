@@ -6,7 +6,7 @@
 import {generateMap} from './synth/generate-map'
 import {renderMap} from './synth/render-map'
 import {type MapSpec, type RoomType, type Theme} from './synth/types'
-import type {DoorOccluder} from './los-core'
+import type {DoorOccluder} from '../../core/los'
 import type {Tile} from './types'
 import {
   doorStates,

@@ -1,5 +1,5 @@
 import {signal} from '@preact/signals'
-import type {Occluder, Point} from './los-core'
+import type {Occluder, Point} from '../../core/los'
 import type {
   BoardSize,
   CounterDefinition,

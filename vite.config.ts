@@ -11,7 +11,7 @@ const apiTarget = (): string => process.env.LOS_API_TARGET ?? 'https://los.tre.s
 export default defineConfig({
   root: 'web',
   test: {
-    include: ['src/**/*.test.ts', '../src/**/*.test.ts']
+    include: ['src/**/*.test.ts', '../src/**/*.test.ts', '../core/**/*.test.ts']
   },
   build: {
     outDir: '../dist/client',

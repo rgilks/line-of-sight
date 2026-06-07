@@ -1,4 +1,4 @@
-import type {Occluder} from './los-core'
+import type {Occluder} from '../../core/los'
 import type {EditorSnapshot, Token} from './types'
 import {
   boardSize,

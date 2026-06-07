@@ -1,4 +1,4 @@
-import {analyzeImageRgba, type DoorOccluder, type Occluder, type WallOccluder} from './los-core'
+import {analyzeImageRgba, type DoorOccluder, type Occluder, type WallOccluder} from '../../core/los'
 import type {Placement, Tile} from './types'
 import {
   boardSize,

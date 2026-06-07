@@ -1,5 +1,5 @@
 import type {JSX} from 'preact'
-import type {Occluder} from './los-core'
+import type {Occluder} from '../../core/los'
 import type {Token} from './types'
 import {
   boardSize,

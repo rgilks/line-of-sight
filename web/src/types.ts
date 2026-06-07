@@ -1,4 +1,4 @@
-import type {Occluder, Point} from './los-core'
+import type {Occluder, Point} from '../../core/los'
 
 export type Tool = 'viewer' | 'wall' | 'door' | 'erase' | 'token'
 

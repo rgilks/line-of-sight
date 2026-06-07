@@ -5,7 +5,7 @@ import {
   visibilityPolygon,
   type Occluder,
   type Point
-} from './los-core'
+} from './los'
 
 const blankRgba = (width: number, height: number): Uint8ClampedArray =>
   new Uint8ClampedArray(width * height * 4)

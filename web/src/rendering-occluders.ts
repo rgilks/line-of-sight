@@ -1,4 +1,4 @@
-import type {DoorOccluder} from './los-core'
+import type {DoorOccluder} from '../../core/los'
 import {drawReachableDoorAffordance} from './door-affordance'
 import {
   ctx,

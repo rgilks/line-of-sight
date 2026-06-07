@@ -1,7 +1,7 @@
 // Spec + data model for the synthetic deck generator. These types are the
 // contract between the (future) LLM steering layer, the generator, and the
 // renderer — keep them plain data so they serialise straight to JSON.
-import type {Occluder} from '../los-core'
+import type {Occluder} from '../../../core/los'
 
 // A room's function. Drives furniture and labelling; the LLM can target these
 // when steering a layout from a natural-language brief.
@@ -74,7 +74,7 @@ export type GeneratedMap = {
 
 // Re-export the occluder shape from the core so the generator and the existing
 // sidecar/LOS pipeline share one definition.
-export type {Occluder} from '../los-core'
+export type {Occluder} from '../../../core/los'
 
 // A sensible default deck: a ~28x28 cell grid at 36px/cell (~1000px square, the
 // geomorph tile size), civilian, with a 2-cell corridor cross and 2-cell hull

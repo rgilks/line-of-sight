@@ -1,4 +1,4 @@
-import type {DoorOccluder, Point} from './los-core'
+import type {DoorOccluder, Point} from '../../core/los'
 
 type PixelScaler = (pixels: number) => number
 

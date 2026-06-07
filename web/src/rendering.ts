@@ -1,4 +1,4 @@
-import type {Point} from './los-core'
+import type {Point} from '../../core/los'
 import {
   boardSize,
   canvas,

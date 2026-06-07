@@ -3,7 +3,7 @@
 // Furniture is drawn but is decorative only; walls/doors are the LOS truth.
 // `renderMap` draws the player-visible deck; `renderLabels` draws the GM-only
 // room labels onto a separate layer the GM can toggle.
-import type {DoorOccluder, Occluder} from '../los-core'
+import type {DoorOccluder, Occluder} from '../../../core/los'
 import type {Decoration, GeneratedMap} from './types'
 
 const INK = '#0c0e0d'
