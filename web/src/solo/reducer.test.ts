@@ -143,6 +143,16 @@ describe('solo reducer — combat actions', () => {
     expect(next.actionUsed).toBe(true)
   })
 
+  it('cannot fire on a foe behind a wall, even within range', () => {
+    // Wall segment at x=120 between the attacker (x=75) and the monster (x=135).
+    const wall: Occluder = {type: 'wall', id: 'w', x1: 120, y1: 60, x2: 120, y2: 90}
+    const state = makeState([pc('a', 2, 2, 0), mob('m', 4, 2)], [wall])
+    const next = reduce(state, {t: 'Attack', targetId: 'm'}, seqRng([6, 6, 4, 4, 4]))
+    expect(next.entities.find((e) => e.id === 'm')?.stats.end).toBe(10) // unharmed
+    expect(next.actionUsed).toBe(false) // no shot taken — action preserved
+    expect(next.log.some((line) => /line of sight/i.test(line))).toBe(true)
+  })
+
   it('refuses a second significant action in the same turn', () => {
     const state = {...makeState([pc('a', 2, 2, 0), mob('m', 3, 2)]), actionUsed: true}
     const next = reduce(state, {t: 'Attack', targetId: 'm'}, seqRng([6, 6, 4, 4, 4]))

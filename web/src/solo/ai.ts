@@ -20,8 +20,12 @@ const cellKey = (cx: number, cy: number): string => `${cx},${cy}`
 
 const canAttackFrom = (state: SoloState, monster: Entity, target: Entity, fromX: number, fromY: number): boolean => {
   const weapon = weaponById(monster.weaponId)
-  const band = rangeBandFor(Math.hypot(fromX - target.x, fromY - target.y), state.grid.gridScale)
+  const dist = Math.hypot(fromX - target.x, fromY - target.y)
+  const band = rangeBandFor(dist, state.grid.gridScale)
   if (weapon.rangeDm[band] === undefined) return false
+  // Must be able to see the target itself (sight radius + clear line) — matches the
+  // reducer's attack gate, so a planned shot is never rejected for want of LOS.
+  if (dist > state.sightRadius) return false
   return hasLineOfSight({x: fromX, y: fromY}, {x: target.x, y: target.y}, state.map.occluders, state.doorStates)
 }
 

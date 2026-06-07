@@ -31,6 +31,7 @@ import {decideMonster} from './solo/ai'
 import {createDiceRoller, type DiceRoller} from '@rgilks/cepheus-dice'
 import {
   activeEntity,
+  canSeePoint,
   dexDm,
   entityById,
   isActive,
@@ -912,11 +913,13 @@ const drawSelectionRing = (at: Point, faction: Entity['faction'], gridScale: num
   ctx.restore()
 }
 
-const drawTargetingLine = (from: Point, to: Point): void => {
+// Red dashed = the active character has a clear shot. Grey dotted = the foe is
+// visible to the squad but this character has no line of sight (no shot).
+const drawTargetingLine = (from: Point, to: Point, clear: boolean): void => {
   ctx.save()
-  ctx.strokeStyle = 'rgba(255,72,72,0.7)'
+  ctx.strokeStyle = clear ? 'rgba(255,72,72,0.7)' : 'rgba(150,156,148,0.45)'
   ctx.lineWidth = 2
-  ctx.setLineDash([6, 6])
+  ctx.setLineDash(clear ? [6, 6] : [2, 7])
   ctx.beginPath()
   ctx.moveTo(from.x, from.y)
   ctx.lineTo(to.x, to.y)
@@ -963,7 +966,7 @@ const draw = (): void => {
   const actor = activeEntity(s)
   const selected = selectedId ? entityById(s, selectedId) : undefined
   if (actor && actor.faction === 'pc' && selected && selected.faction === 'monster' && visibleToSquad(s, selected.x, selected.y)) {
-    drawTargetingLine(positionOf(actor), positionOf(selected))
+    drawTargetingLine(positionOf(actor), positionOf(selected), canSeePoint(s, actor, selected.x, selected.y))
   }
 
   for (const entity of s.entities) {
@@ -1023,8 +1026,10 @@ const renderPanel = (): void => {
   const selected = selectedId ? entityById(s, selectedId) : undefined
   const squares = actor ? Math.max(0, Math.round(s.moveRemainingPx / s.grid.gridScale)) : 0
 
-  // Attack availability against a selected, visible enemy.
-  const enemy = selected && selected.faction === 'monster' && visibleToSquad(s, selected.x, selected.y) ? selected : undefined
+  // Attack availability against a selected enemy. The active character can only
+  // fire on a foe IT can see — not one only an ally has line of sight to.
+  const selectedEnemy = selected && selected.faction === 'monster' ? selected : undefined
+  const enemy = actor && selectedEnemy && canSeePoint(s, actor, selectedEnemy.x, selectedEnemy.y) ? selectedEnemy : undefined
   let attackLabel = 'Attack'
   let canAttack = false
   let targetNote = ''
@@ -1035,6 +1040,10 @@ const renderPanel = (): void => {
     canAttack = !s.actionUsed && isActive(actor) && inRange && hasAmmo
     attackLabel = `Attack ${enemy.label}`
     targetNote = `${enemy.label} · ${enemy.stats.end}/${enemy.statsMax.end} END · ${inRange ? band : `out of range (${band})`}${hasAmmo ? '' : ' · no ammo'}`
+  } else if (selectedEnemy) {
+    // Selected, squad-visible, but this character can't see it.
+    attackLabel = 'No line of sight'
+    targetNote = `${selectedEnemy.label} · no line of sight from ${actor?.label ?? 'here'}`
   }
 
   const canReload =

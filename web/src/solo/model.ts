@@ -2,7 +2,7 @@
 // inventory, and gear fields grow in later phases — Phase 1 needs only enough to
 // place characters on the deck and roll initiative.
 import {CEPHEUS_DEFAULT_MOVE_METERS, CEPHEUS_METERS_PER_SQUARE, type CounterKind} from '../../../core/rules'
-import type {Point} from '../../../core/los'
+import {hasLineOfSight, type Point} from '../../../core/los'
 import type {GeneratedMap} from '../synth/types'
 import type {WalkGrid} from './grid'
 
@@ -144,3 +144,13 @@ export const withinReach = (a: Entity, b: Entity, gridScale: number, squares = 1
 /** Per-turn movement budget in board pixels (metres ÷ 1.5 m/square × gridScale). */
 export const moveBudgetPx = (gridScale: number, moveMeters: number = CEPHEUS_DEFAULT_MOVE_METERS): number =>
   (moveMeters / CEPHEUS_METERS_PER_SQUARE) * gridScale
+
+/**
+ * Can `viewer` see board point (x, y) — within its own sight radius and not
+ * blocked by a wall or closed door? This is each entity's *personal* vision. It
+ * gates attacks: a character can only target a foe it can itself see, never one
+ * only an ally has eyes on (you can't shoot through a wall).
+ */
+export const canSeePoint = (state: SoloState, viewer: Entity, x: number, y: number): boolean =>
+  Math.hypot(viewer.x - x, viewer.y - y) <= state.sightRadius &&
+  hasLineOfSight({x: viewer.x, y: viewer.y}, {x, y}, state.map.occluders, state.doorStates)

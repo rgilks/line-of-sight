@@ -10,6 +10,7 @@ import {weaponById} from './gear'
 import {cellCenter, cellOf, isFloor} from './grid'
 import {
   activeEntity,
+  canSeePoint,
   dexDm,
   entityById,
   isActive,
@@ -116,6 +117,12 @@ const applyAttack = (state: SoloState, targetId: string, rng: Rng): SoloState =>
   const weapon = weaponById(actor.weaponId)
   if (weapon.magazine !== undefined && actor.loadedRounds <= 0) {
     return log(state, `${actor.label} is out of ammo — reload!`)
+  }
+
+  // You can only fire on a foe you can personally see — not one only an ally has
+  // line of sight to. No shooting through walls.
+  if (!canSeePoint(state, actor, target.x, target.y)) {
+    return log(state, `${actor.label} has no line of sight to ${target.label}.`)
   }
 
   const result = resolveAttack(actor, target, rng, state.grid.gridScale)
