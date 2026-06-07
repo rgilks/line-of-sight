@@ -557,6 +557,21 @@ const onAttack = async (targetId: string): Promise<void> => {
   requestDraw()
 }
 
+// Can the active character attack `target` right now — their turn, their own line
+// of sight, in range, with ammo? Mirrors the panel's Attack-button gate, so the
+// quick-attack gestures (double-click / F) only fire on a real shot.
+const canAttackTarget = (target: Entity): boolean => {
+  if (busy || !state || state.phase.t !== 'playerTurn') return false
+  const actor = activeEntity(state)
+  if (!actor || actor.faction !== 'pc' || !isActive(actor) || state.actionUsed) return false
+  if (target.faction !== 'monster' || isDead(target) || !canSeePoint(state, actor, target.x, target.y)) return false
+  const weapon = weaponById(actor.weaponId)
+  if (weapon.rangeDm[rangeBandFor(Math.hypot(actor.x - target.x, actor.y - target.y), state.grid.gridScale)] === undefined) {
+    return false
+  }
+  return weapon.magazine === undefined || actor.loadedRounds > 0
+}
+
 // End the player's turn, then hand off to the monster AI.
 const endTurn = (): void => {
   if (busy || !state || state.phase.t !== 'playerTurn') return
@@ -579,6 +594,13 @@ const onKey = (event: KeyboardEvent): void => {
   if (event.key === ' ' || event.key === 'Enter') {
     event.preventDefault()
     endTurn()
+  } else if (event.key === 'f' || event.key === 'F') {
+    // Fire at the current target.
+    const target = state && selectedId ? entityById(state, selectedId) : undefined
+    if (target && canAttackTarget(target)) {
+      event.preventDefault()
+      void onAttack(target.id)
+    }
   } else if (event.key === 'Escape' && selectedId) {
     selectedId = null
     renderPanel()
@@ -850,6 +872,12 @@ function actAt(clientX: number, clientY: number): void {
   }
   const hit = entityHitAt(point)
   if (hit) {
+    // Tapping an already-targeted foe fires (so a double-click attacks outright);
+    // otherwise the tap just targets it.
+    if (hit.id === selectedId && canAttackTarget(hit)) {
+      void onAttack(hit.id)
+      return
+    }
     selectedId = selectedId === hit.id ? null : hit.id
     if (selectedId) playUi('select')
     renderPanel()
@@ -1154,7 +1182,7 @@ const renderPanel = (): void => {
     const hasAmmo = weapon.magazine === undefined || actor.loadedRounds > 0
     canAttack = !s.actionUsed && isActive(actor) && inRange && hasAmmo
     attackLabel = `Attack ${enemy.label}`
-    targetNote = `${enemy.label} · ${enemy.stats.end}/${enemy.statsMax.end} END · ${inRange ? band : `out of range (${band})`}${hasAmmo ? '' : ' · no ammo'}`
+    targetNote = `${enemy.label} · ${enemy.stats.end}/${enemy.statsMax.end} END · ${inRange ? band : `out of range (${band})`}${hasAmmo ? '' : ' · no ammo'}${canAttack ? ' · double-click or F to fire' : ''}`
   } else if (selectedEnemy) {
     // Selected, squad-visible, but this character can't see it.
     attackLabel = 'No line of sight'
@@ -1237,9 +1265,9 @@ const renderPanel = (): void => {
       <button id="solo-new" class="solo-button solo-button-ghost solo-button-sm">New deck</button>
       <label class="solo-check"><input type="checkbox" id="solo-grid" ${showGrid ? 'checked' : ''}/> Show floor grid</label>
     </section>
-    <p class="solo-hint">Tap a foe to target it, then Attack. Tap the floor to move, a
-    squadmate to treat them, an adjacent door to open it. Press <b>Space</b> to end your turn;
-    drag to pan.</p>`
+    <p class="solo-hint">Double-click a foe to fire (or target it, then <b>F</b>). Tap the floor to
+    move, a squadmate to treat them, an adjacent door to open it. Press <b>Space</b> to end your
+    turn; drag to pan.</p>`
     }`
 
   for (const el of panel.querySelectorAll<HTMLElement>('[data-select]')) {
