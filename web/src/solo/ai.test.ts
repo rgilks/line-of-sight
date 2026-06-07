@@ -31,6 +31,7 @@ const ent = (over: Partial<Entity>): Entity => ({
   inventory: [],
   loadedRounds: 0,
   stance: 'standing',
+  aim: 0,
   initiative: 5,
   order: 0,
   ...over

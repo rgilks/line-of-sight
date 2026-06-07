@@ -26,7 +26,7 @@ import {orderByInitiative, pointInPolygon} from '../../core/rules'
 import {PARTY} from './solo/characters'
 import {MONSTERS} from './solo/monsters'
 import {ARMORS, weaponById} from './solo/gear'
-import {rangeBandFor} from './solo/combat'
+import {parseDamage, predictAttack, rangeBandFor} from './solo/combat'
 import {decideMonster} from './solo/ai'
 import {createDiceRoller, type DiceRoller} from '@rgilks/cepheus-dice'
 import {
@@ -37,6 +37,7 @@ import {
   isActive,
   isDead,
   isDown,
+  AIM_MAX,
   MINOR_ACTIONS_PER_ROUND,
   moveBudgetPx,
   SIGNIFICANT_ACTION_COST,
@@ -252,6 +253,7 @@ const spawnParty = (map: GeneratedMap, grid: WalkGrid): Entity[] => {
       inventory,
       loadedRounds: weapon.magazine ?? 0,
       stance: 'standing',
+      aim: 0,
       initiative: null,
       order: index
     }
@@ -280,6 +282,7 @@ const monsterEntity = (block: (typeof MONSTERS)[number], x: number, y: number): 
     inventory: [],
     loadedRounds: 0,
     stance: 'standing',
+    aim: 0,
     moveMeters: block.moveMeters,
     initiative: null,
     order: 100 + monsterCounter,
@@ -552,15 +555,29 @@ const fireAttackFx = (prev: AttackFx | undefined): boolean => {
 // once the dice clear — fire the weapon (sound + tracer/strike + impact burst).
 const onAttack = async (targetId: string): Promise<void> => {
   if (busy || !state || state.phase.t !== 'playerTurn') return
+  const actor = activeEntity(state)
   const target = entityById(state, targetId)
-  if (!target || !canAttackTarget(target)) return // also gates range / LOS / ammo / action budget
+  if (!actor || !target || !canAttackTarget(target)) return // also gates range / LOS / ammo / action budget
+  const gridScale = state.grid.gridScale
   busy = true
   renderPanel()
   showDice()
   const prevFx = state.lastAttack
-  const {faces} = await diceRoller.roll(2)
-  dispatch({t: 'Attack', targetId}, queuedFaces([...faces]))
-  await delay(550)
+  // First roll: the 2D6 to-hit (shown).
+  const toHit = await diceRoller.roll(2)
+  const faces = [...toHit.faces]
+  // On a hit, roll and SHOW the weapon's damage dice; their settled faces feed the
+  // reducer's damage roll, so the dice on screen are the damage that's applied
+  // (plus the weapon's flat modifier and the Effect).
+  const pred = predictAttack(actor, target, gridScale, faces[0] ?? 1, faces[1] ?? 1)
+  if (pred.hit) {
+    const dmgDice = parseDamage(weaponById(actor.weaponId).damage).count
+    await delay(220)
+    const damage = await diceRoller.roll(dmgDice)
+    faces.push(...damage.faces)
+  }
+  dispatch({t: 'Attack', targetId}, queuedFaces(faces))
+  await delay(520)
   hideDice()
   if (fireAttackFx(prevFx)) await delay(720)
   busy = false
@@ -1268,12 +1285,16 @@ type TrackCombat = {
   canMedkit: boolean
   canPickup: boolean
   canPush: boolean
+  aim: number
+  canAim: boolean
   targetNote: string
 }
 
 const SOLO_ICON = {
   attack:
     '<svg class="solo-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="12" r="2.2" fill="currentColor"/><path d="M12 3v4M12 17v4M3 12h4M17 12h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>',
+  aim:
+    '<svg class="solo-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 2v3.5M12 18.5V22M2 12h3.5M18.5 12H22" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="12" cy="12" r="1.3" fill="currentColor"/></svg>',
   reload:
     '<svg class="solo-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4a8 8 0 1 1-5.3 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M7 6.5 4.5 9 7 11.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   medkit:
@@ -1313,6 +1334,7 @@ const trackControlsHtml = (combat: TrackCombat): string => {
       <span class="solo-chip">${combat.squares} sq left</span>
       ${actionChip}
       <span class="solo-chip solo-chip-stance">${stanceLabel(combat.stance)}</span>
+      ${combat.aim > 0 ? `<span class="solo-chip solo-chip-aim">Aim +${combat.aim}</span>` : ''}
     </div>
     ${combat.targetNote ? `<div class="solo-target-card">${escapeHtml(combat.targetNote)}</div>` : ''}
     <div class="solo-icon-bar">
@@ -1321,6 +1343,7 @@ const trackControlsHtml = (combat: TrackCombat): string => {
       </div>
       <span class="solo-icon-sep" aria-hidden="true"></span>
       ${iconBtn('solo-attack', SOLO_ICON.attack, combat.attackLabel, combat.canAttack, 'is-primary')}
+      ${iconBtn('solo-aim', SOLO_ICON.aim, combat.aim > 0 ? `Aim (+${combat.aim})` : 'Aim', combat.canAim, combat.aim > 0 ? 'is-aiming' : '')}
       ${iconBtn('solo-reload', SOLO_ICON.reload, 'Reload', combat.canReload)}
       ${iconBtn('solo-medkit', SOLO_ICON.medkit, 'Medkit', combat.canMedkit)}
       ${iconBtn('solo-pickup', SOLO_ICON.pickup, 'Pick up', combat.canPickup)}
@@ -1470,6 +1493,8 @@ const renderPanel = (): void => {
         canMedkit,
         canPickup,
         canPush,
+        aim: actor?.aim ?? 0,
+        canAim: canSignificant && (actor?.aim ?? 0) < AIM_MAX,
         targetNote
       }
   const busyBanner = busy ? '<div class="solo-busy-banner">Hostiles acting…</div>' : ''
@@ -1528,6 +1553,10 @@ const renderPanel = (): void => {
   }
   panel.querySelector<HTMLButtonElement>('#solo-attack')?.addEventListener('click', () => {
     if (enemy) void onAttack(enemy.id)
+  })
+  panel.querySelector<HTMLButtonElement>('#solo-aim')?.addEventListener('click', () => {
+    playUi('select')
+    playerAct({t: 'Aim'})
   })
   panel.querySelector<HTMLButtonElement>('#solo-reload')?.addEventListener('click', () => {
     playUi('reload')

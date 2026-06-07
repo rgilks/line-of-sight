@@ -2,7 +2,7 @@ import {describe, expect, it} from 'vitest'
 import type {Rng} from '../../../core/dice'
 import type {Entity} from './model'
 import {isDead, isDown} from './model'
-import {applyDamage, applyHeal, resolveAttack, resolveFirstAid, stanceAttackDm} from './combat'
+import {applyDamage, applyHeal, predictAttack, resolveAttack, resolveFirstAid, stanceAttackDm} from './combat'
 
 // Deterministic dice: each call yields the next face (1..6) mapped to mid-bucket
 // so rollD6 returns exactly that face. Attack throws consume 2 faces, then weapon
@@ -31,6 +31,7 @@ const ent = (over: Partial<Entity>): Entity => ({
   inventory: [],
   loadedRounds: 0,
   stance: 'standing',
+  aim: 0,
   initiative: null,
   order: 0,
   ...over
@@ -63,6 +64,16 @@ describe('resolveAttack', () => {
     const result = resolveAttack(attacker, target, seqRng([6, 5, 1, 1, 1]), 36)
     expect(result.effect).toBe(8)
     expect(result.damage).toBe(1)
+  })
+
+  it('Aim adds its DM to the to-hit throw', () => {
+    const attacker = ent({skills: {'Gun Combat': 0}, stats: {str: 7, dex: 7, end: 7}, weaponId: 'autopistol'})
+    const target = ent({x: 48, y: 0}) // ~2 m → close
+    const noAim = predictAttack(attacker, target, 36, 3, 4) // 7 → effect −1, miss
+    expect(noAim.hit).toBe(false)
+    const aimed = predictAttack({...attacker, aim: 2}, target, 36, 3, 4) // 7 + 2 → effect 1, hit
+    expect(aimed.hit).toBe(true)
+    expect(aimed.effect).toBe(noAim.effect + 2)
   })
 
   it('applies prone stance DMs to ranged attacks', () => {

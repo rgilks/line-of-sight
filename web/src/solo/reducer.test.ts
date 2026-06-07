@@ -34,6 +34,7 @@ const pc = (id: string, cx: number, cy: number, order: number): Entity => ({
   inventory: [],
   loadedRounds: 15,
   stance: 'standing',
+  aim: 0,
   initiative: 7,
   order
 })
@@ -86,6 +87,7 @@ const mob = (id: string, cx: number, cy: number): Entity => ({
   inventory: [],
   loadedRounds: 0,
   stance: 'standing',
+  aim: 0,
   initiative: 5,
   order: 9
 })
@@ -228,6 +230,21 @@ describe('solo reducer — PushProp', () => {
     const state = {...makeState([actor]), props: [{id: 'crate-0', x: (3 + 0.5) * 30, y: (2 + 0.5) * 30}]}
     const next = reduce(state, {t: 'Move', to: {x: (3 + 0.5) * 30, y: (2 + 0.5) * 30}})
     expect(next.entities[0].x).toBe((2 + 0.5) * 30) // didn't move onto the crate
+  })
+})
+
+describe('solo reducer — Aim', () => {
+  it('takes aim as a significant action: +1 and spends two minors', () => {
+    const next = reduce(makeState([pc('a', 2, 2, 0)]), {t: 'Aim'})
+    expect(next.entities[0].aim).toBe(1)
+    expect(next.actionUsed).toBe(true)
+    expect(next.moveRemainingPx).toBe(turnBudgetPx(30) - 2 * moveBudgetPx(30))
+  })
+
+  it('loses aim when moving', () => {
+    const aimed = {...pc('a', 2, 2, 0), aim: 2}
+    const next = reduce(makeState([aimed]), {t: 'Move', to: {x: (3 + 0.5) * 30, y: (2 + 0.5) * 30}})
+    expect(next.entities[0].aim).toBe(0)
   })
 })
 

@@ -53,6 +53,7 @@ export type Entity = {
   moveMeters?: number
   // Combat bookkeeping.
   stance: CombatStance
+  aim: number // accumulated Aim DM for the next attack (Cepheus aiming); 0 = not aiming
   initiative: number | null
   order: number // stable join index; ties in initiative break by this
   // monster-only behaviour hint (Phase 4 AI); PCs leave it undefined.
@@ -61,6 +62,9 @@ export type Entity = {
 
 /** Crouched characters move at half speed — each metre costs double budget. */
 export const movementCostMultiplier = (entity: Entity): number => (entity.stance === 'crouched' ? 2 : 1)
+
+/** Aiming (a significant action) adds +1 to the next attack per round, up to this. */
+export const AIM_MAX = 4
 
 // Cepheus characteristic DM table: the modifier a characteristic value confers.
 //   0 ⇒ -3 · 1-2 ⇒ -2 · 3-5 ⇒ -1 · 6-8 ⇒ 0 · 9-11 ⇒ +1 · 12-14 ⇒ +2 · 15+ ⇒ +3
@@ -138,6 +142,7 @@ export type Action =
   | {t: 'Drop'; stackIndex: number}
   | {t: 'PushProp'; propId: string}
   | {t: 'SetStance'; stance: CombatStance}
+  | {t: 'Aim'}
   | {t: 'AddWave'; monsters: Entity[]}
   | {t: 'EndTurn'}
 

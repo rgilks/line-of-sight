@@ -65,36 +65,57 @@ export type AttackResult = {
 }
 
 /**
- * Resolve `attacker` shooting/striking `target` with the attacker's equipped
- * weapon. Pure: returns the outcome; it does not mutate either entity (apply the
- * damage with applyDamage).
+ * The to-hit outcome for a specific 2D6 result — pure, no rng. The throw is
+ * 2D6 + combat skill + DEX DM + range-band DM + target-stance DM + the attacker's
+ * accumulated Aim DM, against 8+. Used by resolveAttack and by the UI to decide
+ * whether to roll (and show) the damage dice.
  */
-export const resolveAttack = (attacker: Entity, target: Entity, rng?: Rng, gridScale = 36): AttackResult => {
+export const predictAttack = (
+  attacker: Entity,
+  target: Entity,
+  gridScale: number,
+  d1: number,
+  d2: number
+): {outOfRange: boolean; hit: boolean; roll: number; effect: number; band: RangeBand} => {
   const weapon = weaponById(attacker.weaponId)
   const band = rangeBandFor(distancePx(attacker, target), gridScale)
   const rangeDm = weapon.rangeDm[band]
-  if (rangeDm === undefined) {
-    return {outOfRange: true, hit: false, roll: 0, effect: 0, band, damage: 0}
+  if (rangeDm === undefined || blockedByStance(attacker, weapon.skill)) {
+    return {outOfRange: true, hit: false, roll: 0, effect: 0, band}
   }
-  if (blockedByStance(attacker, weapon.skill)) {
-    return {outOfRange: true, hit: false, roll: 0, effect: 0, band, damage: 0}
-  }
-
-  const [d1, d2] = roll2D6(rng)
   const roll =
     d1 +
     d2 +
     skillFor(attacker, weapon.skill) +
     characteristicDm(attacker.stats.dex) +
     rangeDm +
-    stanceAttackDm(target, band)
+    stanceAttackDm(target, band) +
+    (attacker.aim ?? 0)
   const effect = roll - 8
-  if (effect < 0) return {outOfRange: false, hit: false, roll, effect, band, damage: 0}
+  return {outOfRange: false, hit: effect >= 0, roll, effect, band}
+}
 
-  const raw = rollDamageDice(weapon.damage, rng) + effect
+/**
+ * Resolve `attacker` shooting/striking `target` with the attacker's equipped
+ * weapon. Pure: returns the outcome; it does not mutate either entity (apply the
+ * damage with applyDamage). Damage = weapon dice + Effect, less armour, with the
+ * SRD Effect-6 floor of ≥1.
+ */
+export const resolveAttack = (attacker: Entity, target: Entity, rng?: Rng, gridScale = 36): AttackResult => {
+  const weapon = weaponById(attacker.weaponId)
+  // Range/stance are checked before rolling, so an illegal shot consumes no dice.
+  const band = rangeBandFor(distancePx(attacker, target), gridScale)
+  if (weapon.rangeDm[band] === undefined || blockedByStance(attacker, weapon.skill)) {
+    return {outOfRange: true, hit: false, roll: 0, effect: 0, band, damage: 0}
+  }
+  const [d1, d2] = roll2D6(rng)
+  const p = predictAttack(attacker, target, gridScale, d1, d2)
+  if (!p.hit) return {outOfRange: false, hit: false, roll: p.roll, effect: p.effect, band: p.band, damage: 0}
+
+  const raw = rollDamageDice(weapon.damage, rng) + p.effect
   let damage = raw - armorRating(target.armorId)
-  damage = effect >= 6 ? Math.max(1, damage) : Math.max(0, damage)
-  return {outOfRange: false, hit: true, roll, effect, band, damage}
+  damage = p.effect >= 6 ? Math.max(1, damage) : Math.max(0, damage)
+  return {outOfRange: false, hit: true, roll: p.roll, effect: p.effect, band: p.band, damage}
 }
 
 /**
@@ -122,7 +143,8 @@ export const applyDamage = (entity: Entity, amount: number): Entity => {
     dex = pool.dex
   }
 
-  return {...entity, stats: {str: Math.max(0, str), dex: Math.max(0, dex), end: Math.max(0, end)}}
+  // Taking a wound breaks concentration — any accumulated Aim is lost.
+  return {...entity, aim: 0, stats: {str: Math.max(0, str), dex: Math.max(0, dex), end: Math.max(0, end)}}
 }
 
 export type FirstAidResult = {roll: number; effect: number; heal: number}

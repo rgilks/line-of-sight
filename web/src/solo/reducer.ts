@@ -10,6 +10,7 @@ import {weaponById} from './gear'
 import {cellCenter, cellOf, isFloor} from './grid'
 import {
   activeEntity,
+  AIM_MAX,
   canSeePoint,
   dexDm,
   entityById,
@@ -99,7 +100,7 @@ const applyMove = (state: SoloState, to: {x: number; y: number}): SoloState => {
 
   return {
     ...state,
-    entities: replace(state, actor.id, (e) => ({...e, x: dest.x, y: dest.y})),
+    entities: replace(state, actor.id, (e) => ({...e, x: dest.x, y: dest.y, aim: 0})), // moving breaks aim
     moveRemainingPx: state.moveRemainingPx - moveCost
   }
 }
@@ -118,6 +119,25 @@ const applySetStance = (state: SoloState, stance: CombatStance): SoloState => {
       moveRemainingPx: state.moveRemainingPx - cost
     },
     `${actor.label} goes ${stanceLabel(stance).toLowerCase()}.`
+  )
+}
+
+// --- aim -------------------------------------------------------------------
+// Take aim: a significant action that adds +1 to the next attack (up to AIM_MAX),
+// stacking across rounds. Lost by moving or taking a wound; spent on the next shot.
+const applyAim = (state: SoloState): SoloState => {
+  const actor = activeEntity(state)
+  if (!actor || !isActive(actor) || state.actionUsed) return state
+  if (!enough(state, significantCost(state, actor))) return log(state, `${actor.label} has no action left this turn.`)
+  const aim = Math.min(actor.aim + 1, AIM_MAX)
+  return log(
+    {
+      ...state,
+      entities: replace(state, actor.id, (e) => ({...e, aim})),
+      actionUsed: true,
+      moveRemainingPx: state.moveRemainingPx - significantCost(state, actor)
+    },
+    `${actor.label} takes aim (+${aim}).`
   )
 }
 
@@ -163,8 +183,11 @@ const applyAttack = (state: SoloState, targetId: string, rng: Rng): SoloState =>
 
   const entities = state.entities.map((e) => {
     let next = e
-    if (e.id === actor.id && weapon.magazine !== undefined) next = {...next, loadedRounds: next.loadedRounds - 1}
-    if (e.id === target.id && result.hit) next = applyDamage(next, result.damage)
+    if (e.id === actor.id) {
+      next = {...next, aim: 0} // the shot is taken — spend the aim
+      if (weapon.magazine !== undefined) next = {...next, loadedRounds: next.loadedRounds - 1}
+    }
+    if (e.id === target.id && result.hit) next = applyDamage(next, result.damage) // applyDamage also clears the target's aim
     return next
   })
 
@@ -398,6 +421,8 @@ export const reduce = (state: SoloState, action: Action, rng: Rng = Math.random)
       return applyPush(state, action.propId)
     case 'SetStance':
       return applySetStance(state, action.stance)
+    case 'Aim':
+      return applyAim(state)
     case 'AddWave':
       return applyAddWave(state, action.monsters, rng)
     case 'EndTurn':
