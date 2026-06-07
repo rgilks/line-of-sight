@@ -84,7 +84,19 @@ const queuedFaces =
 let zoom = 1
 const MIN_ZOOM = 0.15
 const MAX_ZOOM = 5
-let panPointer: {id: number; startX: number; startY: number; scrollLeft: number; scrollTop: number} | null = null
+// A trackpad/mouse press on the board. A plain left press is a tentative tap
+// (acts on release) until it moves past TAP_SLOP, at which point it becomes a pan
+// — so a macOS three-finger drag (which the OS delivers as a left-button drag)
+// pans the view. Middle/right or ⌘/Ctrl-left pan from the start.
+let boardDrag: {
+  id: number
+  startX: number
+  startY: number
+  scrollLeft: number
+  scrollTop: number
+  panning: boolean
+  tap: boolean
+} | null = null
 let touchPan: {x: number; y: number; scrollLeft: number; scrollTop: number} | null = null
 let pinch: {startDist: number; startZoom: number; boardX: number; boardY: number} | null = null
 let touchMoved = false
@@ -595,40 +607,57 @@ const handleWheel = (event: WheelEvent): void => {
   })
 }
 
-// Desktop pan: right/middle drag, or ⌘/Ctrl + left-drag (left alone is "act").
-const shouldStartPan = (event: PointerEvent): boolean =>
-  event.button === 1 || event.button === 2 || (event.button === 0 && (event.metaKey || event.ctrlKey))
+// Movement (px) before a plain left press stops being a tap and becomes a pan.
+const TAP_SLOP = 5
 
-const onPanMove = (event: PointerEvent): void => {
-  if (!boardViewport || !panPointer || panPointer.id !== event.pointerId) return
+const onBoardDragMove = (event: PointerEvent): void => {
+  if (!boardViewport || !boardDrag || boardDrag.id !== event.pointerId) return
+  const dx = event.clientX - boardDrag.startX
+  const dy = event.clientY - boardDrag.startY
+  if (!boardDrag.panning && Math.hypot(dx, dy) <= TAP_SLOP) return // still possibly a tap
+  if (!boardDrag.panning) {
+    boardDrag.panning = true
+    boardViewport.classList.add('is-panning')
+  }
   event.preventDefault()
-  boardViewport.scrollLeft = panPointer.scrollLeft - (event.clientX - panPointer.startX)
-  boardViewport.scrollTop = panPointer.scrollTop - (event.clientY - panPointer.startY)
+  boardViewport.scrollLeft = boardDrag.scrollLeft - dx
+  boardViewport.scrollTop = boardDrag.scrollTop - dy
 }
 
-const endPan = (event: PointerEvent): void => {
-  if (!panPointer || panPointer.id !== event.pointerId) return
-  panPointer = null
+const onBoardDragEnd = (event: PointerEvent): void => {
+  if (!boardDrag || boardDrag.id !== event.pointerId) return
+  const tapped = boardDrag.tap && !boardDrag.panning
+  const {clientX, clientY} = event
+  boardDrag = null
   boardViewport?.classList.remove('is-panning')
-  window.removeEventListener('pointermove', onPanMove)
-  window.removeEventListener('pointerup', endPan)
-  window.removeEventListener('pointercancel', endPan)
+  window.removeEventListener('pointermove', onBoardDragMove)
+  window.removeEventListener('pointerup', onBoardDragEnd)
+  window.removeEventListener('pointercancel', onBoardDragEnd)
+  if (tapped) actAt(clientX, clientY) // a click that never dragged = an action
 }
 
-const onPanPointerDown = (event: PointerEvent): void => {
-  if (!boardViewport || !shouldStartPan(event)) return
+// One press handler for mouse + trackpad. ⌘/Ctrl-left, middle, and right pan from
+// the start; a plain left press is a tap that turns into a pan once it drags
+// (covers the macOS three-finger drag, which arrives as a left-button drag).
+const onBoardPointerDown = (event: PointerEvent): void => {
+  if (event.pointerType === 'touch' || !boardViewport) return // touch handled separately
+  const panFromStart = event.button === 1 || event.button === 2 || (event.button === 0 && (event.metaKey || event.ctrlKey))
+  const tap = event.button === 0 && !event.metaKey && !event.ctrlKey
+  if (!panFromStart && !tap) return
   event.preventDefault()
-  panPointer = {
+  boardDrag = {
     id: event.pointerId,
     startX: event.clientX,
     startY: event.clientY,
     scrollLeft: boardViewport.scrollLeft,
-    scrollTop: boardViewport.scrollTop
+    scrollTop: boardViewport.scrollTop,
+    panning: panFromStart,
+    tap
   }
-  boardViewport.classList.add('is-panning')
-  window.addEventListener('pointermove', onPanMove)
-  window.addEventListener('pointerup', endPan)
-  window.addEventListener('pointercancel', endPan)
+  if (panFromStart) boardViewport.classList.add('is-panning')
+  window.addEventListener('pointermove', onBoardDragMove)
+  window.addEventListener('pointerup', onBoardDragEnd)
+  window.addEventListener('pointercancel', onBoardDragEnd)
 }
 
 const blockContextMenu = (event: Event): void => event.preventDefault()
@@ -772,14 +801,6 @@ function actAt(clientX: number, clientY: number): void {
     return
   }
   playerAct({t: 'Move', to: point})
-}
-
-// Mouse "act" is a plain left click (touch is handled by the touch listeners;
-// ⌘/Ctrl-left and right/middle are pan).
-const onActionPointerDown = (event: PointerEvent): void => {
-  if (event.pointerType === 'touch') return
-  if (event.button !== 0 || event.metaKey || event.ctrlKey) return
-  actAt(event.clientX, event.clientY)
 }
 
 // ---- rendering ------------------------------------------------------------
@@ -1204,8 +1225,7 @@ const mount = (): void => {
   const context = canvas.getContext('2d')
   if (!context) throw new Error('Canvas 2D is required.')
   ctx = context
-  canvas.addEventListener('pointerdown', onActionPointerDown)
-  canvas.addEventListener('pointerdown', onPanPointerDown)
+  canvas.addEventListener('pointerdown', onBoardPointerDown)
   canvas.addEventListener('wheel', handleWheel, {passive: false})
   canvas.addEventListener('contextmenu', blockContextMenu)
   canvas.addEventListener('touchstart', onTouchStart, {passive: false})
