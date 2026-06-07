@@ -28,6 +28,7 @@ import {MONSTERS} from './solo/monsters'
 import {weaponById} from './solo/gear'
 import {rangeBandFor} from './solo/combat'
 import {decideMonster} from './solo/ai'
+import {createDiceRoller, type DiceRoller} from '@rgilks/cepheus-dice'
 import {
   activeEntity,
   dexDm,
@@ -62,6 +63,17 @@ let canvas: HTMLCanvasElement
 let ctx: CanvasRenderingContext2D
 let panel: HTMLDivElement
 let boardViewport: HTMLDivElement
+let diceOverlay: HTMLDivElement
+let diceRoller: DiceRoller
+
+// An rng that yields the given die faces first (mapped to rollD6 buckets), then
+// falls back to Math.random — so a visual roll's faces drive the to-hit throw.
+const queuedFaces =
+  (faces: number[]): (() => number) =>
+  () => {
+    const next = faces.shift()
+    return next === undefined ? Math.random() : (next - 0.5) / 6
+  }
 
 // Camera: the canvas backing store stays at map resolution; we zoom by sizing its
 // display box (map × zoom) inside a scrollable viewport and pan via scroll. Click
@@ -402,10 +414,10 @@ const newGame = (seed = Math.floor(Math.random() * 100000)): void => {
 }
 
 // ---- dispatch: reduce + animate the result --------------------------------
-const dispatch = (action: Parameters<typeof reduce>[1]): void => {
+const dispatch = (action: Parameters<typeof reduce>[1], rng?: () => number): void => {
   if (!state) return
   const before = new Map(state.entities.map((entity) => [entity.id, {x: entity.x, y: entity.y}]))
-  state = reduce(state, action)
+  state = reduce(state, action, rng)
   for (const entity of state.entities) {
     const old = before.get(entity.id)
     if (old && (old.x !== entity.x || old.y !== entity.y)) {
@@ -462,6 +474,31 @@ const runMonsters = async (): Promise<void> => {
 const playerAct = (action: Parameters<typeof reduce>[1]): void => {
   if (busy || !state || state.phase.t !== 'playerTurn') return
   dispatch(action)
+}
+
+const showDice = (): void => {
+  diceOverlay.style.display = 'block'
+  diceRoller.resize()
+}
+const hideDice = (): void => {
+  diceOverlay.style.display = 'none'
+}
+
+// An attack: roll the 3D dice, then resolve the to-hit with the settled faces.
+const onAttack = async (targetId: string): Promise<void> => {
+  if (busy || !state || state.phase.t !== 'playerTurn') return
+  const actor = activeEntity(state)
+  if (!actor || actor.faction !== 'pc' || state.actionUsed) return
+  busy = true
+  renderPanel()
+  showDice()
+  const {faces} = await diceRoller.roll(2)
+  dispatch({t: 'Attack', targetId}, queuedFaces([...faces]))
+  await delay(800)
+  hideDice()
+  busy = false
+  renderPanel()
+  requestDraw()
 }
 
 // End the player's turn, then hand off to the monster AI.
@@ -1051,7 +1088,7 @@ const renderPanel = (): void => {
     })
   }
   panel.querySelector<HTMLButtonElement>('#solo-attack')?.addEventListener('click', () => {
-    if (enemy) playerAct({t: 'Attack', targetId: enemy.id})
+    if (enemy) void onAttack(enemy.id)
   })
   panel.querySelector<HTMLButtonElement>('#solo-reload')?.addEventListener('click', () => playerAct({t: 'Reload'}))
   panel.querySelector<HTMLButtonElement>('#solo-medkit')?.addEventListener('click', () => {
@@ -1095,6 +1132,11 @@ const mount = (): void => {
   canvas.addEventListener('touchend', onTouchEnd)
   window.addEventListener('resize', updateCanvasDisplaySize)
 
+  diceOverlay = document.createElement('div')
+  diceOverlay.id = 'solo-dice'
+  boardViewport.appendChild(diceOverlay)
+  diceRoller = createDiceRoller(diceOverlay, {colors: {body: '#ecd5bb', pip: '#1c1c1c'}})
+
   const seedParam = new URLSearchParams(location.search).get('seed')
   const seed = seedParam !== null && Number.isFinite(Number(seedParam)) ? Number(seedParam) : undefined
   newGame(seed)
@@ -1125,6 +1167,7 @@ if (import.meta.env.DEV) {
       renderPanel()
       requestDraw()
     },
+    attack: (id: string) => onAttack(id),
     endTurn: async () => {
       endTurn()
       // give the async monster driver time to finish (tweens + beats)

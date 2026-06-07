@@ -28,6 +28,7 @@
   },
   "dependencies": {
     "@preact/signals": "^2.9.1",
+    "@rgilks/cepheus-dice": "github:rgilks/cepheus-dice",
     "preact": "^10.29.2"
   }
 }

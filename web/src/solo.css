@@ -279,7 +279,18 @@ body {
   padding: 16px;
   overflow: auto;
   text-align: center;
+  position: relative;
   background: radial-gradient(circle at 50% 40%, #060906 0%, #000000 80%);
+}
+
+/* 3D dice overlay (cepheus-dice) shown during a to-hit roll. */
+#solo-dice {
+  position: absolute;
+  inset: 0;
+  display: none;
+  z-index: 5;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(1px);
 }
 
 .solo-board canvas {
