@@ -33,6 +33,7 @@ const pc = (id: string, cx: number, cy: number, order: number): Entity => ({
   armorId: null,
   inventory: [],
   loadedRounds: 15,
+  stance: 'standing',
   initiative: 7,
   order
 })
@@ -84,6 +85,7 @@ const mob = (id: string, cx: number, cy: number): Entity => ({
   armorId: null,
   inventory: [],
   loadedRounds: 0,
+  stance: 'standing',
   initiative: 5,
   order: 9
 })
@@ -114,6 +116,29 @@ describe('solo reducer — Move', () => {
     const state = makeState([pc('a', 1, 1, 0)])
     const next = reduce(state, {t: 'Move', to: {x: 5, y: 5}}) // cell (0,0) = hull margin
     expect(next.entities[0].x).toBe((1 + 0.5) * 30)
+  })
+
+  it('doubles movement cost while crouched', () => {
+    const state = makeState([{...pc('a', 2, 2, 0), stance: 'crouched'}])
+    const next = reduce(state, {t: 'Move', to: {x: (4 + 0.5) * 30, y: (2 + 0.5) * 30}})
+    expect(next.moveRemainingPx).toBeCloseTo(turnBudgetPx(30) - 120)
+  })
+})
+
+describe('solo reducer — SetStance', () => {
+  it('changes stance as a minor action', () => {
+    const state = makeState([pc('a', 2, 2, 0)])
+    const budget = turnBudgetPx(30)
+    const next = reduce(state, {t: 'SetStance', stance: 'crouched'})
+    expect(next.entities[0].stance).toBe('crouched')
+    expect(next.moveRemainingPx).toBeCloseTo(budget - moveBudgetPx(30))
+    expect(next.log.at(-1)).toContain('crouched')
+  })
+
+  it('does not spend budget when already in that stance', () => {
+    const state = makeState([{...pc('a', 2, 2, 0), stance: 'prone'}])
+    const next = reduce(state, {t: 'SetStance', stance: 'prone'})
+    expect(next.moveRemainingPx).toBe(turnBudgetPx(30))
   })
 })
 

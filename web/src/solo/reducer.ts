@@ -17,10 +17,13 @@ import {
   isDead,
   isDown,
   moveBudgetPx,
+  movementCostMultiplier,
   SIGNIFICANT_ACTION_COST,
+  stanceLabel,
   turnBudgetPx,
   withinReach,
   type Action,
+  type CombatStance,
   type Entity,
   type ItemStack,
   type SoloState
@@ -88,16 +91,34 @@ const applyMove = (state: SoloState, to: {x: number; y: number}): SoloState => {
 
   const dest = cellCenter(state.grid, cell.cx, cell.cy)
   const distance = Math.hypot(dest.x - actor.x, dest.y - actor.y)
+  const moveCost = distance * movementCostMultiplier(actor)
   if (distance < 0.5) return state
-  if (distance > state.moveRemainingPx + 0.5) return log(state, 'Out of movement this turn.')
+  if (moveCost > state.moveRemainingPx + 0.5) return log(state, 'Out of movement this turn.')
   if (!canSee(state, actor, dest.x, dest.y)) return log(state, "Can't move where you can't see.")
   if (blockedCells(state, actor).has(cellKey(cell.cx, cell.cy))) return log(state, 'Something is in the way.')
 
   return {
     ...state,
     entities: replace(state, actor.id, (e) => ({...e, x: dest.x, y: dest.y})),
-    moveRemainingPx: state.moveRemainingPx - distance
+    moveRemainingPx: state.moveRemainingPx - moveCost
   }
+}
+
+// --- stance ----------------------------------------------------------------
+const applySetStance = (state: SoloState, stance: CombatStance): SoloState => {
+  const actor = activeEntity(state)
+  if (!actor || !isActive(actor)) return state
+  if (actor.stance === stance) return state
+  const cost = minorCost(state, actor)
+  if (!enough(state, cost)) return log(state, `${actor.label} has no actions left this turn.`)
+  return log(
+    {
+      ...state,
+      entities: replace(state, actor.id, (e) => ({...e, stance})),
+      moveRemainingPx: state.moveRemainingPx - cost
+    },
+    `${actor.label} goes ${stanceLabel(stance).toLowerCase()}.`
+  )
 }
 
 // --- doors -----------------------------------------------------------------
@@ -375,6 +396,8 @@ export const reduce = (state: SoloState, action: Action, rng: Rng = Math.random)
       return applyDrop(state, action.stackIndex)
     case 'PushProp':
       return applyPush(state, action.propId)
+    case 'SetStance':
+      return applySetStance(state, action.stance)
     case 'AddWave':
       return applyAddWave(state, action.monsters, rng)
     case 'EndTurn':

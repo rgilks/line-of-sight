@@ -43,6 +43,18 @@ const distancePx = (a: Entity, b: Entity): number => Math.hypot(a.x - b.x, a.y -
 // Skill DM for a weapon: the named skill's level, or the SRD unskilled −3.
 const skillFor = (entity: Entity, skill: string): number => entity.skills[skill] ?? -3
 
+/** Ranged attack DM from the target's stance (Cepheus SRD attack modifiers table). */
+export const stanceAttackDm = (target: Entity, band: RangeBand): number => {
+  if (target.stance !== 'prone') return 0
+  if (band === 'personal') return 2
+  if (band === 'close') return 0
+  return -2
+}
+
+/** Prone characters cannot make melee attacks. */
+export const blockedByStance = (attacker: Entity, weaponSkill: string): boolean =>
+  attacker.stance === 'prone' && weaponSkill === 'Melee Combat'
+
 export type AttackResult = {
   outOfRange: boolean
   hit: boolean
@@ -64,9 +76,18 @@ export const resolveAttack = (attacker: Entity, target: Entity, rng?: Rng, gridS
   if (rangeDm === undefined) {
     return {outOfRange: true, hit: false, roll: 0, effect: 0, band, damage: 0}
   }
+  if (blockedByStance(attacker, weapon.skill)) {
+    return {outOfRange: true, hit: false, roll: 0, effect: 0, band, damage: 0}
+  }
 
   const [d1, d2] = roll2D6(rng)
-  const roll = d1 + d2 + skillFor(attacker, weapon.skill) + characteristicDm(attacker.stats.dex) + rangeDm
+  const roll =
+    d1 +
+    d2 +
+    skillFor(attacker, weapon.skill) +
+    characteristicDm(attacker.stats.dex) +
+    rangeDm +
+    stanceAttackDm(target, band)
   const effect = roll - 8
   if (effect < 0) return {outOfRange: false, hit: false, roll, effect, band, damage: 0}
 

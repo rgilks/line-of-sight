@@ -8,6 +8,12 @@ import type {WalkGrid} from './grid'
 
 export type Faction = 'pc' | 'monster'
 
+// Cepheus SRD combat posture. Changing stance is a minor action.
+export type CombatStance = 'standing' | 'crouched' | 'prone'
+export const STANCES: CombatStance[] = ['standing', 'crouched', 'prone']
+export const stanceLabel = (stance: CombatStance): string =>
+  stance === 'standing' ? 'Standing' : stance === 'crouched' ? 'Crouched' : 'Prone'
+
 // The three Cepheus physical characteristics. They double as hit points (Cepheus
 // SRD): damage reduces END first, then STR or DEX. These mirror the lowercase
 // names the character generator uses (ccg Characteristics.{str,dex,end}), so a
@@ -46,11 +52,15 @@ export type Entity = {
   /** Per-round movement in metres; defaults to the Cepheus 6 m. Monsters vary. */
   moveMeters?: number
   // Combat bookkeeping.
+  stance: CombatStance
   initiative: number | null
   order: number // stable join index; ties in initiative break by this
   // monster-only behaviour hint (Phase 4 AI); PCs leave it undefined.
   behaviour?: 'hunter' | 'lurker'
 }
+
+/** Crouched characters move at half speed — each metre costs double budget. */
+export const movementCostMultiplier = (entity: Entity): number => (entity.stance === 'crouched' ? 2 : 1)
 
 // Cepheus characteristic DM table: the modifier a characteristic value confers.
 //   0 ⇒ -3 · 1-2 ⇒ -2 · 3-5 ⇒ -1 · 6-8 ⇒ 0 · 9-11 ⇒ +1 · 12-14 ⇒ +2 · 15+ ⇒ +3
@@ -127,6 +137,7 @@ export type Action =
   | {t: 'PickUp'; groundItemId: string}
   | {t: 'Drop'; stackIndex: number}
   | {t: 'PushProp'; propId: string}
+  | {t: 'SetStance'; stance: CombatStance}
   | {t: 'AddWave'; monsters: Entity[]}
   | {t: 'EndTurn'}
 

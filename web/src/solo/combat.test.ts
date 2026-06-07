@@ -2,7 +2,7 @@ import {describe, expect, it} from 'vitest'
 import type {Rng} from '../../../core/dice'
 import type {Entity} from './model'
 import {isDead, isDown} from './model'
-import {applyDamage, applyHeal, resolveAttack, resolveFirstAid} from './combat'
+import {applyDamage, applyHeal, resolveAttack, resolveFirstAid, stanceAttackDm} from './combat'
 
 // Deterministic dice: each call yields the next face (1..6) mapped to mid-bucket
 // so rollD6 returns exactly that face. Attack throws consume 2 faces, then weapon
@@ -30,6 +30,7 @@ const ent = (over: Partial<Entity>): Entity => ({
   armorId: null,
   inventory: [],
   loadedRounds: 0,
+  stance: 'standing',
   initiative: null,
   order: 0,
   ...over
@@ -62,6 +63,22 @@ describe('resolveAttack', () => {
     const result = resolveAttack(attacker, target, seqRng([6, 5, 1, 1, 1]), 36)
     expect(result.effect).toBe(8)
     expect(result.damage).toBe(1)
+  })
+
+  it('applies prone stance DMs to ranged attacks', () => {
+    const prone = ent({stance: 'prone'})
+    expect(stanceAttackDm(prone, 'personal')).toBe(2)
+    expect(stanceAttackDm(prone, 'close')).toBe(0)
+    expect(stanceAttackDm(prone, 'short')).toBe(-2)
+    expect(stanceAttackDm(ent({stance: 'standing'}), 'medium')).toBe(0)
+  })
+
+  it('blocks melee attacks while prone', () => {
+    const attacker = ent({stance: 'prone', weaponId: 'blade', skills: {'Melee Combat': 2}})
+    const target = ent({x: 20, y: 0})
+    const result = resolveAttack(attacker, target, seqRng([6, 6]), 36)
+    expect(result.outOfRange).toBe(true)
+    expect(result.hit).toBe(false)
   })
 
   it('reports out of range when the band is beyond the weapon', () => {

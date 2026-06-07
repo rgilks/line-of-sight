@@ -40,8 +40,11 @@ import {
   MINOR_ACTIONS_PER_ROUND,
   moveBudgetPx,
   SIGNIFICANT_ACTION_COST,
+  STANCES,
+  stanceLabel,
   turnBudgetPx,
   withinReach,
+  type CombatStance,
   type Entity,
   type GroundItem,
   type ItemStack,
@@ -248,6 +251,7 @@ const spawnParty = (map: GeneratedMap, grid: WalkGrid): Entity[] => {
       armorId: pre.armorId,
       inventory,
       loadedRounds: weapon.magazine ?? 0,
+      stance: 'standing',
       initiative: null,
       order: index
     }
@@ -275,6 +279,7 @@ const monsterEntity = (block: (typeof MONSTERS)[number], x: number, y: number): 
     armorId: block.armorId,
     inventory: [],
     loadedRounds: 0,
+    stance: 'standing',
     moveMeters: block.moveMeters,
     initiative: null,
     order: 100 + monsterCounter,
@@ -430,6 +435,7 @@ const newGame = (seed = Math.floor(Math.random() * 100000)): void => {
   canvas.height = map.height
   sizeFogLayers(map.width, map.height)
   focusOnSquad()
+  focusOnActive()
   renderPanel()
   requestDraw()
 }
@@ -447,6 +453,7 @@ const dispatch = (action: Parameters<typeof reduce>[1], rng?: () => number): voi
     }
   }
   if (!wasLost && state.phase.t === 'lost') playUi('lose')
+  if (action.t === 'EndTurn' || action.t === 'AddWave') focusOnActive()
   renderPanel()
   requestDraw()
 }
@@ -660,6 +667,27 @@ const focusOnSquad = (): void => {
   const cy = (minY + maxY) / 2
   boardViewport.scrollLeft = cx * zoom - availW / 2
   boardViewport.scrollTop = cy * zoom - availH / 2
+}
+
+// Pan the viewport so a board point sits in the middle of the visible map area.
+const focusOnPoint = (x: number, y: number): void => {
+  if (!state || !boardViewport) return
+  const availW = boardViewport.clientWidth
+  const availH = boardViewport.clientHeight
+  if (availW <= 0 || availH <= 0) return
+  const maxScrollX = Math.max(0, state.map.width * zoom - availW)
+  const maxScrollY = Math.max(0, state.map.height * zoom - availH)
+  boardViewport.scrollLeft = Math.min(maxScrollX, Math.max(0, x * zoom - availW / 2))
+  boardViewport.scrollTop = Math.min(maxScrollY, Math.max(0, y * zoom - availH / 2))
+}
+
+// Centre on whoever currently holds the initiative.
+const focusOnActive = (): void => {
+  if (!state) return
+  const actor = activeEntity(state)
+  if (!actor) return
+  const at = renderPos.get(actor.id) ?? {x: actor.x, y: actor.y}
+  focusOnPoint(at.x, at.y)
 }
 
 const setZoom = (
@@ -1186,56 +1214,170 @@ const draw = (): void => {
 const escapeHtml = (text: string): string =>
   text.replace(/[&<>]/g, (c) => (c === '&' ? '&amp;' : c === '<' ? '&lt;' : '&gt;'))
 
-// --- Traveller-style character read-outs for the rail --------------------
+// --- Traveller-style character read-outs for the combat HUD ----------------
 const hexDigit = (n: number): string => Math.max(0, Math.round(n)).toString(16).toUpperCase()
-// UPP from the three physical characteristics we model (STR DEX END), in hex —
-// reflects current values, so wounds show up in the profile.
 const uppOf = (e: Entity): string => `${hexDigit(e.stats.str)}${hexDigit(e.stats.dex)}${hexDigit(e.stats.end)}`
-const skillsOf = (e: Entity): string =>
+const topSkillsOf = (e: Entity, max = 3): string[] =>
   Object.entries(e.skills)
     .sort((a, b) => b[1] - a[1])
+    .slice(0, max)
     .map(([name, level]) => `${name}-${level}`)
-    .join(', ') || 'no skills'
 const gearOf = (e: Entity): string => {
   const w = weaponById(e.weaponId)
   const ammo = w.magazine !== undefined ? ` ${e.loadedRounds}/${w.magazine}` : ''
   const armour = e.armorId ? `${ARMORS[e.armorId]?.name ?? '—'} AR${ARMORS[e.armorId]?.ar ?? 0}` : 'unarmoured'
   return `${w.name}${ammo} · ${armour}`
 }
+const weaponCompactOf = (e: Entity): string => {
+  const w = weaponById(e.weaponId)
+  return w.magazine !== undefined ? `${w.name} ${e.loadedRounds}/${w.magazine}` : w.name
+}
+const endOf = (e: Entity): string => `${e.stats.end}/${e.statsMax.end}`
+const conditionBadge = (e: Entity): string =>
+  isDead(e) ? '<span class="solo-badge is-kia">KIA</span>' : isDown(e) ? '<span class="solo-badge is-down">DOWN</span>' : ''
 
-// The initiative rail: every combatant in turn order — the squad (always) plus
-// living enemies the squad can currently see (hidden foes stay off the list, in
-// keeping with the board's fog). Squad rows carry a Traveller-style read-out: UPP
-// (STR DEX END in hex), skills, and the weapon/armour they carry.
-const combatantRailHtml = (s: SoloState): string =>
-  s.entities
-    .filter((e) => e.faction === 'pc' || (!isDead(e) && visibleToSquad(s, e.x, e.y)))
-    .map((e) => {
-      const def = counterDefinitions.find((d) => d.kind === e.kind)
-      const foe = e.faction === 'monster' ? ' solo-combatant-foe' : ''
-      const active = e.id === activeEntity(s)?.id ? ' is-active' : ''
-      const selected = e.id === selectedId ? ' is-selected' : ''
-      const condition = isDead(e) ? ' · KIA' : isDown(e) ? ' · DOWN' : ''
-      const hp = vitalityRatio(e)
-      const meta =
-        e.faction === 'pc'
-          ? `<div class="solo-meta"><span class="solo-upp" title="STR DEX END (hex)">UPP ${uppOf(e)}</span> · ${escapeHtml(skillsOf(e))}</div>
-             <div class="solo-meta">${escapeHtml(gearOf(e))}</div>`
-          : ''
-      return `<li class="solo-combatant${foe}${active}${selected}" data-select="${e.id}">
-        <img class="solo-combatant-portrait" src="${def?.portrait ?? ''}" alt="" />
-        <div class="solo-combatant-main">
-          <span class="solo-combatant-label">${e.label}${condition}</span>
-          ${meta}
-          <div class="solo-bar"><div class="solo-bar-fill" style="width:${Math.round(hp * 100)}%;background:${healthColor(hp)}"></div></div>
+// Turn order starting at the active combatant; squad always listed, visible foes only.
+const trackCombatants = (s: SoloState): Entity[] => {
+  const out: Entity[] = []
+  const count = s.entities.length
+  for (let i = 0; i < count; i += 1) {
+    const entity = s.entities[(s.turnPtr + i) % count]
+    if (entity.faction === 'pc' || (!isDead(entity) && visibleToSquad(s, entity.x, entity.y))) out.push(entity)
+  }
+  return out
+}
+
+type TrackCombat = {
+  playerTurn: boolean
+  squares: number
+  actionUsed: boolean
+  stance: CombatStance
+  canSetStance: boolean
+  attackLabel: string
+  canAttack: boolean
+  canReload: boolean
+  canMedkit: boolean
+  canPickup: boolean
+  canPush: boolean
+  targetNote: string
+}
+
+const SOLO_ICON = {
+  attack:
+    '<svg class="solo-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="12" r="2.2" fill="currentColor"/><path d="M12 3v4M12 17v4M3 12h4M17 12h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>',
+  reload:
+    '<svg class="solo-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4a8 8 0 1 1-5.3 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M7 6.5 4.5 9 7 11.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  medkit:
+    '<svg class="solo-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="7" width="14" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 10v6M9 13h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+  pickup:
+    '<svg class="solo-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 9V6a4 4 0 1 1 8 0v3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><rect x="6" y="9" width="12" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 12v4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+  push:
+    '<svg class="solo-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="8" height="8" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M15 14h5M18 11l3 3-3 3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  stand:
+    '<svg class="solo-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5.5" r="2.2" fill="currentColor"/><path d="M12 8v9M9.5 20h5M10 12l2 3 2-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  crouch:
+    '<svg class="solo-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="14" cy="7" r="2.2" fill="currentColor"/><path d="M8 18h8M10.5 18l1.5-5 3 2 2-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  prone:
+    '<svg class="solo-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="7" cy="12" r="2.2" fill="currentColor"/><path d="M10 12h10M10 12l2-2M10 12l2 2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  end:
+    '<svg class="solo-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h8l-2 12H10L8 6z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M9 6l1-2h4l1 2" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>'
+} as const
+
+const iconBtn = (id: string | null, icon: string, label: string, enabled: boolean, extraClass = ''): string => {
+  const idAttr = id ? ` id="${id}"` : ''
+  return `<button${idAttr} class="solo-icon-btn${extraClass ? ` ${extraClass}` : ''}" type="button" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}"${enabled ? '' : ' disabled'}>${icon}</button>`
+}
+
+const stanceBtn = (value: CombatStance, current: CombatStance, enabled: boolean): string => {
+  const label = stanceLabel(value)
+  const active = value === current ? ' is-active' : ''
+  const icon = SOLO_ICON[value === 'standing' ? 'stand' : value === 'crouched' ? 'crouch' : 'prone']
+  return `<button class="solo-icon-btn is-stance${active}" type="button" data-stance="${value}" title="${label}" aria-label="${label}" aria-pressed="${value === current}"${enabled ? '' : ' disabled'}>${icon}</button>`
+}
+
+const trackControlsHtml = (combat: TrackCombat): string => {
+  const actionChip = combat.actionUsed
+    ? '<span class="solo-chip is-spent">Action spent</span>'
+    : '<span class="solo-chip is-ready">Action ready</span>'
+  return `<div class="solo-track-controls">
+    <div class="solo-track-chips">
+      <span class="solo-chip">${combat.squares} sq left</span>
+      ${actionChip}
+      <span class="solo-chip solo-chip-stance">${stanceLabel(combat.stance)}</span>
+    </div>
+    ${combat.targetNote ? `<div class="solo-target-card">${escapeHtml(combat.targetNote)}</div>` : ''}
+    <div class="solo-icon-bar">
+      <div class="solo-icon-group" role="group" aria-label="Combat stance">
+        ${STANCES.map((value) => stanceBtn(value, combat.stance, combat.canSetStance)).join('')}
+      </div>
+      <span class="solo-icon-sep" aria-hidden="true"></span>
+      ${iconBtn('solo-attack', SOLO_ICON.attack, combat.attackLabel, combat.canAttack, 'is-primary')}
+      ${iconBtn('solo-reload', SOLO_ICON.reload, 'Reload', combat.canReload)}
+      ${iconBtn('solo-medkit', SOLO_ICON.medkit, 'Medkit', combat.canMedkit)}
+      ${iconBtn('solo-pickup', SOLO_ICON.pickup, 'Pick up', combat.canPickup)}
+      ${iconBtn('solo-push', SOLO_ICON.push, 'Push crate', combat.canPush)}
+      ${iconBtn('solo-end', SOLO_ICON.end, 'End turn (Space)', true, 'is-end')}
+    </div>
+  </div>`
+}
+
+const trackRowHtml = (s: SoloState, entity: Entity, rank: number, combat: TrackCombat | null): string => {
+  const def = counterDefinitions.find((d) => d.kind === entity.kind)
+  const actor = activeEntity(s)
+  const active = entity.id === actor?.id
+  const selected = entity.id === selectedId
+  const expanded = active || selected
+  const acting = active && entity.faction === 'pc' && !!combat?.playerTurn
+  const foe = entity.faction === 'monster'
+  const hp = vitalityRatio(entity)
+  const detail =
+    entity.faction === 'pc' && expanded
+      ? `<div class="solo-track-detail">
+          <span class="solo-tag solo-tag-upp" title="STR DEX END (hex)">UPP ${uppOf(entity)}</span>
+          ${topSkillsOf(entity)
+            .map((skill) => `<span class="solo-tag">${escapeHtml(skill)}</span>`)
+            .join('')}
+          <span class="solo-track-gear">${escapeHtml(gearOf(entity))}</span>
+        </div>`
+      : foe
+        ? ''
+        : `<div class="solo-track-loadout">${escapeHtml(weaponCompactOf(entity))}</div>`
+  const status = active ? '<span class="solo-track-now">NOW</span>' : ''
+  const stanceTag =
+    entity.faction === 'pc' && entity.stance !== 'standing'
+      ? `<span class="solo-tag solo-tag-stance">${stanceLabel(entity.stance)}</span>`
+      : ''
+  const controls = acting && combat ? trackControlsHtml(combat) : ''
+  return `<li class="solo-track-row${foe ? ' is-foe' : ' is-pc'}${active ? ' is-active' : ''}${selected ? ' is-selected' : ''}${expanded ? ' is-expanded' : ''}${acting ? ' is-acting' : ''}" data-select="${entity.id}">
+    <div class="solo-track-summary">
+      <span class="solo-track-rank">${rank}</span>
+      <img class="solo-track-portrait" src="${def?.portrait ?? ''}" alt="" />
+      <div class="solo-track-body">
+        <div class="solo-track-head">
+          <span class="solo-track-name">${escapeHtml(entity.label)}</span>
+          ${conditionBadge(entity)}
+          ${stanceTag}
+          ${status}
+          <span class="solo-track-init" title="Initiative">${entity.initiative ?? '—'}</span>
         </div>
-        <span class="solo-combatant-score">${e.initiative ?? '—'}</span>
-      </li>`
-    })
-    .join('')
+        <div class="solo-track-vitals">
+          <span class="solo-track-end">END ${endOf(entity)}</span>
+          <div class="solo-track-bar"><div class="solo-track-bar-fill" style="width:${Math.round(hp * 100)}%;background:${healthColor(hp)}"></div></div>
+        </div>
+        ${detail}
+      </div>
+    </div>
+    ${controls}
+  </li>`
+}
 
-const btn = (id: string, label: string, enabled: boolean, ghost = false): string =>
-  `<button id="${id}" class="solo-button${ghost ? ' solo-button-ghost' : ''} solo-button-sm"${enabled ? '' : ' disabled'}>${label}</button>`
+const trackHtml = (s: SoloState, combat: TrackCombat | null): string =>
+  trackCombatants(s).map((entity, index) => trackRowHtml(s, entity, index + 1, combat)).join('')
+
+const logHtml = (lines: string[]): string =>
+  lines.length === 0
+    ? '<div class="solo-log-empty">No events yet.</div>'
+    : lines.map((line) => `<div class="solo-log-line">${line}</div>`).join('')
 
 const renderPanel = (): void => {
   if (!state) return
@@ -1262,8 +1404,9 @@ const renderPanel = (): void => {
     const band = rangeBandFor(Math.hypot(actor.x - enemy.x, actor.y - enemy.y), s.grid.gridScale)
     const inRange = weapon.rangeDm[band] !== undefined
     const hasAmmo = weapon.magazine === undefined || actor.loadedRounds > 0
-    canAttack = canSignificant && inRange && hasAmmo
-    attackLabel = `Attack ${enemy.label}`
+    const meleeBlocked = actor.stance === 'prone' && weapon.skill === 'Melee Combat'
+    canAttack = canSignificant && inRange && hasAmmo && !meleeBlocked
+    attackLabel = meleeBlocked ? 'No melee while prone' : `Attack ${enemy.label}`
     targetNote = `${enemy.label} · ${enemy.stats.end}/${enemy.statsMax.end} END · ${inRange ? band : `out of range (${band})`}${hasAmmo ? '' : ' · no ammo'}${canAttack ? ' · double-click or F to fire' : ''}`
   } else if (selectedEnemy) {
     // Selected, squad-visible, but this character can't see it.
@@ -1299,59 +1442,74 @@ const renderPanel = (): void => {
     : undefined
   const canPush = canSignificant && !!pushable
 
-  const ammo = actor && weapon?.magazine !== undefined ? `${actor.loadedRounds}/${weapon.magazine}` : '—'
-  const recentLog = s.log.slice(-6).map(escapeHtml).join('<br/>')
+  const recentLog = s.log.slice(-8).map(escapeHtml)
   const over = s.phase.t === 'lost' || s.phase.t === 'won'
   const overText = s.phase.t === 'won' ? 'Survived — the deck is clear.' : 'Squad lost.'
-  const turnLine = busy
-    ? 'Hostiles acting…'
-    : actor
-      ? `${actor.label}'s turn · ${squares} sq${s.actionUsed ? ' · acted' : ' · action ready'} · ${weapon?.name ?? ''} ${ammo}`
-      : ''
+  const playerTurn = !!actor && actor.faction === 'pc' && !busy
+  const trackCount = trackCombatants(s).length
+  const trackCombat: TrackCombat | null = over
+    ? null
+    : {
+        playerTurn,
+        squares,
+        actionUsed: s.actionUsed,
+        stance: actor?.stance ?? 'standing',
+        canSetStance: playerTurn && canMinor,
+        attackLabel,
+        canAttack,
+        canReload,
+        canMedkit,
+        canPickup,
+        canPush,
+        targetNote
+      }
+  const busyBanner = busy ? '<div class="solo-busy-banner">Hostiles acting…</div>' : ''
 
   panel.innerHTML = `
-    <header class="solo-brand">
-      <img class="solo-brand-mark" src="/favicon.svg" alt="" />
-      <div class="solo-brand-text">
-        <span class="solo-brand-eyebrow">CEPHEUS</span>
-        <span class="solo-brand-tool">Survive the Horde</span>
-        <span class="solo-brand-role">Round ${s.round} · Wave ${s.wave}/${s.wavesTotal} · seed ${s.seed}</span>
+    <header class="solo-hud-top">
+      <img class="solo-hud-mark" src="/favicon.svg" alt="" />
+      <div class="solo-hud-title">
+        <span class="solo-hud-eyebrow">CEPHEUS</span>
+        <span class="solo-hud-name">Survive the Horde</span>
+      </div>
+      <div class="solo-hud-meta">
+        <span class="solo-hud-stat">R${s.round}</span>
+        <span class="solo-hud-stat">W${s.wave}/${s.wavesTotal}</span>
       </div>
     </header>
-    <section class="solo-section">
-      <h2 class="solo-h">Initiative</h2>
-      <ol class="solo-combat-list">${combatantRailHtml(s)}</ol>
+
+    <section class="solo-hud-track">
+      <div class="solo-hud-track-head">
+        <h2 class="solo-hud-label">Turn order</h2>
+        <span class="solo-hud-count">${trackCount}</span>
+      </div>
+      ${busyBanner}
+      <ol class="solo-track-list">${trackHtml(s, trackCombat)}</ol>
     </section>
+
     ${
       over
-        ? `<section class="solo-section"><div class="solo-banner${s.phase.t === 'won' ? ' is-won' : ''}">${overText}</div>
-           <button id="solo-new" class="solo-button">New game</button></section>`
-        : `<section class="solo-section">
-      <div class="solo-turn">${turnLine}</div>
-      ${targetNote ? `<div class="solo-target">${escapeHtml(targetNote)}</div>` : ''}
-      <div class="solo-actions">
-        ${btn('solo-attack', attackLabel, canAttack)}
-        ${btn('solo-reload', 'Reload', canReload, true)}
-        ${btn('solo-medkit', 'Medkit', canMedkit, true)}
-        ${btn('solo-pickup', 'Pick up', canPickup, true)}
-        ${btn('solo-push', 'Push crate', canPush, true)}
-      </div>
-      <button id="solo-end" class="solo-button">End turn · Space ↻</button>
+        ? `<section class="solo-hud-outcome">
+            <div class="solo-outcome${s.phase.t === 'won' ? ' is-won' : ''}">${overText}</div>
+            <button id="solo-new" class="solo-foot-btn" type="button">New game</button>
+          </section>`
+        : ''
+    }
+
+    <section class="solo-hud-log">
+      <h2 class="solo-hud-label">Combat log</h2>
+      <div class="solo-log-feed">${logHtml(recentLog)}</div>
     </section>
-    <section class="solo-section">
-      <div class="solo-log">${recentLog}</div>
-    </section>
-    <section class="solo-section">
-      <button id="solo-new" class="solo-button solo-button-ghost solo-button-sm">New deck</button>
-      <label class="solo-check"><input type="checkbox" id="solo-grid" ${showGrid ? 'checked' : ''}/> Show floor grid</label>
-    </section>
-    <p class="solo-hint">Each turn: move and take one action (attack, reload, medkit…), or skip the
-    action to <b>run</b> up to ${MINOR_ACTIONS_PER_ROUND * 6} m. Double-click a foe to fire (or target it,
-    then <b>F</b>); tap the floor to move; <b>Space</b> ends your turn; drag to pan.</p>`
-    }`
+
+    <footer class="solo-hud-foot">
+      <button id="solo-new" class="solo-foot-btn" type="button">New deck</button>
+      <label class="solo-foot-check"><input type="checkbox" id="solo-grid" ${showGrid ? 'checked' : ''}/> Grid</label>
+      <p class="solo-foot-hint">Move + one action, or run ${MINOR_ACTIONS_PER_ROUND * 6} m. Double-click or <b>F</b> to fire.</p>
+    </footer>`
 
   for (const el of panel.querySelectorAll<HTMLElement>('[data-select]')) {
-    el.addEventListener('click', () => {
+    el.addEventListener('click', (event) => {
+      if ((event.target as HTMLElement).closest('button')) return
       const id = el.dataset.select ?? null
       selectedId = selectedId === id ? null : id
       if (selectedId) playUi('select')
@@ -1385,6 +1543,15 @@ const renderPanel = (): void => {
     }
   })
   panel.querySelector<HTMLButtonElement>('#solo-end')?.addEventListener('click', () => endTurn())
+  for (const btn of panel.querySelectorAll<HTMLButtonElement>('[data-stance]')) {
+    btn.addEventListener('click', (event) => {
+      event.stopPropagation()
+      const stance = btn.dataset.stance as CombatStance
+      if (!STANCES.includes(stance)) return
+      playUi('select')
+      playerAct({t: 'SetStance', stance})
+    })
+  }
   panel.querySelector<HTMLButtonElement>('#solo-new')?.addEventListener('click', () => newGame())
   panel.querySelector<HTMLInputElement>('#solo-grid')?.addEventListener('change', (event) => {
     showGrid = (event.target as HTMLInputElement).checked
@@ -1415,7 +1582,10 @@ const mount = (): void => {
   canvas.addEventListener('touchstart', onTouchStart, {passive: false})
   canvas.addEventListener('touchmove', onTouchMove, {passive: false})
   canvas.addEventListener('touchend', onTouchEnd)
-  window.addEventListener('resize', updateCanvasDisplaySize)
+  window.addEventListener('resize', () => {
+    updateCanvasDisplaySize()
+    focusOnActive()
+  })
   // Unlock the Web Audio context on the first interaction so weapon sounds play.
   window.addEventListener('pointerdown', () => primeAudio(), {once: true})
 
