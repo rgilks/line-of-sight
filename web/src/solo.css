@@ -132,6 +132,25 @@ body {
   box-shadow: 0 0 10px var(--glow);
 }
 
+/* Enemy combatants in the initiative rail — red accent to distinguish from squad. */
+.solo-combatant-foe {
+  background: rgba(255, 72, 72, 0.05);
+  border-color: rgba(255, 72, 72, 0.3);
+}
+
+.solo-combatant-foe .solo-combatant-label {
+  color: rgba(255, 150, 150, 0.95);
+}
+
+.solo-combatant-foe .solo-combatant-score {
+  color: rgba(255, 114, 114, 0.95);
+}
+
+.solo-combatant-foe .solo-combatant-portrait {
+  outline: 1px solid rgba(255, 72, 72, 0.5);
+  outline-offset: -1px;
+}
+
 .solo-combatant.is-selected {
   outline: 1px solid var(--border-strong);
 }

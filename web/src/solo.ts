@@ -1182,16 +1182,20 @@ const draw = (): void => {
 const escapeHtml = (text: string): string =>
   text.replace(/[&<>]/g, (c) => (c === '&' ? '&amp;' : c === '<' ? '&lt;' : '&gt;'))
 
-const squadRailHtml = (s: SoloState): string =>
+// The initiative rail: every combatant in turn order — the squad (always) plus
+// living enemies the squad can currently see (hidden foes stay off the list, in
+// keeping with the board's fog).
+const combatantRailHtml = (s: SoloState): string =>
   s.entities
-    .filter((e) => e.faction === 'pc')
+    .filter((e) => e.faction === 'pc' || (!isDead(e) && visibleToSquad(s, e.x, e.y)))
     .map((e) => {
       const def = counterDefinitions.find((d) => d.kind === e.kind)
+      const foe = e.faction === 'monster' ? ' solo-combatant-foe' : ''
       const active = e.id === activeEntity(s)?.id ? ' is-active' : ''
       const selected = e.id === selectedId ? ' is-selected' : ''
       const condition = isDead(e) ? ' · KIA' : isDown(e) ? ' · DOWN' : ''
       const hp = vitalityRatio(e)
-      return `<li class="solo-combatant${active}${selected}" data-select="${e.id}">
+      return `<li class="solo-combatant${foe}${active}${selected}" data-select="${e.id}">
         <img class="solo-combatant-portrait" src="${def?.portrait ?? ''}" alt="" />
         <div class="solo-combatant-main">
           <span class="solo-combatant-label">${e.label}${condition}</span>
@@ -1283,8 +1287,8 @@ const renderPanel = (): void => {
       </div>
     </header>
     <section class="solo-section">
-      <h2 class="solo-h">Squad</h2>
-      <ol class="solo-combat-list">${squadRailHtml(s)}</ol>
+      <h2 class="solo-h">Initiative</h2>
+      <ol class="solo-combat-list">${combatantRailHtml(s)}</ol>
     </section>
     ${
       over
@@ -1318,6 +1322,7 @@ const renderPanel = (): void => {
     el.addEventListener('click', () => {
       const id = el.dataset.select ?? null
       selectedId = selectedId === id ? null : id
+      if (selectedId) playUi('select')
       renderPanel()
       requestDraw()
     })
