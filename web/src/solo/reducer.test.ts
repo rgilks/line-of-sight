@@ -1,6 +1,7 @@
 import {describe, expect, it} from 'vitest'
 import {defaultSpec, type GeneratedMap} from '../synth/types'
 import type {Occluder} from '../../../core/los'
+import type {Rng} from '../../../core/dice'
 import {buildWalkGrid} from './grid'
 import {moveBudgetPx, type Entity, type SoloState} from './model'
 import {reduce} from './reducer'
@@ -46,13 +47,43 @@ const makeState = (entities: Entity[], occluders: Occluder[] = []): SoloState =>
     doorStates: {},
     sightRadius: 1000,
     entities,
+    ground: [],
     turnPtr: 0,
     round: 1,
     moveRemainingPx: moveBudgetPx(grid.gridScale),
+    actionUsed: false,
     phase: {t: 'playerTurn'},
     log: []
   }
 }
+
+// Deterministic dice for the combat actions (see combat.test.ts).
+const seqRng = (faces: number[]): Rng => {
+  let i = 0
+  return () => {
+    const face = faces[i % faces.length]
+    i += 1
+    return (face - 0.5) / 6
+  }
+}
+
+const mob = (id: string, cx: number, cy: number): Entity => ({
+  id,
+  faction: 'monster',
+  kind: 'insectoid',
+  label: id,
+  x: (cx + 0.5) * 30,
+  y: (cy + 0.5) * 30,
+  stats: {str: 8, dex: 8, end: 10},
+  statsMax: {str: 8, dex: 8, end: 10},
+  skills: {'Melee Combat': 1},
+  weaponId: 'claws',
+  armorId: null,
+  inventory: [],
+  loadedRounds: 0,
+  initiative: 5,
+  order: 9
+})
 
 describe('solo reducer — Move', () => {
   it('moves the active PC to a reachable floor cell and spends budget', () => {
@@ -93,6 +124,35 @@ describe('solo reducer — EndTurn', () => {
     const afterWrap = reduce(afterFirst, {t: 'EndTurn'})
     expect(afterWrap.turnPtr).toBe(0)
     expect(afterWrap.round).toBe(2)
+  })
+})
+
+describe('solo reducer — combat actions', () => {
+  it('attacks an adjacent monster: spends ammo + the action, deals damage', () => {
+    const attacker = pc('a', 2, 2, 0) // autopistol, Gun Combat 1, loaded 15
+    const state = makeState([attacker, mob('m', 3, 2)]) // monster one cell east (close)
+    // 2D6 = 6,6 → 12 +1(skill) +0(dexDm 7) +0(autopistol close) = 13, effect 5
+    // damage 3D6−3 = (4+4+4)−3 = 9 +5 = 14, no armour
+    const next = reduce(state, {t: 'Attack', targetId: 'm'}, seqRng([6, 6, 4, 4, 4]))
+    const monster = next.entities.find((e) => e.id === 'm')
+    expect(monster?.stats.end).toBeLessThan(10)
+    expect(next.entities.find((e) => e.id === 'a')?.loadedRounds).toBe(14)
+    expect(next.actionUsed).toBe(true)
+  })
+
+  it('refuses a second significant action in the same turn', () => {
+    const state = {...makeState([pc('a', 2, 2, 0), mob('m', 3, 2)]), actionUsed: true}
+    const next = reduce(state, {t: 'Attack', targetId: 'm'}, seqRng([6, 6, 4, 4, 4]))
+    expect(next.entities.find((e) => e.id === 'm')?.stats.end).toBe(10) // unchanged
+  })
+
+  it('reloads from spare ammo up to the magazine', () => {
+    const low = {...pc('a', 2, 2, 0), loadedRounds: 2, inventory: [{kind: 'ammo' as const, weaponId: 'autopistol', count: 45}]}
+    const next = reduce(makeState([low]), {t: 'Reload'})
+    const after = next.entities[0]
+    expect(after.loadedRounds).toBe(15)
+    expect(after.inventory[0].count).toBe(32) // 45 − 13 taken
+    expect(next.actionUsed).toBe(true)
   })
 })
 

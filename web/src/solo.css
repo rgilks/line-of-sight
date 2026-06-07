@@ -132,6 +132,14 @@ body {
   box-shadow: 0 0 10px var(--glow);
 }
 
+.solo-combatant.is-selected {
+  outline: 1px solid var(--border-strong);
+}
+
+.solo-combatant {
+  cursor: pointer;
+}
+
 .solo-combatant-portrait {
   width: 30px;
   height: 30px;
@@ -140,9 +148,64 @@ body {
   background: #0c0e0d;
 }
 
+.solo-combatant-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
 .solo-combatant-label {
   flex: 1;
   font-weight: 500;
+  font-size: 13px;
+}
+
+.solo-bar {
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+
+.solo-bar-fill {
+  height: 100%;
+  background: var(--green);
+  box-shadow: 0 0 6px var(--glow);
+}
+
+.solo-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.solo-button-sm {
+  padding: 7px;
+  font-size: 12px;
+}
+
+.solo-actions .solo-button-sm:first-child {
+  grid-column: 1 / -1;
+}
+
+.solo-button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.solo-target {
+  font-size: 11px;
+  color: rgba(255, 114, 114, 0.95);
+}
+
+.solo-banner {
+  font-family: var(--font-display);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(255, 114, 114, 0.95);
 }
 
 .solo-combatant-score {

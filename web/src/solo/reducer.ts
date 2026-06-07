@@ -1,30 +1,40 @@
-// The single-player game reducer: a total, pure (state, action) → state. No DOM,
-// no randomness — so a whole session replays from an action list and unit-tests
-// headless. Animation/timing lives in the DOM shell (solo.ts), never here.
+// The single-player game reducer: a total, pure (state, action) → state. The only
+// impurity is an injectable `rng` for the combat throws (defaults to Math.random);
+// pass a seeded rng to replay a fight deterministically. Animation/timing lives in
+// the DOM shell (solo.ts), never here.
 import {distanceToOccluder, doorReachForGrid, visibilityPolygon} from '../../../core/los'
 import {pointInPolygon} from '../../../core/rules'
+import type {Rng} from '../../../core/dice'
+import {applyDamage, applyHeal, resolveAttack, resolveFirstAid} from './combat'
+import {weaponById} from './gear'
 import {cellCenter, cellOf, isFloor} from './grid'
 import {
   activeEntity,
+  entityById,
   isActive,
+  isDead,
+  isDown,
   moveBudgetPx,
+  withinReach,
   type Action,
   type Entity,
+  type ItemStack,
   type SoloState
 } from './model'
 
-const withLog = (state: SoloState, line: string): SoloState => ({
+const LOG_KEEP = 60
+const log = (state: SoloState, ...lines: string[]): SoloState => ({
   ...state,
-  log: [...state.log.slice(-40), line]
+  log: [...state.log, ...lines].slice(-LOG_KEEP)
 })
 
 const cellKey = (cx: number, cy: number): string => `${cx},${cy}`
 
-// Cells occupied by any living entity other than `exclude`.
+// Cells occupied by any living entity other than `exclude` (blocks movement).
 const occupiedCells = (state: SoloState, exclude: Entity): Set<string> => {
   const set = new Set<string>()
   for (const entity of state.entities) {
-    if (entity === exclude || !isActive(entity)) continue
+    if (entity === exclude || isDead(entity)) continue
     const cell = cellOf(state.grid, entity.x, entity.y)
     set.add(cellKey(cell.cx, cell.cy))
   }
@@ -44,48 +54,187 @@ const canSee = (state: SoloState, from: Entity, x: number, y: number): boolean =
   return polygon.length >= 3 && pointInPolygon({x, y}, polygon)
 }
 
-// Move the active entity to the floor cell containing `to`, if reachable: within
-// the remaining budget, on a floor cell, visible, and unoccupied.
+// If every PC is dead or downed, the run is lost.
+const checkLoss = (state: SoloState): SoloState => {
+  const pcUp = state.entities.some((e) => e.faction === 'pc' && isActive(e))
+  return pcUp ? state : {...state, phase: {t: 'lost'}}
+}
+
+const replace = (state: SoloState, id: string, change: (e: Entity) => Entity): Entity[] =>
+  state.entities.map((e) => (e.id === id ? change(e) : e))
+
+// --- movement --------------------------------------------------------------
 const applyMove = (state: SoloState, to: {x: number; y: number}): SoloState => {
   const actor = activeEntity(state)
-  if (!actor || actor.faction !== 'pc' || !isActive(actor)) return state
+  if (!actor || !isActive(actor)) return state
 
   const cell = cellOf(state.grid, to.x, to.y)
-  if (!isFloor(state.grid, cell.cx, cell.cy)) return withLog(state, 'That way is blocked.')
+  if (!isFloor(state.grid, cell.cx, cell.cy)) return log(state, 'That way is blocked.')
 
   const dest = cellCenter(state.grid, cell.cx, cell.cy)
   const distance = Math.hypot(dest.x - actor.x, dest.y - actor.y)
-  if (distance < 0.5) return state // already there
-  if (distance > state.moveRemainingPx + 0.5) return withLog(state, 'Out of movement this turn.')
-  if (!canSee(state, actor, dest.x, dest.y)) return withLog(state, "Can't move where you can't see.")
-  if (occupiedCells(state, actor).has(cellKey(cell.cx, cell.cy))) {
-    return withLog(state, 'A squadmate is already there.')
-  }
+  if (distance < 0.5) return state
+  if (distance > state.moveRemainingPx + 0.5) return log(state, 'Out of movement this turn.')
+  if (!canSee(state, actor, dest.x, dest.y)) return log(state, "Can't move where you can't see.")
+  if (occupiedCells(state, actor).has(cellKey(cell.cx, cell.cy))) return log(state, 'Something is in the way.')
 
-  const entities = state.entities.map((entity) =>
-    entity === actor ? {...entity, x: dest.x, y: dest.y} : entity
-  )
-  return {...state, entities, moveRemainingPx: state.moveRemainingPx - distance}
+  return {
+    ...state,
+    entities: replace(state, actor.id, (e) => ({...e, x: dest.x, y: dest.y})),
+    moveRemainingPx: state.moveRemainingPx - distance
+  }
 }
 
-// Open/close a door the active entity is standing next to.
+// --- doors -----------------------------------------------------------------
 const applyToggleDoor = (state: SoloState, doorId: string): SoloState => {
   const actor = activeEntity(state)
-  if (!actor || actor.faction !== 'pc' || !isActive(actor)) return state
+  if (!actor || !isActive(actor)) return state
   const door = state.map.occluders.find((o) => o.id === doorId && o.type === 'door')
   if (!door) return state
   if (distanceToOccluder({x: actor.x, y: actor.y}, door) > doorReachForGrid(state.grid.gridScale)) {
-    return withLog(state, 'Too far from that door.')
+    return log(state, 'Too far from that door.')
   }
   const open = !(state.doorStates[doorId]?.open ?? false)
-  return {
-    ...state,
-    doorStates: {...state.doorStates, [doorId]: {open}},
-    log: [...state.log.slice(-40), open ? `${actor.label} opens a door.` : `${actor.label} closes a door.`]
-  }
+  return log(
+    {...state, doorStates: {...state.doorStates, [doorId]: {open}}},
+    open ? `${actor.label} opens a door.` : `${actor.label} closes a door.`
+  )
 }
 
-// Advance to the next living entity in initiative order; wrap → next round.
+// --- attack ----------------------------------------------------------------
+const applyAttack = (state: SoloState, targetId: string, rng: Rng): SoloState => {
+  const actor = activeEntity(state)
+  if (!actor || !isActive(actor) || state.actionUsed) return state
+  const target = entityById(state, targetId)
+  if (!target || target.faction === actor.faction || isDead(target)) return state
+
+  const weapon = weaponById(actor.weaponId)
+  if (weapon.magazine !== undefined && actor.loadedRounds <= 0) {
+    return log(state, `${actor.label} is out of ammo — reload!`)
+  }
+
+  const result = resolveAttack(actor, target, rng, state.grid.gridScale)
+  if (result.outOfRange) return log(state, `${target.label} is out of range.`)
+
+  const entities = state.entities.map((e) => {
+    let next = e
+    if (e.id === actor.id && weapon.magazine !== undefined) next = {...next, loadedRounds: next.loadedRounds - 1}
+    if (e.id === target.id && result.hit) next = applyDamage(next, result.damage)
+    return next
+  })
+
+  const lines = [
+    result.hit
+      ? `${actor.label} hits ${target.label} for ${result.damage} (effect ${result.effect}).`
+      : `${actor.label} misses ${target.label}.`
+  ]
+  const after = entities.find((e) => e.id === targetId)
+  if (after && isDead(after)) lines.push(`${target.label} is killed.`)
+  else if (after && isDown(after)) lines.push(`${target.label} is down.`)
+
+  return checkLoss(log({...state, entities, actionUsed: true}, ...lines))
+}
+
+// --- reload ----------------------------------------------------------------
+const applyReload = (state: SoloState): SoloState => {
+  const actor = activeEntity(state)
+  if (!actor || !isActive(actor) || state.actionUsed) return state
+  const weapon = weaponById(actor.weaponId)
+  if (weapon.magazine === undefined) return state
+  const need = weapon.magazine - actor.loadedRounds
+  if (need <= 0) return log(state, `${actor.label}'s weapon is already loaded.`)
+  const stackIndex = actor.inventory.findIndex(
+    (s) => s.kind === 'ammo' && s.weaponId === actor.weaponId && s.count > 0
+  )
+  if (stackIndex < 0) return log(state, `${actor.label} has no spare ammo.`)
+  const take = Math.min(need, actor.inventory[stackIndex].count)
+  const inventory = actor.inventory
+    .map((s, i) => (i === stackIndex ? {...s, count: s.count - take} : s))
+    .filter((s) => s.count > 0)
+  return log(
+    {
+      ...state,
+      entities: replace(state, actor.id, (e) => ({...e, loadedRounds: e.loadedRounds + take, inventory})),
+      actionUsed: true
+    },
+    `${actor.label} reloads (${take} rounds).`
+  )
+}
+
+// --- medkit (first aid) ----------------------------------------------------
+const applyUseMedkit = (state: SoloState, targetId: string, rng: Rng): SoloState => {
+  const actor = activeEntity(state)
+  if (!actor || !isActive(actor) || state.actionUsed) return state
+  const medIndex = actor.inventory.findIndex((s) => s.kind === 'medkit' && s.count > 0)
+  if (medIndex < 0) return log(state, `${actor.label} has no medkit.`)
+  const target = entityById(state, targetId)
+  if (!target || target.faction !== 'pc' || isDead(target)) return state
+  if (!withinReach(actor, target, state.grid.gridScale)) return log(state, 'Move next to your patient.')
+
+  const aid = resolveFirstAid(actor, rng)
+  const spentInventory = actor.inventory
+    .map((s, i) => (i === medIndex ? {...s, count: s.count - 1} : s))
+    .filter((s) => s.count > 0)
+  const entities = state.entities.map((e) => {
+    let next = e
+    if (e.id === actor.id) next = {...next, inventory: spentInventory}
+    if (e.id === target.id && aid.heal > 0) next = applyHeal(next, aid.heal)
+    return next
+  })
+  return log(
+    {...state, entities, actionUsed: true},
+    aid.heal > 0 ? `${actor.label} treats ${target.label} (+${aid.heal}).` : `${actor.label}'s first aid fails.`
+  )
+}
+
+// --- ground items ----------------------------------------------------------
+const mergeStack = (inventory: ItemStack[], stack: ItemStack): ItemStack[] => {
+  const index = inventory.findIndex((s) => s.kind === stack.kind && s.weaponId === stack.weaponId)
+  if (index >= 0) return inventory.map((s, i) => (i === index ? {...s, count: s.count + stack.count} : s))
+  return [...inventory, {...stack}]
+}
+
+const applyPickUp = (state: SoloState, groundItemId: string): SoloState => {
+  const actor = activeEntity(state)
+  if (!actor || !isActive(actor) || state.actionUsed) return state
+  const item = state.ground.find((g) => g.id === groundItemId)
+  if (!item) return state
+  if (Math.hypot(actor.x - item.x, actor.y - item.y) > 1.6 * state.grid.gridScale) {
+    return log(state, 'Too far to pick that up.')
+  }
+  const label =
+    item.stack.kind === 'ammo'
+      ? `${item.stack.count} rounds`
+      : `${item.stack.count} medkit${item.stack.count > 1 ? 's' : ''}`
+  return log(
+    {
+      ...state,
+      entities: replace(state, actor.id, (e) => ({...e, inventory: mergeStack(e.inventory, item.stack)})),
+      ground: state.ground.filter((g) => g.id !== groundItemId),
+      actionUsed: true
+    },
+    `${actor.label} picks up ${label}.`
+  )
+}
+
+const applyDrop = (state: SoloState, stackIndex: number): SoloState => {
+  const actor = activeEntity(state)
+  if (!actor || !isActive(actor)) return state
+  const stack = actor.inventory[stackIndex]
+  if (!stack) return state
+  const item = {id: `g-${actor.id}-${state.ground.length}-${stackIndex}`, x: actor.x, y: actor.y, stack}
+  return log(
+    {
+      ...state,
+      entities: replace(state, actor.id, (e) => ({...e, inventory: e.inventory.filter((_, i) => i !== stackIndex)})),
+      ground: [...state.ground, item]
+    },
+    `${actor.label} drops an item.`
+  )
+}
+
+// --- turn order ------------------------------------------------------------
+// Advance to the next living, conscious entity (PC or monster); wrap → next round.
 const applyEndTurn = (state: SoloState): SoloState => {
   const count = state.entities.length
   if (count === 0) return state
@@ -99,20 +248,31 @@ const applyEndTurn = (state: SoloState): SoloState => {
     }
     if (isActive(state.entities[ptr])) break
   }
-  return {
+  return checkLoss({
     ...state,
     turnPtr: ptr,
     round,
-    moveRemainingPx: moveBudgetPx(state.grid.gridScale)
-  }
+    moveRemainingPx: moveBudgetPx(state.grid.gridScale),
+    actionUsed: false
+  })
 }
 
-export const reduce = (state: SoloState, action: Action): SoloState => {
+export const reduce = (state: SoloState, action: Action, rng: Rng = Math.random): SoloState => {
   switch (action.t) {
     case 'Move':
       return applyMove(state, action.to)
     case 'ToggleDoor':
       return applyToggleDoor(state, action.doorId)
+    case 'Attack':
+      return applyAttack(state, action.targetId, rng)
+    case 'Reload':
+      return applyReload(state)
+    case 'UseMedkit':
+      return applyUseMedkit(state, action.targetId, rng)
+    case 'PickUp':
+      return applyPickUp(state, action.groundItemId)
+    case 'Drop':
+      return applyDrop(state, action.stackIndex)
     case 'EndTurn':
       return applyEndTurn(state)
   }

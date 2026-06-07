@@ -86,10 +86,12 @@ export type SoloState = {
   grid: WalkGrid
   doorStates: DoorStates
   sightRadius: number
-  entities: Entity[] // initiative order
+  entities: Entity[] // PCs + monsters, in initiative order
+  ground: GroundItem[] // loot on the floor
   turnPtr: number
   round: number
   moveRemainingPx: number // movement budget left for the active entity this turn
+  actionUsed: boolean // the active entity has spent its one significant action
   phase: GamePhase
   log: string[]
 }
@@ -97,9 +99,24 @@ export type SoloState = {
 export type Action =
   | {t: 'Move'; to: Point}
   | {t: 'ToggleDoor'; doorId: string}
+  | {t: 'Attack'; targetId: string}
+  | {t: 'Reload'}
+  | {t: 'UseMedkit'; targetId: string}
+  | {t: 'PickUp'; groundItemId: string}
+  | {t: 'Drop'; stackIndex: number}
   | {t: 'EndTurn'}
 
 export const activeEntity = (state: SoloState): Entity | undefined => state.entities[state.turnPtr]
+
+export const entityById = (state: SoloState, id: string): Entity | undefined =>
+  state.entities.find((entity) => entity.id === id)
+
+export const livingOf = (state: SoloState, faction: Faction): Entity[] =>
+  state.entities.filter((entity) => entity.faction === faction && !isDead(entity))
+
+/** Are two entities within `squares` cells of each other (Chebyshev-ish, by pixels)? */
+export const withinReach = (a: Entity, b: Entity, gridScale: number, squares = 1.6): boolean =>
+  Math.hypot(a.x - b.x, a.y - b.y) <= squares * gridScale
 
 /** Per-turn movement budget in board pixels (Cepheus 6 m ÷ 1.5 m/square × gridScale). */
 export const moveBudgetPx = (gridScale: number): number =>

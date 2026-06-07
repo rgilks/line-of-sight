@@ -17,19 +17,27 @@ import {roll2D6} from '../../core/dice'
 import {
   distanceToOccluder,
   doorReachForGrid,
+  hasLineOfSight,
   visibilityPolygon,
   type DoorOccluder,
   type Point
 } from '../../core/los'
 import {orderByInitiative} from '../../core/rules'
 import {PARTY} from './solo/characters'
+import {MONSTERS} from './solo/monsters'
 import {weaponById} from './solo/gear'
+import {rangeBandFor} from './solo/combat'
 import {
   activeEntity,
   dexDm,
+  entityById,
   isActive,
+  isDead,
+  isDown,
   moveBudgetPx,
+  withinReach,
   type Entity,
+  type GroundItem,
   type ItemStack,
   type SoloState
 } from './solo/model'
@@ -44,6 +52,8 @@ for (const image of counterPortraits.values()) image.addEventListener('load', re
 
 let state: SoloState | null = null
 let showGrid = false
+let selectedId: string | null = null // the entity the player has tapped (target / patient)
+let monsterCounter = 0
 
 let canvas: HTMLCanvasElement
 let ctx: CanvasRenderingContext2D
@@ -186,6 +196,78 @@ const spawnParty = (map: GeneratedMap, grid: WalkGrid): Entity[] => {
   })
 }
 
+const roomCenterPx = (map: GeneratedMap, room: {x: number; y: number; w: number; h: number}): Point => ({
+  x: (room.x + room.w / 2) * map.gridScale,
+  y: (room.y + room.h / 2) * map.gridScale
+})
+
+const monsterEntity = (block: (typeof MONSTERS)[number], x: number, y: number): Entity => {
+  monsterCounter += 1
+  return {
+    id: `mon-${monsterCounter}-${block.id}`,
+    faction: 'monster',
+    kind: block.kind,
+    label: block.name,
+    x,
+    y,
+    stats: {...block.stats},
+    statsMax: {...block.stats},
+    skills: {...block.skills},
+    weaponId: block.weaponId,
+    armorId: block.armorId,
+    inventory: [],
+    loadedRounds: 0,
+    initiative: null,
+    order: 100 + monsterCounter,
+    behaviour: block.behaviour
+  }
+}
+
+// Phase 3B: a few stationary aliens to shoot, in rooms NEAR the squad (skipping
+// their start room) so a door away there's something to engage. Phase 4 replaces
+// this with airlock wave spawning + AI that hunts the squad.
+const spawnMonsters = (map: GeneratedMap, grid: WalkGrid): Entity[] => {
+  const mid = {x: map.width / 2, y: map.height / 2}
+  const near = [...map.rooms]
+    .filter((room) => room.w * room.h >= 4)
+    .sort((a, b) => {
+      const ca = roomCenterPx(map, a)
+      const cb = roomCenterPx(map, b)
+      return Math.hypot(ca.x - mid.x, ca.y - mid.y) - Math.hypot(cb.x - mid.x, cb.y - mid.y)
+    })
+    .slice(1) // skip the squad's start room (nearest to centre)
+  const out: Entity[] = []
+  for (let i = 0; i < MONSTERS.length && i < near.length; i += 1) {
+    const center = roomCenterPx(map, near[i])
+    const start = cellOf(grid, center.x, center.y)
+    const cell = nearestFloorCells(grid, start, 1)[0] ?? start
+    const at = cellCenter(grid, cell.cx, cell.cy)
+    out.push(monsterEntity(MONSTERS[i], at.x, at.y))
+  }
+  return out
+}
+
+// Scatter ammo + medkits across mid-deck rooms so the squad must move to resupply.
+const scatterLoot = (map: GeneratedMap, grid: WalkGrid): GroundItem[] => {
+  const rooms = [...map.rooms].filter((room) => room.w * room.h >= 4)
+  const stacks: ItemStack[] = [
+    {kind: 'ammo', weaponId: 'autorifle', count: 40},
+    {kind: 'ammo', weaponId: 'shotgun', count: 12},
+    {kind: 'medkit', count: 1},
+    {kind: 'medkit', count: 1}
+  ]
+  const out: GroundItem[] = []
+  for (let i = 0; i < stacks.length && rooms.length > 0; i += 1) {
+    const room = rooms[(i * 3 + 1) % rooms.length]
+    const center = roomCenterPx(map, room)
+    const start = cellOf(grid, center.x, center.y)
+    const cell = nearestFloorCells(grid, start, 1)[0] ?? start
+    const at = cellCenter(grid, cell.cx, cell.cy)
+    out.push({id: `loot-${i}`, x: at.x, y: at.y, stack: stacks[i]})
+  }
+  return out
+}
+
 const rollInitiative = (entities: Entity[]): Entity[] => {
   for (const entity of entities) {
     const [a, b] = roll2D6()
@@ -198,7 +280,10 @@ const rollInitiative = (entities: Entity[]): Entity[] => {
 const newGame = (seed = Math.floor(Math.random() * 100000)): void => {
   const map = generateMap(defaultSpec(seed))
   const grid = buildWalkGrid(map)
-  const entities = rollInitiative(spawnParty(map, grid))
+  monsterCounter = 0
+  const entities = rollInitiative([...spawnParty(map, grid), ...spawnMonsters(map, grid)])
+  const firstPc = entities.findIndex((entity) => entity.faction === 'pc' && isActive(entity))
+  selectedId = null
   state = {
     seed,
     map,
@@ -206,9 +291,11 @@ const newGame = (seed = Math.floor(Math.random() * 100000)): void => {
     doorStates: {},
     sightRadius: SIGHT_RADIUS,
     entities,
-    turnPtr: 0,
+    ground: scatterLoot(map, grid),
+    turnPtr: firstPc >= 0 ? firstPc : 0,
     round: 1,
     moveRemainingPx: moveBudgetPx(grid.gridScale),
+    actionUsed: false,
     phase: {t: 'playerTurn'},
     log: []
   }
@@ -223,11 +310,22 @@ const newGame = (seed = Math.floor(Math.random() * 100000)): void => {
   requestDraw()
 }
 
+// Phase 3B: monsters are stationary targets with no AI yet, so auto-skip their
+// turns. Phase 4 replaces this with the AI driver (path + attack via tweens).
+const advancePastMonsters = (): void => {
+  let guard = 0
+  while (state && state.phase.t === 'playerTurn' && activeEntity(state)?.faction === 'monster' && guard < 64) {
+    state = reduce(state, {t: 'EndTurn'})
+    guard += 1
+  }
+}
+
 // ---- dispatch: reduce + animate the result --------------------------------
 const dispatch = (action: Parameters<typeof reduce>[1]): void => {
   if (!state) return
   const before = new Map(state.entities.map((entity) => [entity.id, {x: entity.x, y: entity.y}]))
   state = reduce(state, action)
+  advancePastMonsters()
   for (const entity of state.entities) {
     const old = before.get(entity.id)
     if (old && (old.x !== entity.x || old.y !== entity.y)) {
@@ -417,15 +515,52 @@ const doorHitAt = (point: Point): string | null => {
   return best?.id ?? null
 }
 
-// Act at a screen point: toggle an adjacent door, else move the active PC there.
+// Is (x,y) within any conscious PC's current line of sight? Gates monster + loot
+// visibility (you only see hostiles you can actually see).
+const visibleToSquad = (s: SoloState, x: number, y: number): boolean =>
+  s.entities.some(
+    (e) =>
+      e.faction === 'pc' &&
+      isActive(e) &&
+      Math.hypot(e.x - x, e.y - y) <= s.sightRadius &&
+      hasLineOfSight({x: e.x, y: e.y}, {x, y}, s.map.occluders, s.doorStates)
+  )
+
+// The entity the click landed on: any PC, or a monster the squad can currently see.
+const entityHitAt = (point: Point): Entity | null => {
+  if (!state) return null
+  const tol = state.map.gridScale * 0.7
+  let best: {entity: Entity; d: number} | null = null
+  for (const entity of state.entities) {
+    if (isDead(entity)) continue
+    if (entity.faction === 'monster' && !visibleToSquad(state, entity.x, entity.y)) continue
+    const at = positionOf(entity)
+    const d = Math.hypot(at.x - point.x, at.y - point.y)
+    if (d <= tol && (!best || d < best.d)) best = {entity, d}
+  }
+  return best?.entity ?? null
+}
+
+// Act at a screen point: toggle an adjacent door, select a tapped entity (target /
+// patient), else move the active PC there.
 function actAt(clientX: number, clientY: number): void {
   if (!state) return
   const actor = activeEntity(state)
   if (!actor || actor.faction !== 'pc') return
   const point = boardPointFromXY(clientX, clientY)
   const doorId = doorHitAt(point)
-  if (doorId) dispatch({t: 'ToggleDoor', doorId})
-  else dispatch({t: 'Move', to: point})
+  if (doorId) {
+    dispatch({t: 'ToggleDoor', doorId})
+    return
+  }
+  const hit = entityHitAt(point)
+  if (hit) {
+    selectedId = selectedId === hit.id ? null : hit.id
+    renderPanel()
+    requestDraw()
+    return
+  }
+  dispatch({t: 'Move', to: point})
 }
 
 // Mouse "act" is a plain left click (touch is handled by the touch listeners;
@@ -532,6 +667,54 @@ const drawFloorDebug = (s: SoloState): void => {
   ctx.restore()
 }
 
+const drawGroundItem = (s: SoloState, item: GroundItem): void => {
+  const r = s.map.gridScale * 0.22
+  ctx.save()
+  ctx.translate(item.x, item.y)
+  ctx.fillStyle = item.stack.kind === 'medkit' ? 'rgba(57,255,20,0.92)' : 'rgba(255,210,74,0.92)'
+  ctx.strokeStyle = 'rgba(0,0,0,0.6)'
+  ctx.lineWidth = 2
+  ctx.beginPath()
+  ctx.rect(-r, -r, r * 2, r * 2)
+  ctx.fill()
+  ctx.stroke()
+  if (item.stack.kind === 'medkit') {
+    // a small cross
+    ctx.strokeStyle = '#041006'
+    ctx.lineWidth = Math.max(2, r * 0.35)
+    ctx.beginPath()
+    ctx.moveTo(0, -r * 0.55)
+    ctx.lineTo(0, r * 0.55)
+    ctx.moveTo(-r * 0.55, 0)
+    ctx.lineTo(r * 0.55, 0)
+    ctx.stroke()
+  }
+  ctx.restore()
+}
+
+const drawSelectionRing = (at: Point, faction: Entity['faction'], gridScale: number): void => {
+  const radius = gridScale * 0.62
+  ctx.save()
+  ctx.strokeStyle = faction === 'monster' ? 'rgba(255,72,72,0.95)' : 'rgba(57,255,20,0.95)'
+  ctx.lineWidth = 3
+  ctx.beginPath()
+  ctx.arc(at.x, at.y, radius, 0, Math.PI * 2)
+  ctx.stroke()
+  ctx.restore()
+}
+
+const drawTargetingLine = (from: Point, to: Point): void => {
+  ctx.save()
+  ctx.strokeStyle = 'rgba(255,72,72,0.7)'
+  ctx.lineWidth = 2
+  ctx.setLineDash([6, 6])
+  ctx.beginPath()
+  ctx.moveTo(from.x, from.y)
+  ctx.lineTo(to.x, to.y)
+  ctx.stroke()
+  ctx.restore()
+}
+
 const draw = (): void => {
   if (!state || !ctx) return
   const s = state
@@ -540,8 +723,20 @@ const draw = (): void => {
   drawFog(s)
   drawDoorStates(s)
   drawMoveRing(s)
+
+  for (const item of s.ground) {
+    if (visibleToSquad(s, item.x, item.y)) drawGroundItem(s, item)
+  }
+
+  const actor = activeEntity(s)
+  const selected = selectedId ? entityById(s, selectedId) : undefined
+  if (actor && actor.faction === 'pc' && selected && selected.faction === 'monster' && visibleToSquad(s, selected.x, selected.y)) {
+    drawTargetingLine(positionOf(actor), positionOf(selected))
+  }
+
   for (const entity of s.entities) {
-    if (!isActive(entity)) continue
+    if (isDead(entity)) continue
+    if (entity.faction === 'monster' && !visibleToSquad(s, entity.x, entity.y)) continue
     const at = positionOf(entity)
     drawCounterToken(
       ctx,
@@ -550,31 +745,88 @@ const draw = (): void => {
         gridScale: s.map.gridScale,
         portraits: counterPortraits,
         counterDefinitions,
-        isPov: entity.id === activeEntity(s)?.id
+        isPov: entity.id === actor?.id
       }
     )
+    if (entity.id === selectedId) drawSelectionRing(at, entity.faction, s.map.gridScale)
   }
 }
 
 // ---- panel ----------------------------------------------------------------
-const initiativeRailHtml = (s: SoloState): string =>
+const endPct = (e: Entity): number => Math.round((Math.max(0, e.stats.end) / Math.max(1, e.statsMax.end)) * 100)
+
+const escapeHtml = (text: string): string =>
+  text.replace(/[&<>]/g, (c) => (c === '&' ? '&amp;' : c === '<' ? '&lt;' : '&gt;'))
+
+const squadRailHtml = (s: SoloState): string =>
   s.entities
-    .map((entity, index) => {
-      const def = counterDefinitions.find((d) => d.kind === entity.kind)
-      const active = index === s.turnPtr ? ' is-active' : ''
-      return `<li class="solo-combatant${active}">
+    .filter((e) => e.faction === 'pc')
+    .map((e) => {
+      const def = counterDefinitions.find((d) => d.kind === e.kind)
+      const active = e.id === activeEntity(s)?.id ? ' is-active' : ''
+      const selected = e.id === selectedId ? ' is-selected' : ''
+      const condition = isDead(e) ? ' · KIA' : isDown(e) ? ' · DOWN' : ''
+      return `<li class="solo-combatant${active}${selected}" data-select="${e.id}">
         <img class="solo-combatant-portrait" src="${def?.portrait ?? ''}" alt="" />
-        <span class="solo-combatant-label">${entity.label}</span>
-        <span class="solo-combatant-score">${entity.initiative ?? '—'}</span>
+        <div class="solo-combatant-main">
+          <span class="solo-combatant-label">${e.label}${condition}</span>
+          <div class="solo-bar"><div class="solo-bar-fill" style="width:${endPct(e)}%"></div></div>
+        </div>
+        <span class="solo-combatant-score">${e.initiative ?? '—'}</span>
       </li>`
     })
     .join('')
+
+const btn = (id: string, label: string, enabled: boolean, ghost = false): string =>
+  `<button id="${id}" class="solo-button${ghost ? ' solo-button-ghost' : ''} solo-button-sm"${enabled ? '' : ' disabled'}>${label}</button>`
 
 const renderPanel = (): void => {
   if (!state) return
   const s = state
   const actor = activeEntity(s)
-  const squares = Math.max(0, Math.round(s.moveRemainingPx / s.grid.gridScale))
+  const weapon = actor ? weaponById(actor.weaponId) : null
+  const selected = selectedId ? entityById(s, selectedId) : undefined
+  const squares = actor ? Math.max(0, Math.round(s.moveRemainingPx / s.grid.gridScale)) : 0
+
+  // Attack availability against a selected, visible enemy.
+  const enemy = selected && selected.faction === 'monster' && visibleToSquad(s, selected.x, selected.y) ? selected : undefined
+  let attackLabel = 'Attack'
+  let canAttack = false
+  let targetNote = ''
+  if (actor && enemy && weapon) {
+    const band = rangeBandFor(Math.hypot(actor.x - enemy.x, actor.y - enemy.y), s.grid.gridScale)
+    const inRange = weapon.rangeDm[band] !== undefined
+    const hasAmmo = weapon.magazine === undefined || actor.loadedRounds > 0
+    canAttack = !s.actionUsed && isActive(actor) && inRange && hasAmmo
+    attackLabel = `Attack ${enemy.label}`
+    targetNote = `${enemy.label} · ${enemy.stats.end}/${enemy.statsMax.end} END · ${inRange ? band : `out of range (${band})`}${hasAmmo ? '' : ' · no ammo'}`
+  }
+
+  const canReload =
+    !!actor &&
+    isActive(actor) &&
+    !s.actionUsed &&
+    weapon?.magazine !== undefined &&
+    actor.loadedRounds < (weapon.magazine ?? 0) &&
+    actor.inventory.some((i) => i.kind === 'ammo' && i.weaponId === actor.weaponId && i.count > 0)
+
+  const patient = selected && selected.faction === 'pc' && !isDead(selected) ? selected : actor
+  const canMedkit =
+    !!actor &&
+    isActive(actor) &&
+    !s.actionUsed &&
+    actor.inventory.some((i) => i.kind === 'medkit' && i.count > 0) &&
+    !!patient &&
+    patient.stats.end < patient.statsMax.end &&
+    (patient.id === actor.id || withinReach(actor, patient, s.grid.gridScale))
+
+  const loot = actor ? s.ground.find((g) => Math.hypot(actor.x - g.x, actor.y - g.y) <= 1.6 * s.grid.gridScale) : undefined
+  const canPickup = !!actor && isActive(actor) && !s.actionUsed && !!loot
+
+  const ammo = actor && weapon?.magazine !== undefined ? `${actor.loadedRounds}/${weapon.magazine}` : '—'
+  const recentLog = s.log.slice(-6).map(escapeHtml).join('<br/>')
+  const lost = s.phase.t === 'lost'
+
   panel.innerHTML = `
     <header class="solo-brand">
       <img class="solo-brand-mark" src="/favicon.svg" alt="" />
@@ -585,19 +837,53 @@ const renderPanel = (): void => {
       </div>
     </header>
     <section class="solo-section">
-      <h2 class="solo-h">Squad — initiative</h2>
-      <ol class="solo-combat-list">${initiativeRailHtml(s)}</ol>
+      <h2 class="solo-h">Squad</h2>
+      <ol class="solo-combat-list">${squadRailHtml(s)}</ol>
+    </section>
+    ${
+      lost
+        ? `<section class="solo-section"><div class="solo-banner">Squad lost.</div>
+           <button id="solo-new" class="solo-button">New game</button></section>`
+        : `<section class="solo-section">
+      <div class="solo-turn">${actor ? `${actor.label}'s turn · ${squares} sq · ${weapon?.name ?? ''} ${ammo}` : ''}</div>
+      ${targetNote ? `<div class="solo-target">${escapeHtml(targetNote)}</div>` : ''}
+      <div class="solo-actions">
+        ${btn('solo-attack', attackLabel, canAttack)}
+        ${btn('solo-reload', 'Reload', canReload, true)}
+        ${btn('solo-medkit', 'Medkit', canMedkit, true)}
+        ${btn('solo-pickup', 'Pick up', canPickup, true)}
+      </div>
+      <button id="solo-end" class="solo-button">End turn ↻</button>
     </section>
     <section class="solo-section">
-      <div class="solo-turn">${actor ? `${actor.label}'s turn · ${squares} sq left` : ''}</div>
-      <div class="solo-log">${s.log[s.log.length - 1] ?? ''}</div>
-      <button id="solo-end" class="solo-button">End turn ↻</button>
-      <button id="solo-new" class="solo-button solo-button-ghost">New deck</button>
+      <div class="solo-log">${recentLog}</div>
+    </section>
+    <section class="solo-section">
+      <button id="solo-new" class="solo-button solo-button-ghost solo-button-sm">New deck</button>
       <label class="solo-check"><input type="checkbox" id="solo-grid" ${showGrid ? 'checked' : ''}/> Show floor grid</label>
     </section>
-    <p class="solo-hint">Click within the green ring to move. Click an adjacent door to
-    open or close it. End the turn to pass to the next of the squad.</p>`
+    <p class="solo-hint">Tap a foe to target it, then Attack. Tap the floor to move, a
+    squadmate to treat them, an adjacent door to open it.</p>`
+    }`
 
+  for (const el of panel.querySelectorAll<HTMLElement>('[data-select]')) {
+    el.addEventListener('click', () => {
+      const id = el.dataset.select ?? null
+      selectedId = selectedId === id ? null : id
+      renderPanel()
+      requestDraw()
+    })
+  }
+  panel.querySelector<HTMLButtonElement>('#solo-attack')?.addEventListener('click', () => {
+    if (enemy) dispatch({t: 'Attack', targetId: enemy.id})
+  })
+  panel.querySelector<HTMLButtonElement>('#solo-reload')?.addEventListener('click', () => dispatch({t: 'Reload'}))
+  panel.querySelector<HTMLButtonElement>('#solo-medkit')?.addEventListener('click', () => {
+    if (patient) dispatch({t: 'UseMedkit', targetId: patient.id})
+  })
+  panel.querySelector<HTMLButtonElement>('#solo-pickup')?.addEventListener('click', () => {
+    if (loot) dispatch({t: 'PickUp', groundItemId: loot.id})
+  })
   panel.querySelector<HTMLButtonElement>('#solo-end')?.addEventListener('click', () => dispatch({t: 'EndTurn'}))
   panel.querySelector<HTMLButtonElement>('#solo-new')?.addEventListener('click', () => newGame())
   panel.querySelector<HTMLInputElement>('#solo-grid')?.addEventListener('change', (event) => {
@@ -642,6 +928,23 @@ if (import.meta.env.DEV) {
     newGame,
     dispatch,
     peek: () => state,
-    cellOf: (x: number, y: number) => (state ? cellOf(state.grid, x, y) : null)
+    cellOf: (x: number, y: number) => (state ? cellOf(state.grid, x, y) : null),
+    // Test helpers (dev only): reposition an entity, select a target, force redraw.
+    place: (id: string, x: number, y: number) => {
+      if (!state) return
+      const e = entityById(state, id)
+      if (e) {
+        e.x = x
+        e.y = y
+        renderPos.set(id, {x, y})
+      }
+      renderPanel()
+      requestDraw()
+    },
+    select: (id: string | null) => {
+      selectedId = id
+      renderPanel()
+      requestDraw()
+    }
   }
 }
