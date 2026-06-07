@@ -68,6 +68,7 @@ let panel: HTMLDivElement
 let boardViewport: HTMLDivElement
 let diceOverlay: HTMLDivElement
 let diceRoller: DiceRoller
+let endFab: HTMLButtonElement | null = null // floating End-Turn button over the board
 
 // An rng that yields the given die faces first (mapped to rollD6 buckets), then
 // falls back to Math.random — so a visual roll's faces drive the to-hit throw.
@@ -424,7 +425,7 @@ const newGame = (seed = Math.floor(Math.random() * 100000)): void => {
   canvas.width = map.width
   canvas.height = map.height
   sizeFogLayers(map.width, map.height)
-  fitBoardToViewport()
+  focusOnSquad()
   renderPanel()
   requestDraw()
 }
@@ -559,6 +560,27 @@ const endTurn = (): void => {
   void runMonsters()
 }
 
+// The floating End-Turn button shows only while it's the player's turn to act.
+const updateEndFab = (): void => {
+  if (!endFab) return
+  endFab.hidden = !(!!state && state.phase.t === 'playerTurn' && !busy)
+}
+
+// Keyboard: Space / Enter end the turn (no trip to the side panel); Esc clears
+// the current target. Ignored while typing in a field.
+const onKey = (event: KeyboardEvent): void => {
+  const el = event.target as HTMLElement | null
+  if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return
+  if (event.key === ' ' || event.key === 'Enter') {
+    event.preventDefault()
+    endTurn()
+  } else if (event.key === 'Escape' && selectedId) {
+    selectedId = null
+    renderPanel()
+    requestDraw()
+  }
+}
+
 // ---- camera: zoom (wheel / pinch) + pan (drag / scroll) -------------------
 const updateCanvasDisplaySize = (): void => {
   if (!state) return
@@ -579,6 +601,33 @@ const fitBoardToViewport = (): void => {
   updateCanvasDisplaySize()
   boardViewport.scrollLeft = 0
   boardViewport.scrollTop = 0
+}
+
+// Open zoomed in on the squad: frame the PCs' bounding box plus a few squares of
+// breathing room, and centre the view on them. Falls back to a full-map fit if
+// the viewport isn't laid out yet or there are no PCs.
+const focusOnSquad = (): void => {
+  if (!state || !boardViewport) return
+  const pcs = state.entities.filter((e) => e.faction === 'pc')
+  const availW = boardViewport.clientWidth
+  const availH = boardViewport.clientHeight
+  if (pcs.length === 0 || availW <= 0 || availH <= 0) {
+    fitBoardToViewport()
+    return
+  }
+  const pad = state.map.gridScale * 3.5 // ~3.5 squares of space around the squad
+  const minX = Math.min(...pcs.map((p) => p.x)) - pad
+  const maxX = Math.max(...pcs.map((p) => p.x)) + pad
+  const minY = Math.min(...pcs.map((p) => p.y)) - pad
+  const maxY = Math.max(...pcs.map((p) => p.y)) + pad
+  const boxW = Math.max(1, maxX - minX)
+  const boxH = Math.max(1, maxY - minY)
+  zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.min(availW / boxW, availH / boxH)))
+  updateCanvasDisplaySize()
+  const cx = (minX + maxX) / 2
+  const cy = (minY + maxY) / 2
+  boardViewport.scrollLeft = cx * zoom - availW / 2
+  boardViewport.scrollTop = cy * zoom - availH / 2
 }
 
 const setZoom = (
@@ -1168,7 +1217,7 @@ const renderPanel = (): void => {
         ${btn('solo-pickup', 'Pick up', canPickup, true)}
         ${btn('solo-push', 'Push crate', canPush, true)}
       </div>
-      <button id="solo-end" class="solo-button">End turn ↻</button>
+      <button id="solo-end" class="solo-button">End turn · Space ↻</button>
     </section>
     <section class="solo-section">
       <div class="solo-log">${recentLog}</div>
@@ -1178,7 +1227,8 @@ const renderPanel = (): void => {
       <label class="solo-check"><input type="checkbox" id="solo-grid" ${showGrid ? 'checked' : ''}/> Show floor grid</label>
     </section>
     <p class="solo-hint">Tap a foe to target it, then Attack. Tap the floor to move, a
-    squadmate to treat them, an adjacent door to open it.</p>`
+    squadmate to treat them, an adjacent door to open it. Press <b>Space</b> to end your turn;
+    drag to pan.</p>`
     }`
 
   for (const el of panel.querySelectorAll<HTMLElement>('[data-select]')) {
@@ -1208,6 +1258,7 @@ const renderPanel = (): void => {
     showGrid = (event.target as HTMLInputElement).checked
     requestDraw()
   })
+  updateEndFab()
 }
 
 // ---- mount ----------------------------------------------------------------
@@ -1234,6 +1285,17 @@ const mount = (): void => {
   window.addEventListener('resize', updateCanvasDisplaySize)
   // Unlock the Web Audio context on the first interaction so weapon sounds play.
   window.addEventListener('pointerdown', () => primeAudio(), {once: true})
+
+  // Big End-Turn button floating over the board (no trip to the side panel), plus
+  // Space/Enter as the keyboard equivalent.
+  endFab = document.createElement('button')
+  endFab.id = 'solo-end-fab'
+  endFab.type = 'button'
+  endFab.hidden = true
+  endFab.innerHTML = 'End Turn <span class="solo-fab-key">Space</span>'
+  endFab.addEventListener('click', () => endTurn())
+  app.querySelector('.solo-shell')?.appendChild(endFab)
+  window.addEventListener('keydown', onKey)
 
   diceOverlay = document.createElement('div')
   diceOverlay.id = 'solo-dice'
