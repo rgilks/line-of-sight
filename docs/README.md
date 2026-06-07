@@ -12,6 +12,9 @@ formats in more depth.
 - [MULTIPLAYER.md](MULTIPLAYER.md) — design + roadmap for multiplayer with
   server-authoritative per-player fog of war (Durable Objects, CQRS-lite, SSE,
   Discord auth). Forward-looking; not built yet.
+- [SOLO.md](SOLO.md) — the single-player game at `/solo` ("Survive the Horde"):
+  Cepheus turn-based combat against boarding waves, a pure reducer + monster AI,
+  and barricades. Reuses the shared `core/`.
 - [CV_REVIEW_PIPELINE.md](CV_REVIEW_PIPELINE.md) — branch experiment for
   improving CV-generated wall/door sidecars through local visual overlay review.
 - [WALL_DOOR_DETECTION.md](WALL_DOOR_DETECTION.md) — research + recommended
@@ -26,14 +29,19 @@ formats in more depth.
 ## Project layout
 
 ```
-web/src/los-core.ts      Deterministic TS geometry + image analysis (no DOM/CF)
-web/src/los-core.test.ts Vitest unit tests for the core
-web/src/main.tsx         Preact + signals browser UI, canvas rendering
-web/src/gpu.ts           WebGPU capability check
-web/src/styles.css       TRE-themed styling
-web/index.html           Vite entry document
-web/public/              Static assets served as-is (token portraits)
-src/worker.ts            Cloudflare Worker: /healthz + static asset serving
+core/los.ts              Deterministic TS geometry + image analysis (no DOM/CF)
+core/rules.ts            Shared Cepheus rules + domain model (movement, initiative)
+core/dice.ts             rollD6 / roll2D6 (seedable)
+core/pathfinding.ts      A* over a grid (used by the solo monster AI)
+web/src/main.tsx         Editor (/edit): Preact + signals UI, canvas rendering
+web/src/play.ts          Multiplayer table client (/ host, /play player/GM)
+web/src/solo.ts          Single-player game (/solo); engine in web/src/solo/
+web/src/synth/           Deterministic deck generator + renderer
+web/public/              Static assets served as-is (token portraits, icons)
+src/worker.ts            Cloudflare Worker: routes API to the Durable Object,
+                         else serves static assets (/, /play, /edit, /solo)
+src/game-table.ts        GameTable Durable Object (multiplayer authority)
+src/protocol.ts          Multiplayer transport (re-exports the core rules)
 scripts/                 Diagram render + check tooling
 dist/client/             Vite build output served by the Worker (generated)
 ```

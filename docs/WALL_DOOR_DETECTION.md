@@ -8,7 +8,7 @@ The hands-on review flow that complements any detector lives in
 
 ## The core finding
 
-The current detector (~2600 lines in `web/src/los-core.ts`) scans pixel runs and
+The current detector (~2600 lines in `core/los.ts`) scans pixel runs and
 then rejects noise case-by-case. Every new failure mode (furniture, text, door
 arcs, grid) becomes another special-case scan, so it never converges. The
 research says the problem is the **primitive**, not the tuning.

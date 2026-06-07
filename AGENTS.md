@@ -38,11 +38,16 @@ Live verification should include:
 
 ## Project Shape
 
-- `web/src/los-core.ts` contains the deterministic TypeScript geometry and
-  image-analysis core; `web/src/los-core.test.ts` is its Vitest suite.
-- `web/` contains the browser UI built by Vite.
-- `src/worker.ts` is the Cloudflare Worker shell that serves static assets and
-  `/healthz`.
+- `core/` holds the deterministic, framework-free shared code used by every app:
+  `los.ts` (geometry + image analysis), `rules.ts` (Cepheus movement/initiative/
+  visibility + the domain model), `dice.ts`, and `pathfinding.ts`. No DOM/Cloudflare.
+- `web/` is the browser UI built by Vite, with four routes from one build:
+  `/` + `/play` (multiplayer table, `web/src/play.ts`), `/edit` (authoring tool,
+  `web/src/main.tsx`), and `/solo` (single-player game, `web/src/solo.ts` +
+  `web/src/solo/`; see [`docs/SOLO.md`](docs/SOLO.md)).
+- `src/worker.ts` is the Cloudflare Worker: it routes the table API to the
+  `GameTable` Durable Object (`src/game-table.ts`) and otherwise serves the
+  static build; `src/protocol.ts` is the multiplayer transport layer.
 - `wrangler.toml` owns Cloudflare deployment config for `los.tre.systems`.
 - `scripts/` holds the diagram render/check tooling.
 - `dist/` is generated output.

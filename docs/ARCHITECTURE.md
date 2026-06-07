@@ -13,13 +13,13 @@ with the origin at the top-left.
 
 ## Layers
 
-### Deterministic core — `web/src/los-core.ts`
+### Deterministic core — `core/los.ts`
 
 Pure TypeScript geometry and image analysis: no DOM, no Cloudflare, no Preact.
 Given a raw RGBA buffer it produces candidate walls and doors; given occluders
 and a viewpoint it answers line-of-sight queries and builds a visibility polygon.
 Being side-effect free and deterministic, it is unit-tested in isolation
-(`web/src/los-core.test.ts`). Detailed in
+(`core/los.test.ts`). Detailed in
 [The deterministic core](#the-deterministic-core).
 
 ### Browser UI — `web/src/main.tsx`
@@ -72,7 +72,7 @@ Local map images ──drag/drop or picker──▶ tiles ──arrange──▶
 
 ## The deterministic core
 
-`web/src/los-core.ts` has two responsibilities: **detect** candidate occluders
+`core/los.ts` has two responsibilities: **detect** candidate occluders
 from raster map art, and **answer visibility queries** against a set of
 occluders. It must stay free of DOM, Cloudflare, and Preact concerns (see Coding
 Rules in [`AGENTS.md`](../AGENTS.md)).

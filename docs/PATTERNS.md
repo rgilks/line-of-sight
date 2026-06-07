@@ -20,7 +20,7 @@ patterns are all about how the UI manages state on top of that core.
 Three layers with a strict, one-directional dependency rule:
 
 ```
-web/src/los-core.ts   Deterministic core   (no DOM, no Cloudflare, no Preact)
+core/los.ts   Deterministic core   (no DOM, no Cloudflare, no Preact)
         ▲
 web/src/main.tsx      Browser UI           (imports the core; owns DOM + state)
         ▲
@@ -59,7 +59,7 @@ total functions of their inputs:
 - `hasLineOfSight(from, to, occluders, doorStates)` → `boolean`
 - `visibilityPolygon(x, y, width, height, radius, occluders, doorStates)` → `Point[]`
 
-It lives in `web/src/los-core.ts`, exercised by `web/src/los-core.test.ts`.
+It lives in `core/los.ts`, exercised by `core/los.test.ts`.
 
 **Why:** determinism is what makes the tool reviewable and testable. The same map
 always yields the same candidates, so hand corrections stay meaningful between
@@ -160,7 +160,7 @@ flowchart LR
   R -. "re-analyze" .-> A
 ```
 
-Generation is `analyzeImageRgba` in `web/src/los-core.ts`; review/re-analysis is
+Generation is `analyzeImageRgba` in `core/los.ts`; review/re-analysis is
 `analyzeTiles`, the editing tools, and `carveDoorGaps` in `web/src/main.tsx`;
 export is `exportSidecar` (shape in
 [sidecar format](ARCHITECTURE.md#sidecar-format)).
