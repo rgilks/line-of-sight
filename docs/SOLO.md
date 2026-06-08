@@ -35,9 +35,14 @@ Medicine check. See [`web/src/solo/combat.ts`](../web/src/solo/combat.ts).
 
 ### Exploring
 
-Rooms hold **searchable fixtures** — lockers, cabinets, supply crates, data
-terminals. Search one (a minor action, when adjacent) to pocket its loot — ammo,
-medkits, the occasional access card — and read any clue it holds. Some internal
+The squad boards **lightly armed — basic sidearms or a blade, no armour, little
+spare ammo** — and scavenges the deck to gear up. Rooms hold **searchable
+fixtures** — lockers, cabinets, supply crates, data terminals. Search one (a minor
+action, when adjacent) to pocket its loot — ammo, medkits, a better **weapon**, a
+set of **armour**, or an access card — and read any clue it holds. A weapon or
+armour **equips on pickup** (found weapons come loaded), and the gear it replaces
+drops to the floor for a squadmate. The same loot is scattered on the floor too;
+**Pick up** grabs whatever you're standing by. Some internal
 doors start **sealed**: a keycard lock opens for a card of the **matching
 clearance** (a colour); a hack lock yields to an Electronics check, a significant
 action that effectively needs the engineer (Kade) or scout (Rell). A padlock

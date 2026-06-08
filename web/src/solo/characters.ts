@@ -18,6 +18,9 @@ export type PreGen = {
   medkits: number
 }
 
+// The squad boards lightly equipped — a basic sidearm or blade, no armour, little
+// spare ammo. Better weapons, ammunition, and armour are scavenged from the deck's
+// containers and floor loot.
 export const PARTY: PreGen[] = [
   {
     id: 'pc-vance',
@@ -25,9 +28,9 @@ export const PARTY: PreGen[] = [
     label: 'Vance',
     stats: {str: 9, dex: 8, end: 10},
     skills: {'Gun Combat': 2, 'Melee Combat': 1},
-    weaponId: 'autorifle',
-    armorId: 'cloth',
-    spareAmmo: 40,
+    weaponId: 'autopistol',
+    armorId: null,
+    spareAmmo: 15,
     medkits: 1
   },
   {
@@ -37,8 +40,8 @@ export const PARTY: PreGen[] = [
     stats: {str: 7, dex: 10, end: 7},
     skills: {'Gun Combat': 1, 'Melee Combat': 1, Electronics: 1},
     weaponId: 'autopistol',
-    armorId: 'jack',
-    spareAmmo: 45,
+    armorId: null,
+    spareAmmo: 15,
     medkits: 1
   },
   {
@@ -48,9 +51,9 @@ export const PARTY: PreGen[] = [
     stats: {str: 6, dex: 7, end: 8},
     skills: {Medicine: 2, 'Gun Combat': 0},
     weaponId: 'autopistol',
-    armorId: 'cloth',
-    spareAmmo: 30,
-    medkits: 3
+    armorId: null,
+    spareAmmo: 0,
+    medkits: 2
   },
   {
     id: 'pc-kade',
@@ -58,9 +61,9 @@ export const PARTY: PreGen[] = [
     label: 'Kade',
     stats: {str: 8, dex: 6, end: 9},
     skills: {'Gun Combat': 1, 'Melee Combat': 0, Electronics: 2},
-    weaponId: 'shotgun',
-    armorId: 'cloth',
-    spareAmmo: 18,
+    weaponId: 'blade',
+    armorId: null,
+    spareAmmo: 0,
     medkits: 1
   }
 ]

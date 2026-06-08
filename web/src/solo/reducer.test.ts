@@ -355,3 +355,27 @@ describe('solo reducer — Search', () => {
     expect(next.entities[0].inventory).toHaveLength(0)
   })
 })
+
+describe('solo reducer — gear pickup', () => {
+  it('equips a weapon off the floor (loaded) and drops the old one', () => {
+    const a = {...pc('a', 2, 2, 0), weaponId: 'blade', loadedRounds: 0}
+    const state: SoloState = {
+      ...makeState([a]),
+      ground: [{id: 'g1', x: a.x, y: a.y, stack: {kind: 'weapon', weaponId: 'autorifle', count: 1}}]
+    }
+    const next = reduce(state, {t: 'PickUp', groundItemId: 'g1'})
+    expect(next.entities[0].weaponId).toBe('autorifle')
+    expect(next.entities[0].loadedRounds).toBe(20) // autorifle magazine, found loaded
+    expect(next.ground.some((g) => g.stack.kind === 'weapon' && g.stack.weaponId === 'blade')).toBe(true)
+  })
+
+  it('dons armour off the floor', () => {
+    const a = {...pc('a', 2, 2, 0), armorId: null}
+    const state: SoloState = {
+      ...makeState([a]),
+      ground: [{id: 'g1', x: a.x, y: a.y, stack: {kind: 'armor', armorId: 'combat', count: 1}}]
+    }
+    const next = reduce(state, {t: 'PickUp', groundItemId: 'g1'})
+    expect(next.entities[0].armorId).toBe('combat')
+  })
+})

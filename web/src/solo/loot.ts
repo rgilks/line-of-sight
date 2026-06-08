@@ -59,6 +59,12 @@ const ammoStack = (rng: Rng): ItemStack => {
   const count = weaponId === 'shotgun' ? randInt(rng, 4, 8) : randInt(rng, 10, 24)
   return {kind: 'ammo', weaponId, count}
 }
+// Findable upgrades: the squad starts with basic sidearms / no armour and scavenges
+// these. Better gear is rarer.
+const LOOT_WEAPONS = ['autorifle', 'shotgun', 'autopistol'] as const
+const LOOT_ARMORS = ['cloth', 'cloth', 'combat'] as const
+const weaponStack = (rng: Rng): ItemStack => ({kind: 'weapon', weaponId: pick(rng, LOOT_WEAPONS), count: 1})
+const armorStack = (rng: Rng): ItemStack => ({kind: 'armor', armorId: pick(rng, LOOT_ARMORS), count: 1})
 
 const ck = (cx: number, cy: number): string => `${cx},${cy}`
 
@@ -215,7 +221,8 @@ export const planLockAndLoot = (
   const survivors = shuffle(rng, [...lockedIds].map((id) => doorById.get(id)).filter((d): d is Occluder => !!d))
   const locks: Record<string, DoorLock> = {}
   const keyDoors: string[] = []
-  const cardReserve = Math.min(KEY_CLEARANCES.length, Math.max(0, freeSlots.length - 2))
+  // Leave free slots for the cards PLUS a starter weapon + armour.
+  const cardReserve = Math.min(KEY_CLEARANCES.length, Math.max(0, freeSlots.length - 4))
   survivors.forEach((door, i) => {
     if (i % 2 === 0 && cardReserve > 0) {
       const keyId = KEY_CLEARANCES[keyDoors.length % cardReserve]
@@ -227,31 +234,35 @@ export const planLockAndLoot = (
   })
   const usedClearances = [...new Set(keyDoors)]
 
-  // 5. Fill the container slots. Reserve one free slot per used clearance for its
-  //    card; everything else gets supplies or a clue.
+  // 5. Fill the container slots. Reserve free slots for each clearance's card and a
+  //    starter weapon + armour (so the squad can always gear up without a key);
+  //    everything else gets supplies, an upgrade, or a clue.
   const clues = shuffle(rng, CLUES)
   const containers: Container[] = []
   const freeSet = new Set(freeSlots)
-  const reserved = new Map<Slot, string>()
-  let s = 0
-  for (const keyId of usedClearances) {
-    while (s < freeSlots.length && reserved.has(freeSlots[s])) s += 1
-    if (s < freeSlots.length) reserved.set(freeSlots[s], keyId)
+  const reserved = new Map<Slot, ItemStack>()
+  let fi = 0
+  const reserveNext = (stack: ItemStack): void => {
+    while (fi < freeSlots.length && reserved.has(freeSlots[fi])) fi += 1
+    if (fi < freeSlots.length) reserved.set(freeSlots[fi], stack)
   }
+  for (const keyId of usedClearances) reserveNext({kind: 'keycard', keyId, count: 1})
+  reserveNext(weaponStack(rng)) // a ranged weapon, reachable from the start
+  reserveNext(armorStack(rng)) // a set of body armour, reachable from the start
   slots.forEach((slot, i) => {
     const kind = ROOM_CONTAINER[slot.room.type] as ContainerKind
     const at = cellCenter(grid, slot.cell.cx, slot.cell.cy)
-    let loot: ItemStack | undefined
+    let loot = reserved.get(slot)
     let clue: string | undefined
-    const card = reserved.get(slot)
-    if (card) {
-      loot = {kind: 'keycard', keyId: card, count: 1}
-      clue = chance(rng, 0.4) ? clues[i % clues.length] : undefined
+    if (loot) {
+      clue = chance(rng, 0.35) ? clues[i % clues.length] : undefined
     } else {
-      // supplies / clue (cards only ever come from reserved free slots)
+      // supplies / upgrade / clue (cards only ever come from reserved free slots)
       const r = rng()
-      if (r < 0.4) loot = ammoStack(rng)
-      else if (r < 0.68) loot = {kind: 'medkit', count: 1}
+      if (r < 0.32) loot = ammoStack(rng)
+      else if (r < 0.52) loot = {kind: 'medkit', count: 1}
+      else if (r < 0.63) loot = weaponStack(rng)
+      else if (r < 0.71) loot = armorStack(rng)
       clue = !loot || chance(rng, 0.5) ? clues[i % clues.length] : undefined
     }
     containers.push({id: `cont-${i}`, x: at.x, y: at.y, kind, searched: false, loot, clue, locked: !freeSet.has(slot)})

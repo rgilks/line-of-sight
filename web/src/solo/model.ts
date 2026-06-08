@@ -25,11 +25,13 @@ export type Stats = {str: number; dex: number; end: number}
 // "Melee Combat", "Medicine").
 export type Skills = Record<string, number>
 
-export type ItemKind = 'ammo' | 'medkit' | 'keycard'
-// A stack of carried consumables. `weaponId` ties ammo to the weapon it reloads;
-// `keyId` tags a keycard with the door clearance it opens (a colour). Several
-// doors can share a clearance, so one card may open more than one of them.
-export type ItemStack = {kind: ItemKind; weaponId?: string; keyId?: string; count: number}
+export type ItemKind = 'ammo' | 'medkit' | 'keycard' | 'weapon' | 'armor'
+// A stack of carried/loose items. `weaponId` ties ammo to the weapon it reloads
+// (and names a 'weapon' pickup); `armorId` names an 'armor' pickup; `keyId` tags a
+// keycard with the door clearance it opens (a colour). Several doors can share a
+// clearance, so one card may open more than one of them. Weapons and armour are
+// picked up to equip (count 1); ammo/medkits/keycards stack.
+export type ItemStack = {kind: ItemKind; weaponId?: string; armorId?: string; keyId?: string; count: number}
 // Loot lying on the deck floor until a character picks it up (board pixels).
 export type GroundItem = {id: string; x: number; y: number; stack: ItemStack}
 // A solid, pushable crate occupying one cell. Blocks movement (and Phase-4 monster

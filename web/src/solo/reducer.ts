@@ -6,7 +6,7 @@ import {distanceToOccluder, doorReachForGrid, visibilityPolygon} from '../../../
 import {orderByInitiative, pointInPolygon} from '../../../core/rules'
 import {roll2D6, type Rng} from '../../../core/dice'
 import {applyDamage, applyHeal, attackLog, HACK_TARGET, resolveAttack, resolveFirstAid, resolveHack} from './combat'
-import {weaponById} from './gear'
+import {ARMORS, weaponById} from './gear'
 import {cellCenter, cellOf, isFloor} from './grid'
 import {
   activeEntity,
@@ -335,7 +335,38 @@ const lootLabel = (stack: ItemStack): string =>
     ? `${stack.count} rounds`
     : stack.kind === 'keycard'
       ? `a ${keyLabel(stack.keyId)} access card`
-      : `${stack.count} medkit${stack.count > 1 ? 's' : ''}`
+      : stack.kind === 'weapon'
+        ? `a ${weaponById(stack.weaponId ?? '').name}`
+        : stack.kind === 'armor'
+          ? (ARMORS[stack.armorId ?? '']?.name ?? 'armour')
+          : `${stack.count} medkit${stack.count > 1 ? 's' : ''}`
+
+// Equip a found weapon or armour on `actor`, dropping the gear it replaces onto the
+// floor (so nothing is lost and the squad can redistribute). Natural weapons have
+// no pickup, so they're never dropped. Returns the updated entities + ground.
+const equipGear = (
+  state: SoloState,
+  actor: Entity,
+  stack: ItemStack
+): {entities: Entity[]; ground: SoloState['ground']; lines: string[]} => {
+  const dropId = `g-old-${actor.id}-${state.ground.length}`
+  if (stack.kind === 'weapon' && stack.weaponId) {
+    const weapon = weaponById(stack.weaponId)
+    const old = weaponById(actor.weaponId)
+    const ground =
+      old.id === weapon.id
+        ? state.ground
+        : [...state.ground, {id: dropId, x: actor.x, y: actor.y, stack: {kind: 'weapon' as const, weaponId: old.id, count: 1}}]
+    const entities = replace(state, actor.id, (e) => ({...e, weaponId: weapon.id, loadedRounds: weapon.magazine ?? 0}))
+    return {entities, ground, lines: [`${actor.label} takes up the ${weapon.name}${weapon.magazine ? ' (loaded)' : ''}.`]}
+  }
+  const armor = ARMORS[stack.armorId ?? '']
+  const ground = actor.armorId
+    ? [...state.ground, {id: dropId, x: actor.x, y: actor.y, stack: {kind: 'armor' as const, armorId: actor.armorId, count: 1}}]
+    : state.ground
+  const entities = replace(state, actor.id, (e) => ({...e, armorId: stack.armorId ?? null}))
+  return {entities, ground, lines: [`${actor.label} dons ${armor?.name ?? 'armour'} (AR ${armor?.ar ?? 0}).`]}
+}
 
 const applyPickUp = (state: SoloState, groundItemId: string): SoloState => {
   const actor = activeEntity(state)
@@ -347,15 +378,24 @@ const applyPickUp = (state: SoloState, groundItemId: string): SoloState => {
   }
   const cost = minorCost(state, actor) // picking up is a minor action
   if (!enough(state, cost)) return log(state, `${actor.label} has no actions left this turn.`)
-  const label = lootLabel(item.stack)
+  const remaining = state.ground.filter((g) => g.id !== groundItemId)
+  // Weapons + armour equip on pickup (replaced gear drops to the floor); the rest
+  // stack into the pack.
+  if (item.stack.kind === 'weapon' || item.stack.kind === 'armor') {
+    const eq = equipGear({...state, ground: remaining}, actor, item.stack)
+    return log(
+      {...state, entities: eq.entities, ground: eq.ground, moveRemainingPx: state.moveRemainingPx - cost},
+      ...eq.lines
+    )
+  }
   return log(
     {
       ...state,
       entities: replace(state, actor.id, (e) => ({...e, inventory: mergeStack(e.inventory, item.stack)})),
-      ground: state.ground.filter((g) => g.id !== groundItemId),
+      ground: remaining,
       moveRemainingPx: state.moveRemainingPx - cost
     },
-    `${actor.label} picks up ${label}.`
+    `${actor.label} picks up ${lootLabel(item.stack)}.`
   )
 }
 
@@ -393,14 +433,21 @@ const applySearch = (state: SoloState, containerId: string): SoloState => {
   const containers = state.containers.map((c) => (c.id === containerId ? {...c, searched: true} : c))
   const lines = [`${actor.label} searches the ${containerLabel(container.kind)}.`]
   let entities = state.entities
+  let ground = state.ground
   if (container.loot) {
     const loot = container.loot
-    entities = replace(state, actor.id, (e) => ({...e, inventory: mergeStack(e.inventory, loot)}))
     lines.push(`  ${actor.label} finds ${lootLabel(loot)}.`)
+    if (loot.kind === 'weapon' || loot.kind === 'armor') {
+      const eq = equipGear(state, actor, loot) // equips, dropping replaced gear nearby
+      entities = eq.entities
+      ground = eq.ground
+    } else {
+      entities = replace(state, actor.id, (e) => ({...e, inventory: mergeStack(e.inventory, loot)}))
+    }
   }
   if (container.clue) lines.push(`  ${container.clue}`)
   if (!container.loot && !container.clue) lines.push('  …nothing of use.')
-  return log({...state, containers, entities, moveRemainingPx: state.moveRemainingPx - cost}, ...lines)
+  return log({...state, containers, entities, ground, moveRemainingPx: state.moveRemainingPx - cost}, ...lines)
 }
 
 // --- crates / barricades ---------------------------------------------------

@@ -365,9 +365,9 @@ const buildWave = (map: GeneratedMap, grid: WalkGrid, n: number): Entity[] => {
 const scatterLoot = (map: GeneratedMap, grid: WalkGrid): GroundItem[] => {
   const rooms = [...map.rooms].filter((room) => room.w * room.h >= 4)
   const stacks: ItemStack[] = [
-    {kind: 'ammo', weaponId: 'autorifle', count: 40},
-    {kind: 'ammo', weaponId: 'shotgun', count: 12},
-    {kind: 'medkit', count: 1},
+    {kind: 'weapon', weaponId: 'autorifle', count: 1},
+    {kind: 'armor', armorId: 'cloth', count: 1},
+    {kind: 'ammo', weaponId: 'autopistol', count: 24},
     {kind: 'medkit', count: 1}
   ]
   const out: GroundItem[] = []
@@ -1347,25 +1347,64 @@ const drawFloorDebug = (s: SoloState): void => {
 }
 
 const drawGroundItem = (s: SoloState, item: GroundItem): void => {
-  const r = s.map.gridScale * 0.22
+  const r = s.map.gridScale * 0.24
+  const k = item.stack.kind
+  const fill =
+    k === 'medkit'
+      ? 'rgba(57,255,20,0.92)'
+      : k === 'weapon'
+        ? 'rgba(150,182,214,0.95)'
+        : k === 'armor'
+          ? 'rgba(150,158,172,0.95)'
+          : k === 'keycard'
+            ? (KEY_COLORS[item.stack.keyId ?? ''] ?? 'rgba(255,210,74,0.92)')
+            : 'rgba(255,210,74,0.92)' // ammo
   ctx.save()
   ctx.translate(item.x, item.y)
-  ctx.fillStyle = item.stack.kind === 'medkit' ? 'rgba(57,255,20,0.92)' : 'rgba(255,210,74,0.92)'
+  ctx.fillStyle = fill
   ctx.strokeStyle = 'rgba(0,0,0,0.6)'
   ctx.lineWidth = 2
   ctx.beginPath()
   ctx.rect(-r, -r, r * 2, r * 2)
   ctx.fill()
   ctx.stroke()
-  if (item.stack.kind === 'medkit') {
-    // a small cross
-    ctx.strokeStyle = '#041006'
-    ctx.lineWidth = Math.max(2, r * 0.35)
+  ctx.strokeStyle = 'rgba(6,14,10,0.85)'
+  ctx.lineWidth = Math.max(1.5, r * 0.26)
+  ctx.lineJoin = 'round'
+  if (k === 'medkit') {
     ctx.beginPath()
     ctx.moveTo(0, -r * 0.55)
     ctx.lineTo(0, r * 0.55)
     ctx.moveTo(-r * 0.55, 0)
     ctx.lineTo(r * 0.55, 0)
+    ctx.stroke()
+  } else if (k === 'weapon') {
+    // a crude pistol: barrel along the top, a grip dropping from it
+    ctx.beginPath()
+    ctx.moveTo(-r * 0.6, -r * 0.2)
+    ctx.lineTo(r * 0.6, -r * 0.2)
+    ctx.lineTo(r * 0.6, r * 0.02)
+    ctx.moveTo(-r * 0.2, -r * 0.2)
+    ctx.lineTo(-r * 0.45, r * 0.55)
+    ctx.stroke()
+  } else if (k === 'armor') {
+    // a shield outline
+    ctx.beginPath()
+    ctx.moveTo(0, -r * 0.58)
+    ctx.lineTo(r * 0.55, -r * 0.15)
+    ctx.lineTo(r * 0.38, r * 0.52)
+    ctx.lineTo(-r * 0.38, r * 0.52)
+    ctx.lineTo(-r * 0.55, -r * 0.15)
+    ctx.closePath()
+    ctx.stroke()
+  } else if (k === 'keycard') {
+    // a key: round bow + stem with a tooth
+    ctx.beginPath()
+    ctx.arc(-r * 0.28, 0, r * 0.3, 0, Math.PI * 2)
+    ctx.moveTo(0, 0)
+    ctx.lineTo(r * 0.62, 0)
+    ctx.moveTo(r * 0.62, 0)
+    ctx.lineTo(r * 0.62, r * 0.3)
     ctx.stroke()
   }
   ctx.restore()
