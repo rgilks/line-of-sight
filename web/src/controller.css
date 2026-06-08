@@ -1,0 +1,205 @@
+/* Phone controller: a heads-up gamepad for one character. Dark Cepheus brand,
+   big touch targets, a scrollable middle, and a fixed action bar at the bottom so
+   the dominant thumb always lands on END TURN / ATTACK without looking. */
+:root {
+  --green: #39ff14;
+  --green-rgb: 57, 255, 20;
+  --ink: #07120b;
+  --panel: rgba(8, 18, 11, 0.92);
+  --line: rgba(var(--green-rgb), 0.22);
+  --text: #e8f3ea;
+  --muted: rgba(232, 243, 234, 0.55);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--ink);
+  color: var(--text);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+#app {
+  display: flex;
+  min-height: 100svh;
+  flex-direction: column;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+.ctrl-boot {
+  margin: auto;
+  padding: 24px;
+  text-align: center;
+  color: var(--muted);
+}
+
+.ctrl-hud {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.ctrl-turn {
+  font-family: "Orbitron", sans-serif;
+  font-size: 14px;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+}
+
+.ctrl-turn.is-mine {
+  color: var(--green);
+  text-shadow: 0 0 12px rgba(var(--green-rgb), 0.5);
+}
+
+.ctrl-wave {
+  font-size: 12px;
+  color: var(--muted);
+  letter-spacing: 0.06em;
+}
+
+.ctrl-me {
+  display: grid;
+  gap: 3px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.ctrl-me-name {
+  font-family: "Orbitron", sans-serif;
+  font-size: 15px;
+  color: var(--green);
+}
+
+.ctrl-me-hp,
+.ctrl-me-gear,
+.ctrl-me-move {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.ctrl-list {
+  padding: 10px 16px 0;
+}
+
+.ctrl-list:last-of-type {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.ctrl-list h2 {
+  margin: 6px 0;
+  font-family: "Orbitron", sans-serif;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.ctrl-empty {
+  margin: 4px 0 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.ctrl-foe,
+.ctrl-act {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+  padding: 13px 14px;
+  font-family: inherit;
+  font-size: 14px;
+  color: var(--text);
+  text-align: left;
+  background: rgba(var(--green-rgb), 0.05);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  cursor: pointer;
+}
+
+.ctrl-foe.is-selected {
+  border-color: var(--green);
+  background: rgba(var(--green-rgb), 0.16);
+}
+
+.ctrl-foe.is-far {
+  opacity: 0.55;
+}
+
+.ctrl-foe-name {
+  font-weight: 700;
+}
+
+.ctrl-foe-meta {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.ctrl-act {
+  color: var(--green);
+}
+
+.ctrl-note {
+  margin: 4px 16px 0;
+  font-size: 12px;
+  color: #ffcf66;
+}
+
+.ctrl-actions {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr;
+  gap: 8px;
+  padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.ctrl-btn {
+  min-height: 56px;
+  padding: 6px;
+  font-family: "Orbitron", sans-serif;
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  color: var(--text);
+  background: rgba(var(--green-rgb), 0.08);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  cursor: pointer;
+}
+
+.ctrl-btn:active {
+  background: rgba(var(--green-rgb), 0.2);
+}
+
+.ctrl-btn:disabled {
+  opacity: 0.35;
+}
+
+.ctrl-attack {
+  grid-column: 1;
+  grid-row: 1;
+  color: #ff7064;
+  border-color: rgba(255, 112, 100, 0.4);
+  background: rgba(255, 112, 100, 0.12);
+}
+
+.ctrl-end {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  color: var(--ink);
+  background: var(--green);
+  border-color: var(--green);
+}
