@@ -15,7 +15,7 @@ installErrorReporting('controller')
 
 const params = new URLSearchParams(location.search)
 const room = params.get('table') ?? 'demo'
-const actor = params.get('actor') ?? ''
+let actor = params.get('actor') ?? ''
 const seedParam = params.get('seed')
 
 const app = document.querySelector<HTMLDivElement>('#app')
@@ -142,9 +142,18 @@ const render = (): void => {
 
 root.addEventListener('click', (event) => {
   const el = (event.target as HTMLElement).closest<HTMLElement>(
-    '[data-foe],[data-step],[data-pickup],[data-search],[data-door],[data-do]'
+    '[data-pick],[data-foe],[data-step],[data-pickup],[data-search],[data-door],[data-do]'
   )
-  if (!el || !view) return
+  if (!el) return
+  if (el.dataset.pick) {
+    actor = el.dataset.pick
+    const url = new URL(location.href)
+    url.searchParams.set('actor', actor)
+    history.replaceState(null, '', url)
+    connect()
+    return
+  }
+  if (!view) return
   if (el.dataset.foe) {
     selectedFoe = el.dataset.foe
     render()
@@ -196,10 +205,35 @@ const connect = (): void => {
   }
 }
 
-if (!actor) {
-  note = 'Open this from the board: it needs ?table=<room>&actor=<character>.'
-  render()
-} else {
+// With no actor (a phone that scanned the board's join QR), connect to the room
+// just to read its roster and show a character picker; choosing one reconnects as
+// that character.
+const renderPicker = (pcs: ReadonlyArray<{id: string; label: string}>): void => {
+  root.innerHTML = `<div class="ctrl-pick">
+    <h1 class="ctrl-pick-title">Choose your character</h1>
+    ${pcs.map((p) => `<button class="ctrl-pick-btn" data-pick="${escapeHtml(p.id)}">${escapeHtml(p.label)}</button>`).join('')}
+  </div>`
+}
+
+const connectPicker = (): void => {
+  root.innerHTML = '<div class="ctrl-boot">Loading characters…</div>'
+  const src = new EventSource(
+    `/api/solo/${encodeURIComponent(room)}/stream${seedParam ? `?seed=${encodeURIComponent(seedParam)}` : ''}`
+  )
+  src.onmessage = (event) => {
+    const message = JSON.parse(event.data) as {
+      view?: string
+      state?: {entities?: Array<{id: string; label: string; faction: string}>}
+    }
+    if (message.view !== 'board' || !message.state?.entities) return
+    src.close()
+    renderPicker(message.state.entities.filter((e) => e.faction === 'pc').map((e) => ({id: e.id, label: e.label})))
+  }
+}
+
+if (actor) {
   render()
   connect()
+} else {
+  connectPicker()
 }

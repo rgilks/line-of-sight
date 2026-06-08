@@ -31,7 +31,10 @@ export default defineConfig({
         board: entry('board.html'),
         // controller (route `/controller`) is the phone gamepad for companion
         // play — the per-character SoloRoom view. See docs/COMPANION-PLAY.md.
-        controller: entry('controller.html')
+        controller: entry('controller.html'),
+        // solo-board (route `/solo-board`) is the shared-screen display of a
+        // SoloRoom game (the deck on a TV) with a join QR.
+        'solo-board': entry('solo-board.html')
       }
     }
   },
