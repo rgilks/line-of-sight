@@ -3,7 +3,7 @@
 // security-critical fog gating: a player must never receive a token, room label,
 // or chat say they aren't allowed to see, and command permissions are enforced.
 import {describe, expect, it} from 'vitest'
-import {decide, fold, projectFor, type Actor, type EventInput, type TableState} from './game-table'
+import {decide, fold, projectFor, replay, seedBoard, type Actor, type EventInput, type TableState} from './game-table'
 import type {Board, Combatant, CombatState, Command, DomainEvent, Token} from './protocol'
 
 // A wall down the middle (x = 500), splitting the board into a left and right
@@ -289,5 +289,90 @@ describe('decide — round-trip Say through fold builds a seq-stamped id', () =>
   it('emits no event for an empty say', () => {
     const state = splitState(walledBoard())
     expect(decide(state, player('a'), {type: 'Say', text: '   '}, {now: NOW, rollD6: () => 1})).toEqual({events: []})
+  })
+})
+
+describe('replay — a table survives a restart', () => {
+  // Durability check for the pure half of the persistence story: a live table is
+  // a fold over its event log starting from the seed board, and the DO rebuilds
+  // on construction by replaying that log over the same seed. So replaying the
+  // exact event sequence the shell logged must reproduce the live TableState.
+  //
+  // This unit-tests the replay/fold logic only. The storage read/write wiring in
+  // GameTable (storage.put on commit, storage.list + blockConcurrencyWhile on
+  // construction) needs a real DO and is not exercised here.
+
+  // Build a log the way the shell's `commit` does — append with a monotonic seq —
+  // folding each event into a "live" state as we go. Returns the log plus the
+  // live state, which a fresh replay must match.
+  const buildTable = (): {log: DomainEvent[]; live: TableState} => {
+    const live: TableState = {board: seedBoard(), tokens: new Map(), says: [], combat: null}
+    const log: DomainEvent[] = []
+    const append = (event: EventInput): void => {
+      const logged = {...event, seq: log.length + 1} as DomainEvent
+      log.push(logged)
+      fold(live, logged)
+    }
+
+    // Two players join on opposite sides of the seed board's central door.
+    append({type: 'PlayerJoined', playerId: 'a', label: 'P1', kind: 'scout', x: 250, y: 500})
+    append({type: 'PlayerJoined', playerId: 'b', label: 'P2', kind: 'medic', x: 750, y: 500})
+    // One renames, one moves.
+    append({type: 'PlayerRenamed', playerId: 'a', label: 'Scout'})
+    append({type: 'TokenMoved', playerId: 'a', x: 300, y: 520})
+    append({type: 'TokenMoveMetersSet', playerId: 'b', moveMeters: 9})
+    // A door toggles, then the GM publishes a new board (full value in the event).
+    append({type: 'DoorToggled', doorId: 'seed-door', open: true})
+    const published: Board = {...seedBoard(), assetRef: 'map-7', boardSeq: 1, playerDoorControl: false}
+    append({type: 'BoardPublished', board: published})
+    // A chat say (its folded id is stamped from the event seq).
+    append({
+      type: 'Said',
+      fromId: 'a',
+      label: 'Scout',
+      text: 'on me',
+      at: {x: 300, y: 520},
+      fromGm: false,
+      sentAt: NOW
+    })
+    // A combat: start, both roll initiative, advance a turn.
+    append({type: 'CombatStarted', playerIds: ['a', 'b']})
+    append({type: 'InitiativeRolled', playerId: 'a', dice: [4, 4], dexterityDm: 0, initiative: 8})
+    append({type: 'InitiativeRolled', playerId: 'b', dice: [6, 6], dexterityDm: 0, initiative: 12})
+    append({type: 'TurnAdvanced', round: 1, turnIndex: 1})
+
+    return {log, live}
+  }
+
+  it('rebuilds the identical TableState purely from the event log', () => {
+    const {log, live} = buildTable()
+    const rebuilt = replay(log)
+    // Deep-equals across board, tokens (a Map), says, and combat — every piece of
+    // canonical state is reconstructed from the log alone.
+    expect(rebuilt).toEqual(live)
+  })
+
+  it('restores the published board (not the seed) from the log', () => {
+    const {log} = buildTable()
+    const rebuilt = replay(log)
+    expect(rebuilt.board.assetRef).toBe('map-7')
+    expect(rebuilt.board.boardSeq).toBe(1)
+    expect(rebuilt.board.playerDoorControl).toBe(false)
+    // The door toggled before the publish is on the seed board; the published
+    // board carries its own (empty) doorStates, so the toggle does not persist.
+    expect(rebuilt.board.doorStates).toEqual({})
+  })
+
+  it('restores combat ordering and the current turn from the log', () => {
+    const {log} = buildTable()
+    const rebuilt = replay(log)
+    // b rolled higher, so initiative order is b then a; the log advanced to turn 1.
+    expect(rebuilt.combat?.combatants.map((c) => c.playerId)).toEqual(['b', 'a'])
+    expect(rebuilt.combat?.turnIndex).toBe(1)
+  })
+
+  it('an empty log replays to the seed state', () => {
+    const rebuilt = replay([])
+    expect(rebuilt).toEqual({board: seedBoard(), tokens: new Map(), says: [], combat: null})
   })
 })

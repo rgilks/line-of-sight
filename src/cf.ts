@@ -19,8 +19,21 @@ export interface DurableObjectNamespace {
   get(id: DurableObjectId): DurableObjectStub
 }
 
+// The slice of the Durable Object storage API the table uses: ordered key/value
+// reads + writes for the event log, plus the construction-time barrier that
+// holds requests until state is rebuilt. Keys sort lexicographically, so the log
+// keys are zero-padded (see EVT_KEY in game-table.ts) to replay in seq order.
+export interface DurableObjectStorage {
+  put<T = unknown>(key: string, value: T): Promise<void>
+  list<T = unknown>(options?: {prefix?: string}): Promise<Map<string, T>>
+}
+
 export interface DurableObjectState {
   readonly id: DurableObjectId
+  readonly storage: DurableObjectStorage
+  // Runs `callback` before any fetch is delivered, and blocks delivery until it
+  // resolves — the only way to do async setup from a (synchronous) constructor.
+  blockConcurrencyWhile<T>(callback: () => Promise<T>): Promise<T>
 }
 
 // Minimal R2 surface used for GM-uploaded maps (private bucket, served only

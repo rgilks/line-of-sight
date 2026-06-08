@@ -337,8 +337,10 @@ export const fold = (state: TableState, event: DomainEvent): TableState => {
       state.board = {...state.board, playerDoorControl: event.enabled}
       return state
     case 'BoardPublished':
-      // The board value itself is swapped in by the shell's publish path; the
-      // event only marks the change in the log. State already holds the new board.
+      // The event carries the whole normalized board, so the fold is the single
+      // place the board swaps in — for both the live publish path and a replay
+      // rebuilding from the log. State after this fold holds the published board.
+      state.board = event.board
       return state
     case 'Said':
       state.says = prunedSays(
@@ -398,12 +400,10 @@ export const fold = (state: TableState, event: DomainEvent): TableState => {
   }
 }
 
-// ── Imperative shell ──────────────────────────────────────────────────────────
-
 // Default board: a central wall with a DOOR in the middle, so two players on
 // opposite sides start blocked and opening the door reveals them — the whole
 // system is demonstrable with no map uploaded. A GM publish replaces this.
-const seedBoard = (): Board => ({
+export const seedBoard = (): Board => ({
   assetRef: 'composed-board',
   width: 1000,
   height: 1000,
@@ -420,15 +420,50 @@ const seedBoard = (): Board => ({
   defaultMoveMeters: 6
 })
 
+// A fresh canonical state on the seed board — the starting value every replay
+// and every live table folds onto.
+const seedState = (): TableState => ({
+  board: seedBoard(),
+  tokens: new Map<PlayerId, Token>(),
+  says: [],
+  combat: null
+})
+
+// Rebuild the canonical state from an ordered event log by folding from the seed.
+// Pure and the inverse of `commit`'s logging: feeding the full log back through
+// `replay` yields the same TableState the live shell held. This is the whole
+// persistence story for the prototype — no snapshots, just full-log replay (see
+// the constructor for the compaction note).
+export const replay = (events: DomainEvent[]): TableState => {
+  const state = seedState()
+  for (const event of events) fold(state, event)
+  return state
+}
+
+// boardSeq isn't stored on its own — it's derived from the last published board
+// in the log, so a replay restores it for free. Defaults to 0 (seed board, never
+// published).
+const boardSeqFromLog = (events: DomainEvent[]): number => {
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const event = events[i]
+    if (event.type === 'BoardPublished') return event.board.boardSeq ?? 0
+  }
+  return 0
+}
+
+// ── Imperative shell ──────────────────────────────────────────────────────────
+
+// Event-log storage keys are `evt:` + the seq zero-padded to a fixed width, so
+// DO storage `list()` (lexicographic key order) returns them already in seq
+// order. 12 digits covers any seq a table will reach.
+const EVT_PREFIX = 'evt:'
+const EVT_KEY = (seq: number): string => EVT_PREFIX + String(seq).padStart(12, '0')
+
 export class GameTable {
   // The canonical, projectable game state — the value the functional core folds
-  // events into and projects from.
-  private readonly state: TableState = {
-    board: seedBoard(),
-    tokens: new Map<PlayerId, Token>(),
-    says: [],
-    combat: null
-  }
+  // events into and projects from. Starts on the seed board; the constructor
+  // replays any persisted log over it before the first request is served.
+  private readonly state: TableState = seedState()
   private boardSeq = 0
   private readonly connections = new Map<PlayerId, Connection>()
   private readonly log: DomainEvent[] = []
@@ -436,8 +471,31 @@ export class GameTable {
   // Per-table salt so the spawn-point shuffle is stable within a table but
   // differs between tables. Derived once from the (random) DO id name.
   private readonly spawnSalt = Math.floor(Math.random() * 1e9)
+  private readonly storage: DurableObjectState['storage']
 
-  constructor(_state: DurableObjectState, _env: unknown) {}
+  constructor(state: DurableObjectState, _env: unknown) {
+    this.storage = state.storage
+    // Durability: the event log lives in DO storage; on construction we load it
+    // and rebuild TableState by replaying it over the seed (the same fold the
+    // live path uses), so a Worker/DO eviction or restart loses nothing.
+    //
+    // The constructor can't be async, and the DO must not serve a fetch before
+    // state is rebuilt — `blockConcurrencyWhile` runs this async load to
+    // completion and holds every incoming request until it resolves, so by the
+    // time `fetch` runs the in-memory log, state, seq, and boardSeq are restored.
+    void state.blockConcurrencyWhile(async () => {
+      const stored = await this.storage.list<DomainEvent>({prefix: EVT_PREFIX})
+      // list() yields keys in lexicographic order; the zero-padded EVT_KEY makes
+      // that seq order, so the values replay in the order they were committed.
+      const events = [...stored.values()]
+      for (const event of events) {
+        this.log.push(event)
+        fold(this.state, event)
+      }
+      this.seq = events.length > 0 ? events[events.length - 1].seq : 0
+      this.boardSeq = boardSeqFromLog(events)
+    })
+  }
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url)
@@ -450,11 +508,19 @@ export class GameTable {
   // Assign and log an event, then fold it into the canonical state. Returns the
   // logged event (with its seq) so callers that need the seq (chat say id) can use
   // it. Single I/O point for advancing state.
+  //
+  // The persist is fire-and-forget by design: the in-memory log + state are the
+  // source of truth a live table reads, and DO storage writes are durable on the
+  // same single-threaded actor — we don't await it on the command's critical
+  // path. Compaction is intentionally omitted for the prototype: we keep the full
+  // log and replay all of it on restart. A later phase can snapshot TableState
+  // and truncate `evt:` keys below the snapshot seq; nothing here forecloses that.
   private commit(event: EventInput): DomainEvent {
     this.seq += 1
     const logged = {...event, seq: this.seq} as DomainEvent
     this.log.push(logged)
     fold(this.state, logged)
+    void this.storage.put(EVT_KEY(logged.seq), logged)
     return logged
   }
 
@@ -569,7 +635,10 @@ export class GameTable {
     }
 
     this.boardSeq += 1
-    this.state.board = {
+    // Normalize the incoming board, stamp its boardSeq, and carry the whole value
+    // in the event — `commit`'s fold swaps it into state and persists it, so the
+    // published board survives a restart instead of living only in memory.
+    const normalized: Board = {
       ...board,
       boardSeq: this.boardSeq,
       doorStates: board.doorStates ?? {},
@@ -577,7 +646,7 @@ export class GameTable {
       metersPerSquare: board.metersPerSquare ?? 1.5,
       defaultMoveMeters: board.defaultMoveMeters ?? 6
     }
-    this.commit({type: 'BoardPublished', assetRef: board.assetRef})
+    this.commit({type: 'BoardPublished', board: normalized})
     this.projectAll()
     return Response.json({ok: true, seq: this.seq})
   }

@@ -50,7 +50,11 @@ export type DomainEvent = {seq: number} & (
   | {type: 'DoorToggled'; doorId: string; open: boolean}
   | {type: 'PlayerDoorControlSet'; enabled: boolean}
   | {type: 'TokenMoveMetersSet'; playerId: PlayerId; moveMeters: number}
-  | {type: 'BoardPublished'; assetRef: string}
+  // Carries the whole normalized board (already stamped with its boardSeq), not
+  // just the assetRef, so a replay of the log alone reconstructs the published
+  // board — the fold swaps `board` straight in. Without this the board value
+  // would live only in memory and be lost on restart.
+  | {type: 'BoardPublished'; board: Board}
   | {type: 'CombatStarted'; playerIds: PlayerId[]}
   | {
       type: 'InitiativeRolled'
