@@ -383,3 +383,28 @@ describe('solo reducer — gear pickup', () => {
     expect(next.entities[0].armorId).toBe('combat')
   })
 })
+
+// The authority gate for companion play: in multi-actor play each command names
+// its issuer, and a player may only act on their own character's turn. This is
+// what keeps one phone from driving another player's character.
+describe('solo reducer — multi-actor authority', () => {
+  const east = {x: (3 + 0.5) * 30, y: (2 + 0.5) * 30}
+
+  it('lets a player act on their own turn (byActor is the active entity)', () => {
+    const state = makeState([pc('a', 2, 2, 0), pc('b', 4, 4, 1)]) // a is active (turnPtr 0)
+    const next = reduce(state, {t: 'Move', to: east}, undefined, 'a')
+    expect(next.entities[0].x).toBeCloseTo(east.x)
+  })
+
+  it('rejects a command from a player who is not the active entity', () => {
+    const state = makeState([pc('a', 2, 2, 0), pc('b', 4, 4, 1)]) // a is active
+    const next = reduce(state, {t: 'Move', to: east}, undefined, 'b') // b acts off-turn
+    expect(next).toBe(state) // no-op: b cannot move on a's turn, and cannot move a
+  })
+
+  it('is ungated when no actor is supplied (single-player and the monster AI)', () => {
+    const state = makeState([pc('a', 2, 2, 0)])
+    const next = reduce(state, {t: 'Move', to: east})
+    expect(next.entities[0].x).toBeCloseTo(east.x)
+  })
+})

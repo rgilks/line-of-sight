@@ -543,7 +543,14 @@ const applyAddWave = (state: SoloState, monsters: Entity[], rng: Rng): SoloState
   )
 }
 
-export const reduce = (state: SoloState, action: Action, rng: Rng = Math.random): SoloState => {
+// In multi-actor "companion" play (phones as controllers, see
+// docs/COMPANION-PLAY.md), a command names the actor issuing it via `byActor`. A
+// player may act only on their own character's turn, so any command whose issuer
+// is not the active entity is rejected — this is the authority gate that stops
+// one phone from driving another player's character. Single-player, the monster
+// AI, and the wave director pass no `byActor` and are ungated.
+export const reduce = (state: SoloState, action: Action, rng: Rng = Math.random, byActor?: string): SoloState => {
+  if (byActor !== undefined && activeEntity(state)?.id !== byActor) return state
   switch (action.t) {
     case 'Move':
       return applyMove(state, action.to)
