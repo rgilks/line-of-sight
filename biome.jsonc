@@ -63,14 +63,6 @@
         // `!cond` is a stylistic call left to the author, not auto-applied.
         "noUselessTernary": "off"
       },
-      "correctness": {
-        // tsc (strict) does not enable noUnusedLocals/Parameters here, so keep
-        // parity: these flag dead helpers/params in detect.ts and play.ts that
-        // are out of scope to delete while landing a formatter. Tracked for a
-        // separate dead-code cleanup rather than silently removed here.
-        "noUnusedVariables": "off",
-        "noUnusedFunctionParameters": "off"
-      },
       "style": {
         // Pure CSS source-ordering hint; reordering rules risks changing the
         // cascade and the rendered result, so this is not auto-applied.

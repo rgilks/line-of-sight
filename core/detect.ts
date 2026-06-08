@@ -367,9 +367,6 @@ const morphDilate = (mask: Uint8Array, width: number, height: number, radius: nu
   return out
 }
 
-const morphOpen = (mask: Uint8Array, width: number, height: number, radius: number): Uint8Array =>
-  morphDilate(morphErode(mask, width, height, radius), width, height, radius)
-
 const morphClose = (mask: Uint8Array, width: number, height: number, radius: number): Uint8Array =>
   morphErode(morphDilate(mask, width, height, radius), width, height, radius)
 
@@ -560,21 +557,11 @@ const hasDarkCoreAlongStroke = (candidate: Candidate, width: number, height: num
   return samples > 0 && dark / samples >= 0.38
 }
 
-const extractStructuralDiagonalCandidates = (
-  existingWalls: Candidate[],
-  width: number,
-  height: number,
-  mask: Uint8Array,
-  thickMask: Uint8Array,
-  grid: GridGeometry,
-  snap: number
-): Candidate[] => collectDiagonalWallCandidates(existingWalls, width, height, mask, thickMask, grid, snap)
-
 const collectDiagonalWallCandidates = (
   existingWalls: Candidate[],
   width: number,
   height: number,
-  mask: Uint8Array,
+  _mask: Uint8Array,
   thickMask: Uint8Array,
   grid: GridGeometry,
   snap: number
@@ -833,8 +820,8 @@ const diagonalCandidateFromRange = (
 
 const selectFinalWallCandidates = (
   wallCandidates: Candidate[],
-  thickStrokeWalls: Candidate[],
-  snap: number,
+  _thickStrokeWalls: Candidate[],
+  _snap: number,
   maxWalls: number
 ): Candidate[] => {
   const maxDiagonalWalls = 80
@@ -1369,46 +1356,6 @@ const scanDiagonalUp = (width: number, height: number, mask: Uint8Array, minRun:
   }
   for (let x = 1; x < width; x += 1) {
     scanDiagonalLine(width, height, mask, minRun, snap, x, height - 1, 1, -1, 'diagonal-up', candidates)
-  }
-  return candidates
-}
-
-const scanSlopedDown = (
-  width: number,
-  height: number,
-  mask: Uint8Array,
-  minRun: number,
-  snap: number,
-  stepX: 1 | 2,
-  stepY: 1 | 2,
-  orientation: CandidateOrientation
-): Candidate[] => {
-  const candidates: Candidate[] = []
-  for (let x = 0; x < width; x += 1) {
-    scanDiagonalLine(width, height, mask, minRun, snap, x, 0, stepX, stepY, orientation, candidates)
-  }
-  for (let y = 1; y < height; y += 1) {
-    scanDiagonalLine(width, height, mask, minRun, snap, 0, y, stepX, stepY, orientation, candidates)
-  }
-  return candidates
-}
-
-const scanSlopedUp = (
-  width: number,
-  height: number,
-  mask: Uint8Array,
-  minRun: number,
-  snap: number,
-  stepX: 1 | 2,
-  stepY: 1 | 2,
-  orientation: CandidateOrientation
-): Candidate[] => {
-  const candidates: Candidate[] = []
-  for (let y = 0; y < height; y += 1) {
-    scanDiagonalLine(width, height, mask, minRun, snap, 0, y, stepX, -stepY, orientation, candidates)
-  }
-  for (let x = 1; x < width; x += 1) {
-    scanDiagonalLine(width, height, mask, minRun, snap, x, height - 1, stepX, -stepY, orientation, candidates)
   }
   return candidates
 }

@@ -106,7 +106,6 @@ let loadedMapKey = ''
 // loop is the sole owner of draw() — see requestDraw/onFrame below. Kept distinct
 // from fitFrame.
 const MOVE_EASE_MS = 350
-let dirty = false
 
 // Player fog memory: an offscreen mask of everywhere this player's POV has ever
 // seen. Never-seen areas are fully hidden (opaque); explored-but-not-currently-
@@ -290,14 +289,12 @@ const nowEpoch = (): number => Date.now()
 // tween: while a chat bubble is still fading.
 const onFrame = (_t: number, _moving: boolean): boolean => {
   draw()
-  dirty = false
   return bubblesActive(nowEpoch())
 }
 
 const {renderPos, anim, startEase, ensureRaf} = createTweenLoop({easeMs: MOVE_EASE_MS, onFrame})
 
 const requestDraw = (): void => {
-  dirty = true
   ensureRaf()
 }
 
@@ -395,21 +392,6 @@ const scheduleInitialView = (): void => {
   })
 }
 
-const scheduleFitBoardToViewport = (): void => {
-  if (typeof window === 'undefined') {
-    fitBoardToViewport()
-    return
-  }
-
-  if (fitFrame !== 0) cancelAnimationFrame(fitFrame)
-  fitFrame = requestAnimationFrame(() => {
-    fitFrame = requestAnimationFrame(() => {
-      fitFrame = 0
-      fitBoardToViewport()
-    })
-  })
-}
-
 const setZoom = (
   nextZoom: number,
   anchor?: {boardX: number; boardY: number; viewportX: number; viewportY: number}
@@ -455,17 +437,6 @@ const connect = (): void => {
     applyView(message.board, message.tokens, message.says, message.combat ?? null)
   }
   window.addEventListener('beforeunload', () => source.close())
-}
-
-const pointerToBoard = (event: PointerEvent): Point | null => {
-  const active = board.value
-  if (!active) return null
-  const rect = canvas.getBoundingClientRect()
-  if (rect.width <= 0 || rect.height <= 0) return null
-  return {
-    x: ((event.clientX - rect.left) / rect.width) * active.width,
-    y: ((event.clientY - rect.top) / rect.height) * active.height
-  }
 }
 
 const boardPickRadius = (screenPixels: number): number => {
