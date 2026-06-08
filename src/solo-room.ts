@@ -100,18 +100,23 @@ export class SoloRoom {
   }
 
   private async handleCommand(request: Request): Promise<Response> {
-    let body: SoloCommand
+    let body: unknown
     try {
-      body = (await request.json()) as SoloCommand
+      body = await request.json()
     } catch {
       return Response.json({error: 'Invalid JSON'}, {status: 400})
     }
     if (!this.session) return Response.json({error: 'No game in this room yet'}, {status: 409})
-    if (!body || typeof body.byActor !== 'string' || !body.action || !PLAYER_ACTIONS.has(body.action.t)) {
+    // Validate the untrusted command: an actor plus EITHER a whitelisted action
+    // OR a d-pad step (a numeric unit direction).
+    const cmd = body as {byActor?: unknown; action?: {t?: unknown}; step?: {dx?: unknown; dy?: unknown}}
+    const isStep = !!cmd.step && typeof cmd.step.dx === 'number' && typeof cmd.step.dy === 'number'
+    const isAction = !!cmd.action && typeof cmd.action.t === 'string' && PLAYER_ACTIONS.has(cmd.action.t as Action['t'])
+    if (typeof cmd.byActor !== 'string' || (!isStep && !isAction)) {
       return Response.json({error: 'Invalid command'}, {status: 400})
     }
     const before = this.session.state
-    const {session, aiActions} = sessionStep(this.session, body)
+    const {session, aiActions} = sessionStep(this.session, body as SoloCommand)
     this.session = session
     if (session.state === before) return Response.json({accepted: false}) // rejected: not your turn
     // Persist only the player command — the AI turns are re-derived on replay.

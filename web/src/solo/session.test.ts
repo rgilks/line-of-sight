@@ -47,4 +47,36 @@ describe('solo session', () => {
     expect(restored.state.wave).toBe(live.state.wave)
     expect(restored.state.phase).toEqual(live.state.phase)
   })
+
+  it('a d-pad step moves the active character one cell, and replays', () => {
+    let session = createSession(1234)
+    const id = activeEntity(session.state)?.id
+    if (!id) throw new Error('no active entity')
+    const start = session.state.entities.find((e) => e.id === id)
+    const from = start ? {x: start.x, y: start.y} : {x: 0, y: 0}
+    const eightWays: ReadonlyArray<readonly [number, number]> = [
+      [0, -1],
+      [1, 0],
+      [0, 1],
+      [-1, 0],
+      [1, -1],
+      [1, 1],
+      [-1, 1],
+      [-1, -1]
+    ]
+    for (const [dx, dy] of eightWays) {
+      const next = sessionStep(session, {step: {dx, dy}, byActor: id})
+      const me = next.session.state.entities.find((e) => e.id === id)
+      if (me && (me.x !== from.x || me.y !== from.y)) {
+        session = next.session
+        break
+      }
+    }
+    const moved = session.state.entities.find((e) => e.id === id)
+    expect(!!moved && (moved.x !== from.x || moved.y !== from.y)).toBe(true)
+    // The step is recorded and replays to the same position (deterministic).
+    const replayed = replay(1234, session.log).state.entities.find((e) => e.id === id)
+    expect(replayed?.x).toBe(moved?.x)
+    expect(replayed?.y).toBe(moved?.y)
+  })
 })

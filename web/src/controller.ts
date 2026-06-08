@@ -29,12 +29,12 @@ let note = 'Connecting…'
 const escapeHtml = (value: string): string =>
   value.replace(/[&<>"]/g, (c) => (c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&gt;' : '&quot;'))
 
-const post = async (action: Record<string, unknown>): Promise<void> => {
+const send = async (command: Record<string, unknown>): Promise<void> => {
   try {
     const res = await fetch(`/api/solo/${encodeURIComponent(room)}/commands`, {
       method: 'POST',
       headers: {'content-type': 'application/json'},
-      body: JSON.stringify({action, byActor: actor})
+      body: JSON.stringify({...command, byActor: actor})
     })
     const body = (await res.json().catch(() => ({}))) as {accepted?: boolean; error?: string}
     note = body.accepted ? '' : (body.error ?? (res.ok ? 'Not your turn.' : 'Command failed.'))
@@ -44,6 +44,9 @@ const post = async (action: Record<string, unknown>): Promise<void> => {
   render()
 }
 
+// Atomic reducer actions ride in `action`; the d-pad uses send({step}).
+const post = (action: Record<string, unknown>): void => void send({action})
+
 const nextStance = (s: string): 'standing' | 'crouched' | 'prone' =>
   s === 'standing' ? 'crouched' : s === 'crouched' ? 'prone' : 'standing'
 
@@ -52,6 +55,27 @@ const foeRow = (foe: FoeRow): string =>
      <span class="ctrl-foe-name">${escapeHtml(foe.label)}</span>
      <span class="ctrl-foe-meta">${escapeHtml(foe.band)}${foe.inRange ? ` · ${Math.round(foe.hitChance * 100)}%` : ' · out of range'}</span>
    </button>`
+
+// The 8-way step d-pad as a 3x3 grid; the centre shows the move budget. A
+// direction greys out when the projection says that step is illegal right now.
+const DPAD: ReadonlyArray<readonly [string, number, number, string]> = [
+  ['nw', -1, -1, '↖'],
+  ['n', 0, -1, '↑'],
+  ['ne', 1, -1, '↗'],
+  ['w', -1, 0, '←'],
+  ['', 0, 0, ''],
+  ['e', 1, 0, '→'],
+  ['sw', -1, 1, '↙'],
+  ['s', 0, 1, '↓'],
+  ['se', 1, 1, '↘']
+]
+
+const dpadHtml = (dirs: Record<string, boolean>, squares: number): string =>
+  `<div class="ctrl-dpad">${DPAD.map(([k, dx, dy, label]) =>
+    k === ''
+      ? `<div class="ctrl-dpad-mid">${squares}<small>sq</small></div>`
+      : `<button class="ctrl-dir" data-step="${dx},${dy}"${dirs[k] ? '' : ' disabled'}>${label}</button>`
+  ).join('')}</div>`
 
 const render = (): void => {
   if (!view) {
@@ -106,6 +130,7 @@ const render = (): void => {
         : ''
     }
     ${note ? `<p class="ctrl-note">${escapeHtml(note)}</p>` : ''}
+    ${me && myTurn ? dpadHtml(view.dirs, me.moveSquaresLeft) : ''}
     <footer class="ctrl-actions">
       <button class="ctrl-btn ctrl-attack" data-do="attack"${canAttack ? '' : ' disabled'}>ATTACK</button>
       <button class="ctrl-btn" data-do="reload"${myTurn ? '' : ' disabled'}>Reload</button>
@@ -117,12 +142,17 @@ const render = (): void => {
 
 root.addEventListener('click', (event) => {
   const el = (event.target as HTMLElement).closest<HTMLElement>(
-    '[data-foe],[data-pickup],[data-search],[data-door],[data-do]'
+    '[data-foe],[data-step],[data-pickup],[data-search],[data-door],[data-do]'
   )
   if (!el || !view) return
   if (el.dataset.foe) {
     selectedFoe = el.dataset.foe
     render()
+    return
+  }
+  if (el.dataset.step) {
+    const [dx, dy] = el.dataset.step.split(',').map(Number)
+    void send({step: {dx, dy}})
     return
   }
   if (el.dataset.pickup) return void post({t: 'PickUp', groundItemId: el.dataset.pickup})

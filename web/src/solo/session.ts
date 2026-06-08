@@ -10,15 +10,16 @@
 // re-derived, never stored. No DOM, no Cloudflare; this is the layer the DO wraps.
 import {makeRng} from '../synth/rng'
 import {decideMonster} from './ai'
-import {cellCenter} from './grid'
+import {cellCenter, cellOf} from './grid'
 import {reduce} from './reducer'
 import {buildWave, createSoloGame} from './setup'
-import {activeEntity, isDead, type Action, type Entity, type SoloState} from './model'
+import {activeEntity, entityById, isDead, type Action, type Entity, type SoloState} from './model'
 
-// A player command: an action plus the id of the actor (character) issuing it.
-// Only the active character's owner may act (enforced by the reducer's byActor
-// gate); the transport additionally whitelists which actions a phone may send.
-export type SoloCommand = {action: Action; byActor: string}
+// A player command, naming the actor (character) issuing it: either an atomic
+// reducer action, or a d-pad step (a unit direction the server resolves to a
+// one-cell Move). Only the active character's owner may act (enforced by the
+// reducer's byActor gate); the transport additionally whitelists actions.
+export type SoloCommand = {byActor: string} & ({action: Action} | {step: {dx: number; dy: number}})
 
 // A session bundles the authoritative state with its seeded rng and the persisted
 // player-command log, so it can be replayed to recover after a restart.
@@ -64,16 +65,30 @@ export const runAi = (start: SoloState, rng: () => number): {state: SoloState; a
   return {state, actions}
 }
 
+// Resolve a d-pad step to a one-cell Move, after checking the issuer is active.
+// The reducer's Move then validates floor / budget / line-of-sight / occupancy.
+const applyStep = (state: SoloState, dir: {dx: number; dy: number}, byActor: string, rng: () => number): SoloState => {
+  if (activeEntity(state)?.id !== byActor) return state
+  const actor = entityById(state, byActor)
+  if (!actor) return state
+  const c = cellOf(state.grid, actor.x, actor.y)
+  const to = cellCenter(state.grid, c.cx + Math.sign(dir.dx), c.cy + Math.sign(dir.dy))
+  return reduce(state, {t: 'Move', to}, rng)
+}
+
 // Apply one player command, then run the monsters and wave upkeep out. Returns
 // the new authoritative state plus the AI actions taken (for animation). A
-// rejected command (not your turn) leaves the state unchanged and runs no AI.
+// rejected command (not your turn / illegal) leaves the state unchanged.
 export const step = (
   state: SoloState,
   command: SoloCommand,
   rng: () => number
 ): {state: SoloState; aiActions: Action[]} => {
-  const afterPlayer = reduce(state, command.action, rng, command.byActor)
-  if (afterPlayer === state) return {state, aiActions: []} // rejected by the authority gate
+  const afterPlayer =
+    'step' in command
+      ? applyStep(state, command.step, command.byActor, rng)
+      : reduce(state, command.action, rng, command.byActor)
+  if (afterPlayer === state) return {state, aiActions: []} // rejected (not your turn / illegal)
   const ai = runAi(afterPlayer, rng)
   return {state: ai.state, aiActions: ai.actions}
 }

@@ -6,6 +6,7 @@
 // map; the spatial picture is on the shared board screen.
 import {predictAttack} from './combat'
 import {weaponById} from './gear'
+import {cellCenter, cellOf, isFloor} from './grid'
 import {
   activeEntity,
   canSeePoint,
@@ -13,10 +14,23 @@ import {
   entityById,
   isDead,
   isDown,
+  movementCostMultiplier,
   type Faction,
   type GamePhase,
   type SoloState
 } from './model'
+
+// The 8 step directions for the controller d-pad, in compass order.
+const DIRS: ReadonlyArray<readonly [string, number, number]> = [
+  ['n', 0, -1],
+  ['ne', 1, -1],
+  ['e', 1, 0],
+  ['se', 1, 1],
+  ['s', 0, 1],
+  ['sw', -1, 1],
+  ['w', -1, 0],
+  ['nw', -1, -1]
+]
 
 // P(2d6 >= k): the share of the 36 equally-likely outcomes whose sum is >= k.
 const p2d6AtLeast = (k: number): number => {
@@ -64,6 +78,10 @@ export type ControllerView = {
   items: ReachRow[]
   containers: ReachRow[]
   doors: DoorRow[]
+  // 8-way step legality for the d-pad (compass key -> can step there now);
+  // populated only on this character's turn so blocked arrows grey out before the
+  // player taps blind.
+  dirs: Record<string, boolean>
 }
 
 const groundLabel = (kind: string): string =>
@@ -137,6 +155,34 @@ export const projectController = (state: SoloState, actorId: string): Controller
 
   const weapon = me ? weaponById(me.weaponId) : null
 
+  // 8-way step legality for the d-pad — floor, unoccupied, in budget, and within
+  // this character's own line of sight. Only meaningful on its turn.
+  const dirs: Record<string, boolean> = {}
+  if (me && active?.id === me.id) {
+    const occupied = new Set<string>()
+    for (const e of state.entities) {
+      if (e === me || isDead(e)) continue
+      const c = cellOf(state.grid, e.x, e.y)
+      occupied.add(`${c.cx},${c.cy}`)
+    }
+    for (const p of state.props) {
+      const c = cellOf(state.grid, p.x, p.y)
+      occupied.add(`${c.cx},${c.cy}`)
+    }
+    const ac = cellOf(state.grid, me.x, me.y)
+    const budget = state.moveRemainingPx
+    const mult = movementCostMultiplier(me)
+    for (const [k, dx, dy] of DIRS) {
+      const center = cellCenter(state.grid, ac.cx + dx, ac.cy + dy)
+      const cost = Math.hypot(center.x - me.x, center.y - me.y) * mult
+      dirs[k] =
+        isFloor(state.grid, ac.cx + dx, ac.cy + dy) &&
+        !occupied.has(`${ac.cx + dx},${ac.cy + dy}`) &&
+        cost <= budget + 0.5 &&
+        canSeePoint(state, me, center.x, center.y)
+    }
+  }
+
   return {
     active: active ? {id: active.id, faction: active.faction} : null,
     round: state.round,
@@ -169,6 +215,7 @@ export const projectController = (state: SoloState, actorId: string): Controller
     foes,
     items,
     containers,
-    doors
+    doors,
+    dirs
   }
 }
