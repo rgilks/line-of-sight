@@ -373,9 +373,11 @@ const showInvite = async (roomId: string): Promise<void> => {
   panel.style.cssText =
     'position:absolute;top:12px;right:12px;z-index:6;display:flex;flex-direction:column;align-items:center;gap:6px;' +
     'padding:12px;border-radius:10px;background:rgba(8,11,10,0.86);border:1px solid #1c3a2e;color:#cfe;font:12px var(--font-ui,monospace);max-width:200px;text-align:center'
+  // The QR is black modules — it needs a white backdrop and an explicit size, or it
+  // is invisible on the dark panel.
   panel.innerHTML =
     '<span style="letter-spacing:1px;color:#7ad19a">SCAN TO JOIN</span>' +
-    '<div class="solo-invite-qr" aria-hidden="true"></div>' +
+    '<div class="solo-invite-qr" aria-hidden="true" style="width:148px;height:148px;background:#fff;border-radius:4px;padding:6px;box-sizing:border-box;display:flex;align-items:center;justify-content:center"></div>' +
     `<code style="word-break:break-all;color:#9fb">${joinUrl}</code>`
   document.querySelector('.solo-shell')?.appendChild(panel)
   invitePanel = panel
