@@ -40,7 +40,9 @@ import {
   type SoloState
 } from './solo/model'
 import {cellCenter, cellOf, isFloor} from './solo/grid'
-import {reduce} from './solo/reducer'
+import {reduce, reduceWithEvents, type SoloEvent} from './solo/reducer'
+import {replay} from './solo/session'
+import {loadGame, saveGame, type SavedGame} from './solo/idb'
 import {
   clearEffects,
   drawEffects,
@@ -168,22 +170,72 @@ const sizeFogLayers = (w: number, h: number): void => {
   exploredCtx.clearRect(0, 0, w, h)
 }
 
-// ---- new game -------------------------------------------------------------
-const newGame = (seed = Math.floor(Math.random() * 100000)): void => {
+// ---- new game + offline persistence ---------------------------------------
+// The in-memory event log (the same SoloEvents the server stores), persisted to
+// IndexedDB so closing the tab and reopening resumes the exact game. There is one
+// solo game per browser, so a single fixed id suffices.
+const GAME_ID = 'current'
+let events: SoloEvent[] = []
+let currentSeed = 0
+let saveTimer: ReturnType<typeof setTimeout> | null = null
+
+// Coalesce rapid writes (a monster turn dispatches many events) into one save.
+const scheduleSave = (): void => {
+  if (saveTimer !== null) clearTimeout(saveTimer)
+  saveTimer = setTimeout(() => {
+    saveTimer = null
+    void saveGame(GAME_ID, {seed: currentSeed, events: [...events], updatedAt: Date.now()})
+  }, 250)
+}
+
+// Install an authoritative state (fresh or replayed) into the view: reset
+// selection/animation, size the canvas + fog, and frame the squad.
+const installState = (next: SoloState): void => {
   selectedId = null
   busy = false
-  state = createSoloGame(seed) // pure, shared with the server-authoritative room
+  state = next
   renderPos.clear()
   anim.clear()
   clearEffects()
-  for (const entity of state.entities) renderPos.set(entity.id, {x: entity.x, y: entity.y})
-  canvas.width = state.map.width
-  canvas.height = state.map.height
-  sizeFogLayers(state.map.width, state.map.height)
+  for (const entity of next.entities) renderPos.set(entity.id, {x: entity.x, y: entity.y})
+  canvas.width = next.map.width
+  canvas.height = next.map.height
+  sizeFogLayers(next.map.width, next.map.height)
   focusOnSquad()
   focusOnActive(false) // initial framing snaps; turn changes pan
   renderPanel()
   requestDraw()
+}
+
+// Start a fresh game on `seed`, replacing any saved progress.
+const newGame = (seed = Math.floor(Math.random() * 100000)): void => {
+  currentSeed = seed
+  events = []
+  installState(createSoloGame(seed)) // pure, shared with the server-authoritative room
+  scheduleSave()
+}
+
+// Resume a persisted game by folding its events over the seed-derived genesis —
+// the SAME replay() the server Durable Object uses to recover after a restart.
+const resumeGame = (saved: SavedGame): void => {
+  currentSeed = saved.seed
+  events = [...saved.events]
+  installState(replay(saved.seed, saved.events).state)
+  // If the tab closed mid-horde-turn, the active entity is a monster; finish the
+  // monster turns so control returns to the player rather than stalling.
+  if (state && activeEntity(state)?.faction === 'monster') void runMonsters()
+}
+
+// Resume a saved game when one exists and matches the requested seed (or no seed
+// was asked for); otherwise start fresh. Async because IndexedDB is async — the
+// canvas is already mounted, so there is at most a brief blank before first paint.
+const bootGame = async (requestedSeed?: number): Promise<void> => {
+  const saved = await loadGame(GAME_ID)
+  if (saved && saved.events.length > 0 && (requestedSeed === undefined || requestedSeed === saved.seed)) {
+    resumeGame(saved)
+  } else {
+    newGame(requestedSeed)
+  }
 }
 
 // ---- dispatch: reduce + animate the result --------------------------------
@@ -191,7 +243,14 @@ const dispatch = (action: Parameters<typeof reduce>[1], rng?: () => number): voi
   if (!state) return
   const before = new Map(state.entities.map((entity) => [entity.id, {x: entity.x, y: entity.y}]))
   const wasLost = state.phase.t === 'lost'
-  state = reduce(state, action, rng)
+  // decide → fold, capturing the events so they can be persisted for offline
+  // resume (the same facts the server stores and replays).
+  const result = reduceWithEvents(state, action, rng)
+  state = result.state
+  if (result.events.length > 0) {
+    events.push(...result.events)
+    scheduleSave()
+  }
   for (const entity of state.entities) {
     const old = before.get(entity.id)
     if (old && (old.x !== entity.x || old.y !== entity.y)) {
@@ -1748,8 +1807,8 @@ const mount = (): void => {
   window.addEventListener('keydown', onKey)
 
   const seedParam = new URLSearchParams(location.search).get('seed')
-  const seed = seedParam !== null && Number.isFinite(Number(seedParam)) ? Number(seedParam) : undefined
-  newGame(seed)
+  const requestedSeed = seedParam !== null && Number.isFinite(Number(seedParam)) ? Number(seedParam) : undefined
+  void bootGame(requestedSeed)
 }
 
 mount()

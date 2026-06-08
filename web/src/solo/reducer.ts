@@ -740,10 +740,24 @@ export const decide = (state: SoloState, action: Action, rng: Rng = Math.random,
   }
 }
 
-// Thin compatibility shim: decide → fold. A rejection with a message appends that
-// feedback line (the old reducer's behaviour); a silent rejection is a no-op.
-export const reduce = (state: SoloState, action: Action, rng: Rng = Math.random, byActor?: string): SoloState => {
+// decide → fold, also returning the events produced (empty on rejection). The
+// solo client folds these into state for rendering AND persists them to IndexedDB
+// so a closed tab resumes via the same replay() the server uses. A rejection with
+// a message still appends that feedback line (old reducer behaviour) but yields no
+// events; a silent rejection is a no-op.
+export const reduceWithEvents = (
+  state: SoloState,
+  action: Action,
+  rng: Rng = Math.random,
+  byActor?: string
+): {state: SoloState; events: SoloEvent[]} => {
   const result = decide(state, action, rng, byActor)
-  if ('rejected' in result) return result.rejected ? appendLines(state, [result.rejected]) : state
-  return result.events.reduce(foldSolo, state)
+  if ('rejected' in result) {
+    return {state: result.rejected ? appendLines(state, [result.rejected]) : state, events: []}
+  }
+  return {state: result.events.reduce(foldSolo, state), events: result.events}
 }
+
+// Thin compatibility shim: decide → fold, discarding the event log.
+export const reduce = (state: SoloState, action: Action, rng: Rng = Math.random, byActor?: string): SoloState =>
+  reduceWithEvents(state, action, rng, byActor).state
