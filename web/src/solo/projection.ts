@@ -123,7 +123,10 @@ export const projectController = (state: SoloState, actorId: string): Controller
     ? state.map.occluders
         .filter((o) => o.type === 'door')
         .map((o) => ({o, mx: (o.x1 + o.x2) / 2, my: (o.y1 + o.y2) / 2}))
-        .filter(({mx, my}) => sees(mx, my))
+        // Visible doors, plus any the character is adjacent to — a closed door
+        // blocks line of sight to itself, but you can always operate one you're
+        // standing next to (and adjacency leaks nothing: you're touching it).
+        .filter(({mx, my}) => sees(mx, my) || near(mx, my))
         .map(({o, mx, my}) => ({
           id: o.id,
           open: state.doorStates[o.id]?.open ?? false,
