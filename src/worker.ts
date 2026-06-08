@@ -7,11 +7,14 @@ type AssetFetcher = {
 export interface Env {
   ASSETS: AssetFetcher
   TABLES: DurableObjectNamespace
+  SOLO_ROOMS: DurableObjectNamespace
   MAPS: R2Bucket
 }
 
 // Route /api/tables/<id>/(stream|commands|board) to that table's Durable Object.
 const tableRoute = /^\/api\/tables\/([^/]+)\/(stream|commands|board)$/
+// Route /api/solo/<id>/(stream|commands) to that game's SoloRoom Durable Object.
+const soloRoute = /^\/api\/solo\/([^/]+)\/(stream|commands)$/
 // GM-uploaded map storage. POST .../map uploads; GET .../map/<ref> serves.
 const mapUploadRoute = /^\/api\/tables\/([^/]+)\/map$/
 const mapGetRoute = /^\/api\/tables\/([^/]+)\/map\/([^/]+)$/
@@ -42,6 +45,12 @@ export default {
     const match = tableRoute.exec(url.pathname)
     if (match) {
       const stub = env.TABLES.get(env.TABLES.idFromName(match[1]))
+      return stub.fetch(request)
+    }
+
+    const solo = soloRoute.exec(url.pathname)
+    if (solo) {
+      const stub = env.SOLO_ROOMS.get(env.SOLO_ROOMS.idFromName(solo[1]))
       return stub.fetch(request)
     }
 
@@ -100,3 +109,4 @@ const serveMap = async (env: Env, tableId: string, assetRef: string): Promise<Re
 }
 
 export {GameTable} from './game-table'
+export {SoloRoom} from './solo-room'

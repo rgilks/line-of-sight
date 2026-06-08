@@ -20,9 +20,19 @@ not_found_handling = "single-page-application"
 name = "TABLES"
 class_name = "GameTable"
 
+# Server-authoritative single-player/companion games (Survive the Horde). One DO
+# per game, isolated from the multiplayer GameTable. See docs/COMPANION-PLAY.md.
+[[durable_objects.bindings]]
+name = "SOLO_ROOMS"
+class_name = "SoloRoom"
+
 [[migrations]]
 tag = "v1"
 new_classes = ["GameTable"]
+
+[[migrations]]
+tag = "v2"
+new_classes = ["SoloRoom"]
 
 # Private bucket for GM-uploaded map images. Not public; served only through the
 # Worker's /api/tables/:id/map/:ref route. See docs/MULTIPLAYER.md.

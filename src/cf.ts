@@ -24,6 +24,7 @@ export interface DurableObjectNamespace {
 // holds requests until state is rebuilt. Keys sort lexicographically, so the log
 // keys are zero-padded (see EVT_KEY in game-table.ts) to replay in seq order.
 export interface DurableObjectStorage {
+  get<T = unknown>(key: string): Promise<T | undefined>
   put<T = unknown>(key: string, value: T): Promise<void>
   list<T = unknown>(options?: {prefix?: string}): Promise<Map<string, T>>
 }
