@@ -29,7 +29,7 @@ import {MONSTERS} from './solo/monsters'
 import {ARMORS, weaponById} from './solo/gear'
 import {parseDamage, predictAttack, rangeBandFor} from './solo/combat'
 import {decideMonster} from './solo/ai'
-import {generateLocks, placeContainers} from './solo/loot'
+import {planLockAndLoot} from './solo/loot'
 import {createDiceRoller, type DiceRoller} from '@rgilks/cepheus-dice'
 import {
   activeEntity,
@@ -46,13 +46,14 @@ import {
   STANCES,
   stanceLabel,
   turnBudgetPx,
+  keyLabel,
   withinReach,
   type CombatStance,
   type Container,
+  type DoorLock,
   type Entity,
   type GroundItem,
   type ItemStack,
-  type LockKind,
   type Prop,
   type SoloState
 } from './solo/model'
@@ -70,6 +71,7 @@ for (const image of counterPortraits.values()) image.addEventListener('load', re
 
 let state: SoloState | null = null
 let showGrid = false
+let logExpanded = false // combat log: two lines by default, expandable
 let selectedId: string | null = null // the entity the player has tapped (target / patient)
 let reachable: Array<{cx: number; cy: number}> = [] // cells the active PC can move to (recomputed per action)
 let monsterCounter = 0
@@ -423,7 +425,6 @@ const newGame = (seed = Math.floor(Math.random() * 100000)): void => {
   // A seeded rng (distinct from initiative's Math.random) so loot + locks are
   // stable for a given ?seed= deck.
   const lootRng = makeRng(seed * 2 + 1)
-  const locks = generateLocks(map, lootRng)
   const ground = scatterLoot(map, grid)
   const props = makeProps(map, grid, entities)
   // Keep containers off cells already taken by the squad, crates, or floor loot.
@@ -440,7 +441,10 @@ const newGame = (seed = Math.floor(Math.random() * 100000)): void => {
     const c = cellOf(grid, gi.x, gi.y)
     occupied.add(`${c.cx},${c.cy}`)
   }
-  const containers = placeContainers(map, grid, lootRng, occupied)
+  // Sealed doors + searchable containers, planned together so every keycard is
+  // reachable and the squad is never walled into its spawn.
+  const spawnCells = entities.filter((e) => e.faction === 'pc').map((e) => cellOf(grid, e.x, e.y))
+  const {locks, containers} = planLockAndLoot(map, grid, spawnCells, lootRng, occupied)
   selectedId = null
   busy = false
   state = {
@@ -1131,10 +1135,21 @@ const drawFog = (s: SoloState): void => {
   ctx.drawImage(scratch, 0, 0)
 }
 
-// A small padlock at a sealed door — amber for a keycard lock, cyan for a
+// Keycard clearance colours (ids match loot.ts KEY_CLEARANCES); hack locks read cyan.
+const KEY_COLORS: Record<string, string> = {
+  blue: 'rgba(86, 156, 255, 1)',
+  amber: 'rgba(255, 178, 60, 1)',
+  violet: 'rgba(197, 120, 255, 1)',
+  red: 'rgba(255, 96, 84, 1)'
+}
+const HACK_COLOR = 'rgba(94, 214, 240, 1)'
+const lockColor = (lock: DoorLock): string =>
+  lock.kind === 'hack' ? HACK_COLOR : (KEY_COLORS[lock.keyId ?? ''] ?? KEY_COLORS.amber)
+
+// A small padlock at a sealed door — coloured by keycard clearance, cyan for a
 // hackable one — on a dark backing disc so it reads over the deck art.
-const drawLockGlyph = (x: number, y: number, gs: number, kind: LockKind): void => {
-  const col = kind === 'hack' ? 'rgba(94, 214, 240, 1)' : 'rgba(255, 178, 60, 1)'
+const drawLockGlyph = (x: number, y: number, gs: number, lock: DoorLock): void => {
+  const col = lockColor(lock)
   const w = gs * 0.4
   const h = gs * 0.34
   ctx.save()
@@ -1178,7 +1193,7 @@ const drawDoorStates = (s: SoloState): void => {
       const ny = ((door.x2 - door.x1) / len) * s.grid.gridScale * 0.5
       const seen =
         visibleToSquad(s, mx + nx, my + ny) || visibleToSquad(s, mx - nx, my - ny) || visibleToSquad(s, mx, my)
-      if (seen) drawLockGlyph(mx, my, s.grid.gridScale, lock.kind)
+      if (seen) drawLockGlyph(mx, my, s.grid.gridScale, lock)
       continue
     }
     const reachable = actor != null && actor.faction === 'pc' && distanceToOccluder({x: actor.x, y: actor.y}, door) <= reach
@@ -1479,6 +1494,18 @@ const weaponCompactOf = (e: Entity): string => {
   return w.magazine !== undefined ? `${w.name} ${e.loadedRounds}/${w.magazine}` : w.name
 }
 const endOf = (e: Entity): string => `${e.stats.end}/${e.statsMax.end}`
+// Carried keycards as small colour-coded chips, so the player can match a card to
+// the matching sealed-door padlock.
+const keycardChipsHtml = (e: Entity): string => {
+  const cards = e.inventory.filter((s) => s.kind === 'keycard' && s.count > 0)
+  if (cards.length === 0) return ''
+  return `<div class="solo-track-keys">${cards
+    .map(
+      (c) =>
+        `<span class="solo-key-chip" style="--key:${KEY_COLORS[c.keyId ?? ''] ?? KEY_COLORS.amber}">${escapeHtml(keyLabel(c.keyId))} key${c.count > 1 ? ` ×${c.count}` : ''}</span>`
+    )
+    .join('')}</div>`
+}
 const conditionBadge = (e: Entity): string =>
   isDead(e) ? '<span class="solo-badge is-kia">KIA</span>' : isDown(e) ? '<span class="solo-badge is-down">DOWN</span>' : ''
 
@@ -1594,6 +1621,7 @@ const trackRowHtml = (s: SoloState, entity: Entity, rank: number, combat: TrackC
             .map((skill) => `<span class="solo-tag">${escapeHtml(skill)}</span>`)
             .join('')}
           <span class="solo-track-gear">${escapeHtml(gearOf(entity))}</span>
+          ${keycardChipsHtml(entity)}
         </div>`
       : foe
         ? ''
@@ -1703,7 +1731,7 @@ const renderPanel = (): void => {
     : undefined
   const canPush = canSignificant && !!pushable
 
-  const recentLog = s.log.slice(-8).map(escapeHtml)
+  const recentLog = s.log.slice(logExpanded ? -40 : -2).map(escapeHtml)
   const over = s.phase.t === 'lost' || s.phase.t === 'won'
   const overText = s.phase.t === 'won' ? 'Survived — the deck is clear.' : 'Squad lost.'
   const playerTurn = !!actor && actor.faction === 'pc' && !busy
@@ -1760,8 +1788,11 @@ const renderPanel = (): void => {
         : ''
     }
 
-    <section class="solo-hud-log">
-      <h2 class="solo-hud-label">Combat log</h2>
+    <section class="solo-hud-log${logExpanded ? ' is-expanded' : ''}">
+      <div class="solo-hud-log-head">
+        <h2 class="solo-hud-label">Combat log</h2>
+        <button id="solo-log-toggle" class="solo-log-toggle" type="button" aria-expanded="${logExpanded}">${logExpanded ? 'Minimize' : 'Expand'}</button>
+      </div>
       <div class="solo-log-feed">${logHtml(recentLog)}</div>
     </section>
 
@@ -1769,7 +1800,7 @@ const renderPanel = (): void => {
       <button id="solo-new" class="solo-foot-btn" type="button">New deck</button>
       <label class="solo-foot-check"><input type="checkbox" id="solo-grid" ${showGrid ? 'checked' : ''}/> Grid</label>
       <p class="solo-foot-hint">Move + one action, or run ${MINOR_ACTIONS_PER_ROUND * 6} m. Double-click a foe (or <b>F</b>) to fire; double-click yourself (or <b>Space</b>) to end the turn.</p>
-      <p class="solo-foot-hint">Search lockers &amp; terminals for ammo, medkits, and access cards. Sealed doors want a keycard or a hack (Electronics).</p>
+      <p class="solo-foot-hint">Search lockers &amp; terminals for ammo, medkits, and access cards. A sealed door wants its matching keycard or a hack (Electronics).</p>
     </footer>`
 
   for (const el of panel.querySelectorAll<HTMLElement>('[data-select]')) {
@@ -1827,6 +1858,10 @@ const renderPanel = (): void => {
       playerAct({t: 'SetStance', stance})
     })
   }
+  panel.querySelector<HTMLButtonElement>('#solo-log-toggle')?.addEventListener('click', () => {
+    logExpanded = !logExpanded
+    renderPanel()
+  })
   panel.querySelector<HTMLButtonElement>('#solo-new')?.addEventListener('click', () => newGame())
   panel.querySelector<HTMLInputElement>('#solo-grid')?.addEventListener('change', (event) => {
     showGrid = (event.target as HTMLInputElement).checked

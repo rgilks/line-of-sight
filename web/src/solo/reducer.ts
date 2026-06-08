@@ -16,6 +16,7 @@ import {
   dexDm,
   entityById,
   hasKeycard,
+  keyLabel,
   isActive,
   isDead,
   isDown,
@@ -159,7 +160,9 @@ const applyToggleDoor = (state: SoloState, doorId: string, rng: Rng): SoloState 
   // (hack lock). Closing one is always allowed — only opening is gated.
   if (!currentlyOpen && lock && !lock.unlocked) {
     if (lock.kind === 'key') {
-      if (!hasKeycard(actor)) return log(state, 'That door is locked — find a keycard.')
+      if (!hasKeycard(actor, lock.keyId)) {
+        return log(state, `That door is locked — needs a ${keyLabel(lock.keyId)} keycard.`)
+      }
       const cost = minorCost(state, actor) // badging in is a minor action
       if (!enough(state, cost)) return log(state, `${actor.label} has no actions left this turn.`)
       return log(
@@ -169,7 +172,7 @@ const applyToggleDoor = (state: SoloState, doorId: string, rng: Rng): SoloState 
           doorStates: {...state.doorStates, [doorId]: {open: true}},
           moveRemainingPx: state.moveRemainingPx - cost
         },
-        `${actor.label} badges the lock — access granted.`
+        `${actor.label} badges the ${keyLabel(lock.keyId)} lock — access granted.`
       )
     }
     // Hack lock: a significant action plus an Electronics check.
@@ -320,7 +323,9 @@ const applyUseMedkit = (state: SoloState, targetId: string, rng: Rng): SoloState
 
 // --- ground items ----------------------------------------------------------
 const mergeStack = (inventory: ItemStack[], stack: ItemStack): ItemStack[] => {
-  const index = inventory.findIndex((s) => s.kind === stack.kind && s.weaponId === stack.weaponId)
+  const index = inventory.findIndex(
+    (s) => s.kind === stack.kind && s.weaponId === stack.weaponId && s.keyId === stack.keyId
+  )
   if (index >= 0) return inventory.map((s, i) => (i === index ? {...s, count: s.count + stack.count} : s))
   return [...inventory, {...stack}]
 }
@@ -329,7 +334,7 @@ const lootLabel = (stack: ItemStack): string =>
   stack.kind === 'ammo'
     ? `${stack.count} rounds`
     : stack.kind === 'keycard'
-      ? `an access card${stack.count > 1 ? ` (×${stack.count})` : ''}`
+      ? `a ${keyLabel(stack.keyId)} access card`
       : `${stack.count} medkit${stack.count > 1 ? 's' : ''}`
 
 const applyPickUp = (state: SoloState, groundItemId: string): SoloState => {

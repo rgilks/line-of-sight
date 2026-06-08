@@ -27,8 +27,9 @@ export type Skills = Record<string, number>
 
 export type ItemKind = 'ammo' | 'medkit' | 'keycard'
 // A stack of carried consumables. `weaponId` ties ammo to the weapon it reloads;
-// a keycard is a generic access card that opens any key-locked door.
-export type ItemStack = {kind: ItemKind; weaponId?: string; count: number}
+// `keyId` tags a keycard with the door clearance it opens (a colour). Several
+// doors can share a clearance, so one card may open more than one of them.
+export type ItemStack = {kind: ItemKind; weaponId?: string; keyId?: string; count: number}
 // Loot lying on the deck floor until a character picks it up (board pixels).
 export type GroundItem = {id: string; x: number; y: number; stack: ItemStack}
 // A solid, pushable crate occupying one cell. Blocks movement (and Phase-4 monster
@@ -49,16 +50,20 @@ export type Container = {
   searched: boolean
   loot?: ItemStack
   clue?: string
+  // True when the container sits in a region sealed off behind a locked door (so
+  // it holds no progress-critical keycard — those live in the free region).
+  locked?: boolean
 }
 
 export const containerLabel = (kind: ContainerKind): string =>
   kind === 'cabinet' ? 'cabinet' : kind === 'terminal' ? 'terminal' : kind === 'crate' ? 'supply crate' : 'locker'
 
-// Some internal doors start sealed. A 'key' lock opens for anyone carrying a
-// keycard; a 'hack' lock yields to an Electronics check (a significant action).
-// Once `unlocked`, the door toggles open/closed freely like any other.
+// Some internal doors start sealed. A 'key' lock opens for a keycard of the
+// matching `keyId` clearance (a colour); a 'hack' lock yields to an Electronics
+// check (a significant action). Once `unlocked`, the door toggles open/closed
+// freely like any other.
 export type LockKind = 'key' | 'hack'
-export type DoorLock = {kind: LockKind; unlocked: boolean}
+export type DoorLock = {kind: LockKind; keyId?: string; unlocked: boolean}
 
 export type Entity = {
   id: string
@@ -183,10 +188,15 @@ export const entityById = (state: SoloState, id: string): Entity | undefined =>
 export const livingOf = (state: SoloState, faction: Faction): Entity[] =>
   state.entities.filter((entity) => entity.faction === faction && !isDead(entity))
 
-/** Does the entity carry at least one keycard? Keycards are generic access cards
- * that open any key-locked door (and are not consumed by use). */
-export const hasKeycard = (entity: Entity): boolean =>
-  entity.inventory.some((stack) => stack.kind === 'keycard' && stack.count > 0)
+/** Does the entity carry a keycard for the given clearance? Omit `keyId` to test
+ * for any keycard. Keycards are not consumed by use. */
+export const hasKeycard = (entity: Entity, keyId?: string): boolean =>
+  entity.inventory.some(
+    (stack) => stack.kind === 'keycard' && stack.count > 0 && (keyId === undefined || stack.keyId === keyId)
+  )
+
+/** A keycard/clearance's display word (e.g. "blue"); falls back for an untagged card. */
+export const keyLabel = (keyId?: string): string => keyId ?? 'access'
 
 /** Are two entities within `squares` cells of each other (Chebyshev-ish, by pixels)? */
 export const withinReach = (a: Entity, b: Entity, gridScale: number, squares = 1.6): boolean =>

@@ -289,6 +289,21 @@ describe('solo reducer — locked doors', () => {
     expect(next.actionUsed).toBe(false) // badging in is a minor action
   })
 
+  it('a key lock opens only for the matching clearance', () => {
+    const blue: SoloState = {
+      ...makeState([{...pc('a', 2, 2, 0), inventory: [{kind: 'keycard', keyId: 'red', count: 1}]}], [door]),
+      locks: {'door-1': {kind: 'key', keyId: 'blue', unlocked: false}}
+    }
+    const wrong = reduce(blue, {t: 'ToggleDoor', doorId: 'door-1'})
+    expect(wrong.doorStates['door-1']?.open ?? false).toBe(false)
+    expect(wrong.log.at(-1)).toContain('blue')
+
+    const carrier = {...pc('a', 2, 2, 0), inventory: [{kind: 'keycard' as const, keyId: 'blue', count: 1}]}
+    const right = reduce({...blue, entities: [carrier]}, {t: 'ToggleDoor', doorId: 'door-1'})
+    expect(right.doorStates['door-1'].open).toBe(true)
+    expect(right.locks['door-1'].unlocked).toBe(true)
+  })
+
   it('a hack lock opens on a successful Electronics check (significant action)', () => {
     const eng = {...pc('a', 2, 2, 0), skills: {Electronics: 2}}
     const next = reduce(sealed([eng], 'hack'), {t: 'ToggleDoor', doorId: 'door-1'}, seqRng([6, 6]))

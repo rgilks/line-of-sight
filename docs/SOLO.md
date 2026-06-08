@@ -38,12 +38,18 @@ Medicine check. See [`web/src/solo/combat.ts`](../web/src/solo/combat.ts).
 Rooms hold **searchable fixtures** — lockers, cabinets, supply crates, data
 terminals. Search one (a minor action, when adjacent) to pocket its loot — ammo,
 medkits, the occasional access card — and read any clue it holds. Some internal
-doors start **sealed**: a keycard lock opens for anyone carrying an access card
-(found by searching); a hack lock yields to an Electronics check, a significant
+doors start **sealed**: a keycard lock opens for a card of the **matching
+clearance** (a colour); a hack lock yields to an Electronics check, a significant
 action that effectively needs the engineer (Kade) or scout (Rell). A padlock
-marks a sealed door — amber for a keycard lock, cyan for a hackable one. An
-access card is generic master access and is not consumed by use. See
-[`web/src/solo/loot.ts`](../web/src/solo/loot.ts).
+marks a sealed door, coloured by its clearance (cyan for a hack), and a PC's
+carried cards show as colour chips in the rail. Several doors can share a
+clearance, so one card may open more than one; cards are not consumed by use.
+
+Locks and loot are planned together (`web/src/solo/loot.ts`) so the player is
+never softlocked: the squad can always reach **most of the deck from its spawn
+without any card or hack** (sealed doors only ever gate side rooms, never the way
+out), and every clearance in play has a matching card sitting in that freely
+reachable area — so a card is never stranded behind the door it opens.
 
 ### Defending
 

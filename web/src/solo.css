@@ -540,13 +540,39 @@ body {
   flex-direction: column;
   gap: 8px;
   flex-shrink: 0;
-  max-height: 28vh;
   min-height: 0;
 }
 
+.solo-hud-log-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.solo-log-toggle {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.3);
+  color: rgba(255, 255, 255, 0.7);
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.solo-log-toggle:hover {
+  color: #fff;
+  border-color: rgba(57, 255, 20, 0.5);
+}
+
+/* Two lines by default; .is-expanded shows more (the feed caps + scrolls). */
 .solo-log-feed {
-  flex: 1;
-  min-height: 72px;
+  flex: 0 1 auto;
+  min-height: 0;
   overflow-y: auto;
   padding: 8px;
   border: 1px solid var(--border);
@@ -555,6 +581,28 @@ body {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.solo-hud-log.is-expanded .solo-log-feed {
+  max-height: 30vh;
+}
+
+.solo-track-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  width: 100%;
+}
+
+.solo-key-chip {
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 999px;
+  color: var(--key);
+  border: 1px solid color-mix(in srgb, var(--key) 55%, transparent);
+  background: color-mix(in srgb, var(--key) 16%, transparent);
 }
 
 .solo-log-line {
