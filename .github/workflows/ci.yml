@@ -37,17 +37,18 @@ jobs:
       - name: Diagram check
         run: npm run check:diagrams
 
-  # Best-effort multiplayer smoke test. Hermetic: builds the client, runs the
-  # Worker (Durable Object + R2) in wrangler's *local* simulator — no Cloudflare
-  # account, secrets, or deployed target needed — and drives a headless Chromium
-  # through author -> publish -> two players + GM -> door fog -> move -> republish.
-  # Kept `continue-on-error` so browser/SSE flakiness never blocks merges; the
-  # `verify` job above stays the required gate. To debug a failure locally:
-  #   npm run build && npm run serve:worker  # in one shell
-  #   LOS_BASE_URL=http://127.0.0.1:8787 npm run test:e2e  # in another
-  e2e:
+  # Route smoke test. Hermetic: builds the client, runs the Worker (Durable
+  # Object + R2) in wrangler's *local* simulator — no Cloudflare account,
+  # secrets, or deployed target needed — and loads every route (/, /play, /edit,
+  # /solo) in headless Chromium, asserting each bundle boots its key element with
+  # no console/page errors, plus a /healthz check. It deliberately does not drive
+  # the multiplayer game flow: that is too coupled to fast-moving UI and movement
+  # mechanics for a fixed-coordinate browser script to stay green. To debug a
+  # failure locally:
+  #   npm run build && npm run serve:worker                 # in one shell
+  #   LOS_BASE_URL=http://127.0.0.1:8787 npm run test:e2e   # in another
+  smoke:
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v6
 
@@ -81,7 +82,7 @@ jobs:
           cat wrangler-dev.log >&2 || true
           exit 1
 
-      - name: Multiplayer e2e
+      - name: Route smoke test
         run: npm run test:e2e
         env:
           LOS_BASE_URL: http://127.0.0.1:8787

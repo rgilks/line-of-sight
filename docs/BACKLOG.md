@@ -116,9 +116,10 @@ event log the real source of truth.
 ### 3c. Close the testing gaps
 - The pure layers are well tested; the DO gating, the drivers, and rendering are not.
 - 1b makes the DO projection unit-testable — add those security tests.
-- Wire the existing Playwright e2e (`scripts/e2e-multiplayer.mjs`, `npm run test:e2e`)
-  into CI as a smoke job.
-- Touch: `.github/workflows/ci.yml`, new DO tests.
+- The route smoke test (`scripts/e2e-smoke.mjs`, `npm run test:e2e`) covers boot,
+  not gameplay; deeper multiplayer coverage still needs unit/integration tests
+  against the DO rather than a fixed-coordinate browser script.
+- Touch: new DO tests.
 
 ### 3d. 2D rendering performance (no WebGL)
 - Every frame redraws the whole canvas (`renderMap` + a `visibilityPolygon` per PC) —
