@@ -383,7 +383,9 @@ Status keys: `[ ]` not started · `[~]` in progress · `[x]` done.
       (image-only, ≤25 MB, served through the Worker — not public).
 - [x] GM publishes a board (`assetRef` + occluders) so the DO broadcasts it and
       clients fetch the uploaded map.
-- [ ] Event-log persistence in DO storage + `Last-Event-ID` reconnect catch-up.
+- [ ] Full event sourcing + CQRS build-out (pure `decide`/`fold`, persisted log,
+      pure per-player projection, delta streaming + `Last-Event-ID` reconnect).
+      Detailed as a committed epic in [`BACKLOG.md`](BACKLOG.md#1-multiplayer-proper-event-sourcing--cqrs).
 
 ### Phase 3 — Discord auth
 - [ ] OAuth2 code flow on the Worker; session cookie; player identity.

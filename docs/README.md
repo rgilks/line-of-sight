@@ -4,6 +4,8 @@ Start with [`AGENTS.md`](../AGENTS.md) for agent workflow, commands, deploy
 cadence, and the coding/visual rules. This folder covers architecture and
 formats in more depth.
 
+- [BACKLOG.md](BACKLOG.md) — forward-looking work: event sourcing + CQRS for the
+  table, lazy 3D overlays (dice, item reveals), and engineering-health items.
 - [ARCHITECTURE.md](ARCHITECTURE.md) — the three layers (deterministic core,
   browser UI, Cloudflare Worker), session data flow, the detection pipeline and
   visibility geometry, the UI, and the sidecar JSON format.
