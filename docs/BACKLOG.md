@@ -144,3 +144,69 @@ event log the real source of truth.
 - No client-side error capture today (the solo freeze was found only by hand). Add a
   lightweight error boundary / `console.error` beacon so deployed errors surface.
 - Touch: `web/src/*.ts` entry points.
+
+---
+
+## Work streams (for parallel agents)
+
+Five streams. The **server** and **tooling** streams are cleanly independent; the
+three **client** streams all edit the two god-object drivers (`web/src/solo.ts`,
+`web/src/play.ts`), so they contend on those files — see Execution waves. Each
+stream owns a file set; agents stay out of each other's owned files.
+
+### Stream S — Server: event sourcing & CQRS · items 1a–1d, 3f
+- **Owns:** `src/game-table.ts`, `src/protocol.ts`, `src/worker.ts`, `wrangler.toml`,
+  new `src/*.test.ts`.
+- **Independence: high** — lives entirely in `src/`. The only client touch is 1d's
+  `Last-Event-ID` reconnect in `web/src/play.ts` (the `EventSource` setup, ~20 lines);
+  do it last and coordinate with the client streams.
+- **Order:** 1a → 1b → 1c → 1d; 3f and the DO security tests fold in anywhere.
+- **First move:** lift `decide` / `fold` / `projectFor` out of `apply` / `tokensFor`
+  as pure functions.
+
+### Stream T — Tooling & CI · items 3a, 3c
+- **Owns:** `package.json`, `.github/workflows/ci.yml`, the formatter/linter config.
+- ⚠️ The first format pass rewrites much of the tree — **land it first and alone**,
+  before other streams branch, or everything conflicts. Lint-fixes after are small.
+- 3c here = wire the existing Playwright e2e into CI; the new DO unit tests belong to S.
+- **First move:** add Biome, run one format pass, add it to `check` + CI.
+
+### Stream V — Client viewport & performance, the keystone · items 3b, 3d
+- **Owns:** `web/src/solo.ts`, `web/src/play.ts`, new `web/src/viewport.ts`,
+  `web/src/synth/render-map.ts`.
+- The **decomposition keystone**: extracting the shared camera/tween and an
+  offscreen-cached renderer turns the god-objects into seams the other client streams
+  plug into. Run it **alone** among client streams.
+- **Order:** 3b (extract the viewport) → 3d (offscreen map + fog cache).
+- **First move:** lift `renderPos` / `startEase` / `stepRenderPos` / `frame` + zoom/pan
+  into `viewport.ts`, used by both clients.
+
+### Stream O — Lazy 3D overlays · items 2a, 2b
+- **Owns:** new `web/src/dice-overlay.ts`, `web/src/item-reveal.ts`,
+  `web/public/gltf/`; edits `web/src/solo.ts`, `web/src/play.ts`, `web/src/solo/reducer.ts`.
+- Coordinate with Stream V (shares the two drivers). Cleanest **after** V lands, plugging
+  the overlay into the viewport's overlay seam.
+- **Order:** 2a (lazy shared dice + table) → 2b (item reveal).
+- **First move:** pull the dice overlay out of `solo.ts` into `dice-overlay.ts` with a
+  dynamic `import()` of `@rgilks/cepheus-dice`.
+
+### Stream H — Core split & hygiene · items 3e, 3g
+- **Owns:** `core/los.ts` (→ `core/detect.ts` + `core/visibility.ts`) and its importers;
+  client entry points for 3g.
+- 3e changes import paths across the editor *and* the game drivers, so it contends with
+  the client files — coordinate with V/O.
+- **First move:** split the file, update imports, keep the exported surface identical.
+
+## Execution waves
+
+Honest parallelism, given the two driver files everything client-side funnels through:
+
+- **Wave 0 (solo, fast):** Stream T's format/lint pass — land first so all branches start
+  formatted.
+- **Wave 1 (parallel — 2 agents):** Stream S (server) ‖ Stream V (client keystone).
+  Disjoint file sets (`src/` vs the client drivers) → no conflict.
+- **Wave 2 (parallel — once V lands):** Stream O ‖ Stream H, plugging into the decomposed
+  modules instead of the monoliths; Stream S's small 1d `play.ts` edit lands here, coordinated.
+
+If you'd rather not gate on the keystone: keep S + T parallel, but run O, V, and H
+**serially** (one agent owning `solo.ts` / `play.ts` at a time) — they conflict otherwise.
