@@ -33,3 +33,56 @@ jobs:
 
       - name: Diagram check
         run: npm run check:diagrams
+
+  # Best-effort multiplayer smoke test. Hermetic: builds the client, runs the
+  # Worker (Durable Object + R2) in wrangler's *local* simulator — no Cloudflare
+  # account, secrets, or deployed target needed — and drives a headless Chromium
+  # through author -> publish -> two players + GM -> door fog -> move -> republish.
+  # Kept `continue-on-error` so browser/SSE flakiness never blocks merges; the
+  # `verify` job above stays the required gate. To debug a failure locally:
+  #   npm run build && npm run serve:worker  # in one shell
+  #   LOS_BASE_URL=http://127.0.0.1:8787 npm run test:e2e  # in another
+  e2e:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Build client
+        run: npm run build
+
+      - name: Start Worker (local)
+        run: npm run serve:worker > wrangler-dev.log 2>&1 &
+
+      - name: Wait for Worker
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8787/healthz > /dev/null; then
+              echo "Worker is up."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Worker did not become healthy in time." >&2
+          cat wrangler-dev.log >&2 || true
+          exit 1
+
+      - name: Multiplayer e2e
+        run: npm run test:e2e
+        env:
+          LOS_BASE_URL: http://127.0.0.1:8787
+
+      - name: Worker log (on failure)
+        if: failure()
+        run: cat wrangler-dev.log
