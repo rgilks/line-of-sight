@@ -79,4 +79,25 @@ describe('solo session', () => {
     expect(replayed?.x).toBe(moved?.x)
     expect(replayed?.y).toBe(moved?.y)
   })
+
+  it('multiplayer: seats claim through the session, pieces redistribute, the owner gate holds', () => {
+    let s = createSession(42)
+    const pcs = () => s.state.entities.filter((e) => e.faction === 'pc')
+    const owned = (seat: string) => pcs().filter((p) => p.owner === seat).length
+
+    // Host claims → owns every piece.
+    s = sessionStep(s, {action: {t: 'ClaimSeat', seatId: 'h', joinedAt: 0}}).session
+    expect(pcs().every((p) => p.owner === 'h')).toBe(true)
+
+    // A second player joins → pieces split 2/2; the active piece stays with the host.
+    s = sessionStep(s, {action: {t: 'ClaimSeat', seatId: 'p2', joinedAt: 1}}).session
+    expect(owned('h')).toBe(2)
+    expect(owned('p2')).toBe(2)
+    const active = s.state.entities[s.state.turnPtr]
+    expect(active.owner).toBe('h')
+
+    // The other seat may NOT command the host's active piece; the owner may.
+    expect(sessionStep(s, {action: {t: 'EndTurn'}, byActor: active.id, byPlayer: 'p2'}).events).toHaveLength(0)
+    expect(sessionStep(s, {action: {t: 'EndTurn'}, byActor: active.id, byPlayer: 'h'}).events.length).toBeGreaterThan(0)
+  })
 })

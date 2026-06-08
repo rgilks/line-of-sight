@@ -13,8 +13,8 @@ export interface Env {
 
 // Route /api/tables/<id>/(stream|commands|board) to that table's Durable Object.
 const tableRoute = /^\/api\/tables\/([^/]+)\/(stream|commands|board)$/
-// Route /api/solo/<id>/(stream|commands) to that game's SoloRoom Durable Object.
-const soloRoute = /^\/api\/solo\/([^/]+)\/(stream|commands)$/
+// Route /api/solo/<id>/(stream|commands|import) to that game's SoloRoom DO.
+const soloRoute = /^\/api\/solo\/([^/]+)\/(stream|commands|import)$/
 // GM-uploaded map storage. POST .../map uploads; GET .../map/<ref> serves.
 const mapUploadRoute = /^\/api\/tables\/([^/]+)\/map$/
 const mapGetRoute = /^\/api\/tables\/([^/]+)\/map\/([^/]+)$/
