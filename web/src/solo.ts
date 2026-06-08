@@ -11,6 +11,7 @@
 import {generateMap} from './synth/generate-map'
 import {renderMap} from './synth/render-map'
 import {defaultSpec, type GeneratedMap} from './synth/types'
+import {makeRng} from './synth/rng'
 import {counterTokenSize, drawCounterToken} from './counter-render'
 import {counterDefinitions, counterPortraits, preloadCounterPortraits} from './state'
 import {roll2D6} from '../../core/dice'
@@ -28,6 +29,7 @@ import {MONSTERS} from './solo/monsters'
 import {ARMORS, weaponById} from './solo/gear'
 import {parseDamage, predictAttack, rangeBandFor} from './solo/combat'
 import {decideMonster} from './solo/ai'
+import {generateLocks, placeContainers} from './solo/loot'
 import {createDiceRoller, type DiceRoller} from '@rgilks/cepheus-dice'
 import {
   activeEntity,
@@ -46,9 +48,11 @@ import {
   turnBudgetPx,
   withinReach,
   type CombatStance,
+  type Container,
   type Entity,
   type GroundItem,
   type ItemStack,
+  type LockKind,
   type Prop,
   type SoloState
 } from './solo/model'
@@ -416,21 +420,44 @@ const newGame = (seed = Math.floor(Math.random() * 100000)): void => {
   monsterCounter = 0
   const entities = rollInitiative([...spawnParty(map, grid), ...buildWave(map, grid, 1)])
   const firstPc = entities.findIndex((entity) => entity.faction === 'pc' && isActive(entity))
+  // A seeded rng (distinct from initiative's Math.random) so loot + locks are
+  // stable for a given ?seed= deck.
+  const lootRng = makeRng(seed * 2 + 1)
+  const locks = generateLocks(map, lootRng)
+  const ground = scatterLoot(map, grid)
+  const props = makeProps(map, grid, entities)
+  // Keep containers off cells already taken by the squad, crates, or floor loot.
+  const occupied = new Set<string>()
+  for (const e of entities) {
+    const c = cellOf(grid, e.x, e.y)
+    occupied.add(`${c.cx},${c.cy}`)
+  }
+  for (const p of props) {
+    const c = cellOf(grid, p.x, p.y)
+    occupied.add(`${c.cx},${c.cy}`)
+  }
+  for (const gi of ground) {
+    const c = cellOf(grid, gi.x, gi.y)
+    occupied.add(`${c.cx},${c.cy}`)
+  }
+  const containers = placeContainers(map, grid, lootRng, occupied)
   selectedId = null
   busy = false
   state = {
     seed,
     map,
     grid,
-    // Doors open at start so the horde can roam; the squad closes a door (or shoves
-    // a crate into it) to wall monsters out.
+    // Unlocked doors start open so the horde can roam; the squad closes a door (or
+    // shoves a crate into it) to wall monsters out. Sealed doors start closed.
     doorStates: Object.fromEntries(
-      map.occluders.filter((o) => o.type === 'door').map((d) => [d.id, {open: true}])
+      map.occluders.filter((o) => o.type === 'door').map((d) => [d.id, {open: locks[d.id] ? false : true}])
     ),
     sightRadius: SIGHT_RADIUS,
     entities,
-    ground: scatterLoot(map, grid),
-    props: makeProps(map, grid, entities),
+    ground,
+    props,
+    containers,
+    locks,
     turnPtr: firstPc >= 0 ? firstPc : 0,
     round: 1,
     wave: 1,
@@ -950,6 +977,26 @@ const visibleToSquad = (s: SoloState, x: number, y: number): boolean =>
       hasLineOfSight({x: e.x, y: e.y}, {x, y}, s.map.occluders, s.doorStates)
   )
 
+// Midpoint of a door segment (for placing a "locked" denial right on it).
+const doorMidpoint = (doorId: string): Point | null => {
+  const door = state?.map.occluders.find((o) => o.id === doorId && o.type === 'door')
+  return door ? {x: (door.x1 + door.x2) / 2, y: (door.y1 + door.y2) / 2} : null
+}
+
+// An unsearched container the click landed on (and the squad can see). Searched
+// ones are inert, so they fall through to a normal move.
+const containerHitAt = (point: Point): Container | null => {
+  if (!state) return null
+  const tol = state.map.gridScale * 0.6
+  let best: {container: Container; d: number} | null = null
+  for (const container of state.containers) {
+    if (container.searched || !visibleToSquad(state, container.x, container.y)) continue
+    const d = Math.hypot(container.x - point.x, container.y - point.y)
+    if (d <= tol && (!best || d < best.d)) best = {container, d}
+  }
+  return best?.container ?? null
+}
+
 // The entity the click landed on: any PC, or a monster the squad can currently see.
 const entityHitAt = (point: Point): Entity | null => {
   if (!state) return null
@@ -974,8 +1021,19 @@ function actAt(clientX: number, clientY: number): void {
   const point = boardPointFromXY(clientX, clientY)
   const doorId = doorHitAt(point)
   if (doorId) {
-    playUi('door')
+    const before = state.doorStates[doorId]?.open ?? false
+    const logLen = state.log.length
     playerAct({t: 'ToggleDoor', doorId})
+    const after = state?.doorStates[doorId]?.open ?? false
+    if (state && after === before && state.log.length > logLen) {
+      // Refused (sealed without a card/hack, or out of actions) — show why on the door.
+      const mid = doorMidpoint(doorId)
+      if (mid) spawnDenied(mid, state.log[state.log.length - 1], state.map.gridScale)
+      playUi('denied')
+      requestDraw()
+    } else {
+      playUi('door')
+    }
     return
   }
   const hit = entityHitAt(point)
@@ -999,6 +1057,13 @@ function actAt(clientX: number, clientY: number): void {
     }
     renderPanel()
     requestDraw()
+    return
+  }
+  // A container: search it when adjacent, else fall through to walk toward it.
+  const container = containerHitAt(point)
+  if (container && Math.hypot(actor.x - container.x, actor.y - container.y) <= 1.6 * state.grid.gridScale) {
+    playUi('pickup')
+    playerAct({t: 'Search', containerId: container.id})
     return
   }
   const moverId = actor.id
@@ -1066,6 +1131,28 @@ const drawFog = (s: SoloState): void => {
   ctx.drawImage(scratch, 0, 0)
 }
 
+// A small padlock at a sealed door — amber for a keycard lock, cyan for a
+// hackable one — on a dark backing disc so it reads over the deck art.
+const drawLockGlyph = (x: number, y: number, gs: number, kind: LockKind): void => {
+  const col = kind === 'hack' ? 'rgba(94, 214, 240, 0.96)' : 'rgba(255, 178, 60, 0.96)'
+  const w = gs * 0.32
+  const h = gs * 0.26
+  ctx.save()
+  ctx.translate(x, y)
+  ctx.fillStyle = 'rgba(6, 9, 9, 0.78)'
+  ctx.beginPath()
+  ctx.arc(0, 0, gs * 0.34, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.strokeStyle = col
+  ctx.lineWidth = Math.max(1.6, gs * 0.05)
+  ctx.beginPath()
+  ctx.arc(0, -h * 0.2, w * 0.34, Math.PI, 0) // shackle
+  ctx.stroke()
+  ctx.fillStyle = col
+  ctx.fillRect(-w * 0.42, -h * 0.06, w * 0.84, h * 0.74) // body
+  ctx.restore()
+}
+
 const drawDoorStates = (s: SoloState): void => {
   const reach = doorReachForGrid(s.grid.gridScale)
   const actor = activeEntity(s)
@@ -1074,6 +1161,15 @@ const drawDoorStates = (s: SoloState): void => {
   for (const occluder of s.map.occluders) {
     if (occluder.type !== 'door') continue
     const door = occluder as DoorOccluder
+    const lock = s.locks[door.id]
+    // A sealed door shows a padlock wherever the squad can see it; it is closed, so
+    // the open/close hint below doesn't apply.
+    if (lock && !lock.unlocked) {
+      const mx = (door.x1 + door.x2) / 2
+      const my = (door.y1 + door.y2) / 2
+      if (visibleToSquad(s, mx, my)) drawLockGlyph(mx, my, s.grid.gridScale, lock.kind)
+      continue
+    }
     const reachable = actor != null && actor.faction === 'pc' && distanceToOccluder({x: actor.x, y: actor.y}, door) <= reach
     if (!reachable) continue
     const open = s.doorStates[door.id]?.open ?? false
@@ -1174,6 +1270,60 @@ const drawGroundItem = (s: SoloState, item: GroundItem): void => {
   ctx.restore()
 }
 
+// Searchable fixtures (lockers/cabinets/crates/terminals). Unsearched ones carry a
+// bright edge + highlight ring; searched ones go dim with an open lid. Drawn only
+// where the squad can see, so they live under the fog like floor loot.
+const drawContainers = (s: SoloState): void => {
+  const gs = s.map.gridScale
+  for (const c of s.containers) {
+    if (!visibleToSquad(s, c.x, c.y)) continue
+    const r = gs * 0.3
+    const terminal = c.kind === 'terminal'
+    const edge = c.searched
+      ? 'rgba(120, 138, 148, 0.55)'
+      : terminal
+        ? 'rgba(94, 214, 240, 0.95)'
+        : 'rgba(255, 200, 110, 0.95)'
+    const body = c.searched ? 'rgba(40, 48, 52, 0.7)' : terminal ? 'rgba(20, 46, 56, 0.92)' : 'rgba(48, 60, 44, 0.92)'
+    ctx.save()
+    ctx.translate(c.x, c.y)
+    ctx.fillStyle = body
+    ctx.strokeStyle = edge
+    ctx.lineWidth = 2
+    ctx.beginPath()
+    ctx.rect(-r, -r, r * 2, r * 2)
+    ctx.fill()
+    ctx.stroke()
+    ctx.lineWidth = Math.max(1.3, r * 0.16)
+    if (terminal) {
+      ctx.beginPath() // a couple of screen lines
+      ctx.moveTo(-r * 0.5, -r * 0.2)
+      ctx.lineTo(r * 0.5, -r * 0.2)
+      ctx.moveTo(-r * 0.5, r * 0.12)
+      ctx.lineTo(r * 0.2, r * 0.12)
+      ctx.stroke()
+    } else {
+      ctx.beginPath() // lid line
+      ctx.moveTo(-r, -r * 0.28)
+      ctx.lineTo(r, -r * 0.28)
+      ctx.stroke()
+      if (!c.searched) {
+        ctx.beginPath() // clasp
+        ctx.arc(0, r * 0.14, r * 0.16, 0, Math.PI * 2)
+        ctx.stroke()
+      }
+    }
+    if (!c.searched) {
+      ctx.strokeStyle = terminal ? 'rgba(94, 214, 240, 0.45)' : 'rgba(255, 205, 120, 0.45)'
+      ctx.lineWidth = 1.4
+      ctx.beginPath()
+      ctx.rect(-r - 3, -r - 3, (r + 3) * 2, (r + 3) * 2)
+      ctx.stroke()
+    }
+    ctx.restore()
+  }
+}
+
 // Health as a fraction of total physical characteristics (STR+DEX+END). Damage
 // drains END first then STR/DEX, so this hits 0 exactly when the entity dies —
 // a truer "health level" than END alone.
@@ -1261,6 +1411,7 @@ const draw = (): void => {
   drawFog(s)
   drawDoorStates(s)
   drawReachable(s)
+  drawContainers(s)
 
   for (const item of s.ground) {
     if (visibleToSquad(s, item.x, item.y)) drawGroundItem(s, item)
@@ -1342,6 +1493,7 @@ type TrackCombat = {
   canReload: boolean
   canMedkit: boolean
   canPickup: boolean
+  canSearch: boolean
   canPush: boolean
   aim: number
   canAim: boolean
@@ -1361,6 +1513,8 @@ const SOLO_ICON = {
     '<svg class="solo-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 9V6a4 4 0 1 1 8 0v3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><rect x="6" y="9" width="12" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 12v4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
   push:
     '<svg class="solo-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="8" height="8" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M15 14h5M18 11l3 3-3 3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  search:
+    '<svg class="solo-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M15 15l5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   stand:
     '<svg class="solo-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5.5" r="2.2" fill="currentColor"/><path d="M12 8v9M9.5 20h5M10 12l2 3 2-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   crouch:
@@ -1405,6 +1559,7 @@ const trackControlsHtml = (combat: TrackCombat): string => {
       ${iconBtn('solo-reload', SOLO_ICON.reload, 'Reload', combat.canReload)}
       ${iconBtn('solo-medkit', SOLO_ICON.medkit, 'Medkit', combat.canMedkit)}
       ${iconBtn('solo-pickup', SOLO_ICON.pickup, 'Pick up', combat.canPickup)}
+      ${iconBtn('solo-search', SOLO_ICON.search, 'Search', combat.canSearch)}
       ${iconBtn('solo-push', SOLO_ICON.push, 'Push crate', combat.canPush)}
       ${iconBtn('solo-end', SOLO_ICON.end, 'End turn (Space)', true, 'is-end')}
     </div>
@@ -1523,6 +1678,11 @@ const renderPanel = (): void => {
   const loot = actor ? s.ground.find((g) => Math.hypot(actor.x - g.x, actor.y - g.y) <= 1.6 * s.grid.gridScale) : undefined
   const canPickup = canMinor && !!loot
 
+  const searchTarget = actor
+    ? s.containers.find((c) => !c.searched && Math.hypot(actor.x - c.x, actor.y - c.y) <= 1.6 * s.grid.gridScale)
+    : undefined
+  const canSearch = canMinor && !!searchTarget
+
   const pushable = actor
     ? s.props.find((p) => {
         const ac = cellOf(s.grid, actor.x, actor.y)
@@ -1550,6 +1710,7 @@ const renderPanel = (): void => {
         canReload,
         canMedkit,
         canPickup,
+        canSearch,
         canPush,
         aim: actor?.aim ?? 0,
         canAim: canSignificant && (actor?.aim ?? 0) < AIM_MAX,
@@ -1597,6 +1758,7 @@ const renderPanel = (): void => {
       <button id="solo-new" class="solo-foot-btn" type="button">New deck</button>
       <label class="solo-foot-check"><input type="checkbox" id="solo-grid" ${showGrid ? 'checked' : ''}/> Grid</label>
       <p class="solo-foot-hint">Move + one action, or run ${MINOR_ACTIONS_PER_ROUND * 6} m. Double-click a foe (or <b>F</b>) to fire; double-click yourself (or <b>Space</b>) to end the turn.</p>
+      <p class="solo-foot-hint">Search lockers &amp; terminals for ammo, medkits, and access cards. Sealed doors want a keycard or a hack (Electronics).</p>
     </footer>`
 
   for (const el of panel.querySelectorAll<HTMLElement>('[data-select]')) {
@@ -1630,6 +1792,12 @@ const renderPanel = (): void => {
     if (loot) {
       playUi('pickup')
       playerAct({t: 'PickUp', groundItemId: loot.id})
+    }
+  })
+  panel.querySelector<HTMLButtonElement>('#solo-search')?.addEventListener('click', () => {
+    if (searchTarget) {
+      playUi('pickup')
+      playerAct({t: 'Search', containerId: searchTarget.id})
     }
   })
   panel.querySelector<HTMLButtonElement>('#solo-push')?.addEventListener('click', () => {

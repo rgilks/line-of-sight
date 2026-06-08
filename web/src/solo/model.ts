@@ -25,14 +25,40 @@ export type Stats = {str: number; dex: number; end: number}
 // "Melee Combat", "Medicine").
 export type Skills = Record<string, number>
 
-export type ItemKind = 'ammo' | 'medkit'
-// A stack of carried consumables. `weaponId` ties ammo to the weapon it reloads.
+export type ItemKind = 'ammo' | 'medkit' | 'keycard'
+// A stack of carried consumables. `weaponId` ties ammo to the weapon it reloads;
+// a keycard is a generic access card that opens any key-locked door.
 export type ItemStack = {kind: ItemKind; weaponId?: string; count: number}
 // Loot lying on the deck floor until a character picks it up (board pixels).
 export type GroundItem = {id: string; x: number; y: number; stack: ItemStack}
 // A solid, pushable crate occupying one cell. Blocks movement (and Phase-4 monster
 // pathing), so the squad can shove crates into doorways to build barricades.
 export type Prop = {id: string; x: number; y: number}
+
+// A searchable fixture standing in a room — a locker, cabinet, supply crate, or
+// data terminal. The squad searches it (a minor action, when adjacent) to reveal
+// its contents: a stack of loot to pocket and/or a one-line clue logged for
+// atmosphere. Position is decorative (board pixels at a cell centre); a container
+// never blocks movement or line of sight.
+export type ContainerKind = 'locker' | 'cabinet' | 'crate' | 'terminal'
+export type Container = {
+  id: string
+  x: number
+  y: number
+  kind: ContainerKind
+  searched: boolean
+  loot?: ItemStack
+  clue?: string
+}
+
+export const containerLabel = (kind: ContainerKind): string =>
+  kind === 'cabinet' ? 'cabinet' : kind === 'terminal' ? 'terminal' : kind === 'crate' ? 'supply crate' : 'locker'
+
+// Some internal doors start sealed. A 'key' lock opens for anyone carrying a
+// keycard; a 'hack' lock yields to an Electronics check (a significant action).
+// Once `unlocked`, the door toggles open/closed freely like any other.
+export type LockKind = 'key' | 'hack'
+export type DoorLock = {kind: LockKind; unlocked: boolean}
 
 export type Entity = {
   id: string
@@ -121,6 +147,8 @@ export type SoloState = {
   entities: Entity[] // PCs + monsters, in initiative order
   ground: GroundItem[] // loot on the floor
   props: Prop[] // pushable crates / barricade material
+  containers: Container[] // searchable lockers / cabinets / crates / terminals
+  locks: Record<string, DoorLock> // doorId → lock state (a door absent here is never locked)
   turnPtr: number
   round: number
   wave: number // current wave number (1-based)
@@ -140,6 +168,7 @@ export type Action =
   | {t: 'UseMedkit'; targetId: string}
   | {t: 'PickUp'; groundItemId: string}
   | {t: 'Drop'; stackIndex: number}
+  | {t: 'Search'; containerId: string}
   | {t: 'PushProp'; propId: string}
   | {t: 'SetStance'; stance: CombatStance}
   | {t: 'Aim'}
@@ -153,6 +182,11 @@ export const entityById = (state: SoloState, id: string): Entity | undefined =>
 
 export const livingOf = (state: SoloState, faction: Faction): Entity[] =>
   state.entities.filter((entity) => entity.faction === faction && !isDead(entity))
+
+/** Does the entity carry at least one keycard? Keycards are generic access cards
+ * that open any key-locked door (and are not consumed by use). */
+export const hasKeycard = (entity: Entity): boolean =>
+  entity.inventory.some((stack) => stack.kind === 'keycard' && stack.count > 0)
 
 /** Are two entities within `squares` cells of each other (Chebyshev-ish, by pixels)? */
 export const withinReach = (a: Entity, b: Entity, gridScale: number, squares = 1.6): boolean =>

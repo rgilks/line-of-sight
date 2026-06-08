@@ -3,7 +3,7 @@ import {defaultSpec, type GeneratedMap} from '../synth/types'
 import type {Occluder} from '../../../core/los'
 import type {Rng} from '../../../core/dice'
 import {buildWalkGrid} from './grid'
-import {moveBudgetPx, turnBudgetPx, type Entity, type SoloState} from './model'
+import {moveBudgetPx, turnBudgetPx, type Container, type Entity, type SoloState} from './model'
 import {reduce} from './reducer'
 
 // A 10×10 open room (cells 1..8 are floor) at 30px/cell, no occluders unless
@@ -51,6 +51,8 @@ const makeState = (entities: Entity[], occluders: Occluder[] = []): SoloState =>
     entities,
     ground: [],
     props: [],
+    containers: [],
+    locks: {},
     turnPtr: 0,
     round: 1,
     wave: 1,
@@ -262,5 +264,79 @@ describe('solo reducer — ToggleDoor', () => {
     const state = makeState([pc('a', 6, 6, 0)], [door])
     const next = reduce(state, {t: 'ToggleDoor', doorId: 'door-1'})
     expect(next.doorStates['door-1']?.open).toBeUndefined()
+  })
+})
+
+describe('solo reducer — locked doors', () => {
+  const door: Occluder = {type: 'door', id: 'door-1', x1: 90, y1: 60, x2: 90, y2: 90, open: false}
+  const sealed = (entities: Entity[], kind: 'key' | 'hack'): SoloState => ({
+    ...makeState(entities, [door]),
+    locks: {'door-1': {kind, unlocked: false}}
+  })
+
+  it('a key lock refuses to open without a keycard', () => {
+    const next = reduce(sealed([pc('a', 2, 2, 0)], 'key'), {t: 'ToggleDoor', doorId: 'door-1'})
+    expect(next.doorStates['door-1']?.open ?? false).toBe(false)
+    expect(next.log.at(-1)).toContain('locked')
+  })
+
+  it('a key lock opens for a keycard and keeps the card', () => {
+    const carrier = {...pc('a', 2, 2, 0), inventory: [{kind: 'keycard' as const, count: 1}]}
+    const next = reduce(sealed([carrier], 'key'), {t: 'ToggleDoor', doorId: 'door-1'})
+    expect(next.doorStates['door-1'].open).toBe(true)
+    expect(next.locks['door-1'].unlocked).toBe(true)
+    expect(next.entities[0].inventory).toContainEqual({kind: 'keycard', count: 1})
+    expect(next.actionUsed).toBe(false) // badging in is a minor action
+  })
+
+  it('a hack lock opens on a successful Electronics check (significant action)', () => {
+    const eng = {...pc('a', 2, 2, 0), skills: {Electronics: 2}}
+    const next = reduce(sealed([eng], 'hack'), {t: 'ToggleDoor', doorId: 'door-1'}, seqRng([6, 6]))
+    expect(next.doorStates['door-1'].open).toBe(true)
+    expect(next.locks['door-1'].unlocked).toBe(true)
+    expect(next.actionUsed).toBe(true)
+  })
+
+  it('a failed hack spends the action but leaves the door sealed', () => {
+    const eng = {...pc('a', 2, 2, 0), skills: {Electronics: 0}}
+    const next = reduce(sealed([eng], 'hack'), {t: 'ToggleDoor', doorId: 'door-1'}, seqRng([1, 1]))
+    expect(next.doorStates['door-1']?.open ?? false).toBe(false)
+    expect(next.locks['door-1'].unlocked).toBe(false)
+    expect(next.actionUsed).toBe(true)
+  })
+})
+
+describe('solo reducer — Search', () => {
+  const container = (cx: number, cy: number, fields: Partial<Container>): Container => ({
+    id: 'c1',
+    x: (cx + 0.5) * 30,
+    y: (cy + 0.5) * 30,
+    kind: 'locker',
+    searched: false,
+    ...fields
+  })
+  const withContainer = (c: Container): SoloState => ({...makeState([pc('a', 2, 2, 0)]), containers: [c]})
+
+  it('pockets loot, marks searched, and spends a minor action', () => {
+    const state = withContainer(container(2, 3, {loot: {kind: 'ammo', weaponId: 'autopistol', count: 12}}))
+    const next = reduce(state, {t: 'Search', containerId: 'c1'})
+    expect(next.containers[0].searched).toBe(true)
+    expect(next.entities[0].inventory).toContainEqual({kind: 'ammo', weaponId: 'autopistol', count: 12})
+    expect(next.moveRemainingPx).toBeCloseTo(turnBudgetPx(30) - moveBudgetPx(30))
+    expect(next.actionUsed).toBe(false)
+  })
+
+  it('logs a clue and refuses to search the same container twice', () => {
+    const state = withContainer(container(2, 3, {clue: 'A scrawled note.'}))
+    const once = reduce(state, {t: 'Search', containerId: 'c1'})
+    expect(once.log.some((line) => line.includes('A scrawled note.'))).toBe(true)
+    expect(reduce(once, {t: 'Search', containerId: 'c1'})).toBe(once) // already searched → no-op
+  })
+
+  it('refuses to search a container out of reach', () => {
+    const state = withContainer(container(7, 7, {loot: {kind: 'medkit', count: 1}}))
+    const next = reduce(state, {t: 'Search', containerId: 'c1'})
+    expect(next.containers[0].searched).toBe(false)
+    expect(next.entities[0].inventory).toHaveLength(0)
   })
 })

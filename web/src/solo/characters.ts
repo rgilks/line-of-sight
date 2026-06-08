@@ -1,6 +1,6 @@
 // The four pre-statted player characters for v1 (no character generation yet).
 // Plain Cepheus stat blocks. Skill names match the character generator's parent
-// skills ("Gun Combat", "Melee Combat", "Medicine") so a ccg-made character can
+// skills ("Gun Combat", "Melee Combat", "Medicine", "Electronics") so a ccg-made character can
 // later replace one of these wholesale. `spareAmmo` is rounds beyond the loaded
 // magazine; `medkits` are first-aid kits carried.
 import type {CounterKind} from '../../../core/rules'
@@ -35,7 +35,7 @@ export const PARTY: PreGen[] = [
     kind: 'scout',
     label: 'Rell',
     stats: {str: 7, dex: 10, end: 7},
-    skills: {'Gun Combat': 1, 'Melee Combat': 1},
+    skills: {'Gun Combat': 1, 'Melee Combat': 1, Electronics: 1},
     weaponId: 'autopistol',
     armorId: 'jack',
     spareAmmo: 45,
@@ -57,7 +57,7 @@ export const PARTY: PreGen[] = [
     kind: 'engineer',
     label: 'Kade',
     stats: {str: 8, dex: 6, end: 9},
-    skills: {'Gun Combat': 1, 'Melee Combat': 0},
+    skills: {'Gun Combat': 1, 'Melee Combat': 0, Electronics: 2},
     weaponId: 'shotgun',
     armorId: 'cloth',
     spareAmmo: 18,

@@ -51,6 +51,8 @@ const makeState = (entities: Entity[]): SoloState => {
     entities,
     ground: [],
     props: [],
+    containers: [],
+    locks: {},
     turnPtr: 0,
     round: 1,
     wave: 1,

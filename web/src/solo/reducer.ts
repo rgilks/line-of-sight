@@ -5,15 +5,17 @@
 import {distanceToOccluder, doorReachForGrid, visibilityPolygon} from '../../../core/los'
 import {orderByInitiative, pointInPolygon} from '../../../core/rules'
 import {roll2D6, type Rng} from '../../../core/dice'
-import {applyDamage, applyHeal, attackLog, resolveAttack, resolveFirstAid} from './combat'
+import {applyDamage, applyHeal, attackLog, HACK_TARGET, resolveAttack, resolveFirstAid, resolveHack} from './combat'
 import {weaponById} from './gear'
 import {cellCenter, cellOf, isFloor} from './grid'
 import {
   activeEntity,
   AIM_MAX,
   canSeePoint,
+  containerLabel,
   dexDm,
   entityById,
+  hasKeycard,
   isActive,
   isDead,
   isDown,
@@ -142,7 +144,7 @@ const applyAim = (state: SoloState): SoloState => {
 }
 
 // --- doors -----------------------------------------------------------------
-const applyToggleDoor = (state: SoloState, doorId: string): SoloState => {
+const applyToggleDoor = (state: SoloState, doorId: string, rng: Rng): SoloState => {
   const actor = activeEntity(state)
   if (!actor || !isActive(actor)) return state
   const door = state.map.occluders.find((o) => o.id === doorId && o.type === 'door')
@@ -150,9 +152,55 @@ const applyToggleDoor = (state: SoloState, doorId: string): SoloState => {
   if (distanceToOccluder({x: actor.x, y: actor.y}, door) > doorReachForGrid(state.grid.gridScale)) {
     return log(state, 'Too far from that door.')
   }
-  const cost = minorCost(state, actor) // working a door is a minor action
+  const currentlyOpen = state.doorStates[doorId]?.open ?? false
+  const lock = state.locks[doorId]
+
+  // Opening a still-sealed door needs a keycard (key lock) or a successful hack
+  // (hack lock). Closing one is always allowed — only opening is gated.
+  if (!currentlyOpen && lock && !lock.unlocked) {
+    if (lock.kind === 'key') {
+      if (!hasKeycard(actor)) return log(state, 'That door is locked — find a keycard.')
+      const cost = minorCost(state, actor) // badging in is a minor action
+      if (!enough(state, cost)) return log(state, `${actor.label} has no actions left this turn.`)
+      return log(
+        {
+          ...state,
+          locks: {...state.locks, [doorId]: {...lock, unlocked: true}},
+          doorStates: {...state.doorStates, [doorId]: {open: true}},
+          moveRemainingPx: state.moveRemainingPx - cost
+        },
+        `${actor.label} badges the lock — access granted.`
+      )
+    }
+    // Hack lock: a significant action plus an Electronics check.
+    if (state.actionUsed) return state
+    const cost = significantCost(state, actor)
+    if (!enough(state, cost)) return log(state, `${actor.label} has no action left this turn.`)
+    const h = resolveHack(actor, rng)
+    const sign = h.skill >= 0 ? `+${h.skill}` : `${h.skill}`
+    const detail = `(2D6 ${h.dice[0]}+${h.dice[1]} ${sign} Electronics = ${h.roll} vs ${HACK_TARGET})`
+    if (!h.success) {
+      return log(
+        {...state, actionUsed: true, moveRemainingPx: state.moveRemainingPx - cost},
+        `${actor.label} fails to hack the lock ${detail}.`
+      )
+    }
+    return log(
+      {
+        ...state,
+        locks: {...state.locks, [doorId]: {...lock, unlocked: true}},
+        doorStates: {...state.doorStates, [doorId]: {open: true}},
+        actionUsed: true,
+        moveRemainingPx: state.moveRemainingPx - cost
+      },
+      `${actor.label} hacks the lock — ACCESS GRANTED ${detail}.`
+    )
+  }
+
+  // Normal door (or one already unlocked): toggle as a minor action.
+  const cost = minorCost(state, actor)
   if (!enough(state, cost)) return log(state, `${actor.label} has no actions left this turn.`)
-  const open = !(state.doorStates[doorId]?.open ?? false)
+  const open = !currentlyOpen
   return log(
     {...state, doorStates: {...state.doorStates, [doorId]: {open}}, moveRemainingPx: state.moveRemainingPx - cost},
     open ? `${actor.label} opens a door.` : `${actor.label} closes a door.`
@@ -277,6 +325,13 @@ const mergeStack = (inventory: ItemStack[], stack: ItemStack): ItemStack[] => {
   return [...inventory, {...stack}]
 }
 
+const lootLabel = (stack: ItemStack): string =>
+  stack.kind === 'ammo'
+    ? `${stack.count} rounds`
+    : stack.kind === 'keycard'
+      ? `an access card${stack.count > 1 ? ` (×${stack.count})` : ''}`
+      : `${stack.count} medkit${stack.count > 1 ? 's' : ''}`
+
 const applyPickUp = (state: SoloState, groundItemId: string): SoloState => {
   const actor = activeEntity(state)
   if (!actor || !isActive(actor)) return state
@@ -287,10 +342,7 @@ const applyPickUp = (state: SoloState, groundItemId: string): SoloState => {
   }
   const cost = minorCost(state, actor) // picking up is a minor action
   if (!enough(state, cost)) return log(state, `${actor.label} has no actions left this turn.`)
-  const label =
-    item.stack.kind === 'ammo'
-      ? `${item.stack.count} rounds`
-      : `${item.stack.count} medkit${item.stack.count > 1 ? 's' : ''}`
+  const label = lootLabel(item.stack)
   return log(
     {
       ...state,
@@ -316,6 +368,34 @@ const applyDrop = (state: SoloState, stackIndex: number): SoloState => {
     },
     `${actor.label} drops an item.`
   )
+}
+
+// --- search containers -----------------------------------------------------
+// Rummage an adjacent locker/cabinet/crate/terminal (a minor action): pocket its
+// loot and log any clue. Always succeeds when in reach — exploration is rewarded,
+// not gated behind a roll.
+const applySearch = (state: SoloState, containerId: string): SoloState => {
+  const actor = activeEntity(state)
+  if (!actor || !isActive(actor)) return state
+  const container = state.containers.find((c) => c.id === containerId)
+  if (!container || container.searched) return state
+  if (Math.hypot(actor.x - container.x, actor.y - container.y) > 1.6 * state.grid.gridScale) {
+    return log(state, 'Too far to search that.')
+  }
+  const cost = minorCost(state, actor) // searching is a minor action
+  if (!enough(state, cost)) return log(state, `${actor.label} has no actions left this turn.`)
+
+  const containers = state.containers.map((c) => (c.id === containerId ? {...c, searched: true} : c))
+  const lines = [`${actor.label} searches the ${containerLabel(container.kind)}.`]
+  let entities = state.entities
+  if (container.loot) {
+    const loot = container.loot
+    entities = replace(state, actor.id, (e) => ({...e, inventory: mergeStack(e.inventory, loot)}))
+    lines.push(`  ${actor.label} finds ${lootLabel(loot)}.`)
+  }
+  if (container.clue) lines.push(`  ${container.clue}`)
+  if (!container.loot && !container.clue) lines.push('  …nothing of use.')
+  return log({...state, containers, entities, moveRemainingPx: state.moveRemainingPx - cost}, ...lines)
 }
 
 // --- crates / barricades ---------------------------------------------------
@@ -402,7 +482,7 @@ export const reduce = (state: SoloState, action: Action, rng: Rng = Math.random)
     case 'Move':
       return applyMove(state, action.to)
     case 'ToggleDoor':
-      return applyToggleDoor(state, action.doorId)
+      return applyToggleDoor(state, action.doorId, rng)
     case 'Attack':
       return applyAttack(state, action.targetId, rng)
     case 'Reload':
@@ -413,6 +493,8 @@ export const reduce = (state: SoloState, action: Action, rng: Rng = Math.random)
       return applyPickUp(state, action.groundItemId)
     case 'Drop':
       return applyDrop(state, action.stackIndex)
+    case 'Search':
+      return applySearch(state, action.containerId)
     case 'PushProp':
       return applyPush(state, action.propId)
     case 'SetStance':

@@ -10,17 +10,20 @@ Four pre-made characters board a generated starship deck and hold out against
 three waves of aliens that board from the hull airlocks. Survive all three waves
 to win; lose if the whole squad is dead or downed.
 
-Turn-based in Cepheus initiative order (2D6 + DEX DM). On a character's turn:
+Turn-based in Cepheus initiative order (2D6 + DEX DM). Each turn is a single
+budget — three **minor** actions, or one **significant** action (worth two
+minors) plus a minor:
 
-- **Move** up to 6 m (click within the green ring) — gated by walkable floor,
-  line of sight, and occupancy.
-- One **significant action**: Attack a targeted foe, Reload, use a Medkit (first
-  aid on self or an adjacent squadmate), Pick up floor loot, or Push a crate.
-- Open/close adjacent doors.
+- **Move** (a minor per 6 m; click within the green ring) — gated by walkable
+  floor, line of sight, and occupancy. Spend the whole budget to run up to 18 m.
+- **Significant**: Attack a targeted foe, first aid with a Medkit, Aim, shove a
+  crate, or hack a sealed door.
+- **Minor**: open/close a door, badge through a keycard lock, Reload, Search a
+  container, Pick up floor loot, or change stance.
 
 Then **End turn** hands off to the monsters, which path toward the squad and
-attack. Fog reveals the union of the squad's line of sight; monsters are seen
-only when a character can see them.
+attack. Fog reveals the union of the squad's line of sight; monsters, loot, and
+containers are seen only when a character can see them.
 
 ### Combat (Cepheus SRD)
 
@@ -30,11 +33,24 @@ inflicts at least 1. Damage falls on END first, then STR or DEX; STR or DEX at 0
 downs a character, all three at 0 kills. A medkit restores `2 × Effect` of a
 Medicine check. See [`web/src/solo/combat.ts`](../web/src/solo/combat.ts).
 
+### Exploring
+
+Rooms hold **searchable fixtures** — lockers, cabinets, supply crates, data
+terminals. Search one (a minor action, when adjacent) to pocket its loot — ammo,
+medkits, the occasional access card — and read any clue it holds. Some internal
+doors start **sealed**: a keycard lock opens for anyone carrying an access card
+(found by searching); a hack lock yields to an Electronics check, a significant
+action that effectively needs the engineer (Kade) or scout (Rell). A padlock
+marks a sealed door — amber for a keycard lock, cyan for a hackable one. An
+access card is generic master access and is not consumed by use. See
+[`web/src/solo/loot.ts`](../web/src/solo/loot.ts).
+
 ### Defending
 
-Doors start open so the horde can roam. **Close a door** or **shove a crate**
-into a corridor to physically block monster pathing — barricade a chokepoint and
-fight them in the gap.
+Unlocked doors start open so the horde can roam. **Close a door** or **shove a
+crate** into a corridor to physically block monster pathing — barricade a
+chokepoint and fight them in the gap. A sealed room makes a temporary refuge once
+you're through its lock.
 
 ## Shape
 
@@ -50,6 +66,7 @@ web/src/solo/combat.ts     SRD attack/damage/first-aid resolution (pure)
 web/src/solo/reducer.ts    (state, action[, rng]) => state — the whole game loop
 web/src/solo/ai.ts         decideMonster: path toward + attack the nearest PC
 web/src/solo/grid.ts       walkability derived from the generated deck
+web/src/solo/loot.ts       searchable containers + locked doors (seeded, pure)
 web/src/solo/characters.ts the four pre-gens · gear.ts weapons/armour · monsters.ts
 web/src/solo/ccg.ts        adapter for cepheus-character-generator characters
 web/src/solo.ts            canvas render, camera (zoom/pan), the turn driver

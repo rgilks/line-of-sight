@@ -181,6 +181,24 @@ export const applyDamage = (entity: Entity, amount: number): Entity => {
   return {...entity, aim: 0, stats: {str: Math.max(0, str), dex: Math.max(0, dex), end: Math.max(0, end)}}
 }
 
+/** Difficulty of a door-hack throw (Cepheus Average, 8+). */
+export const HACK_TARGET = 8
+/** The skill a door-hack throw keys off (engineers carry it; scouts a little). */
+export const HACK_SKILL = 'Electronics'
+export type HackResult = {roll: number; dice: [number, number]; skill: number; success: boolean}
+
+/**
+ * Attempt to hack a sealed door's lock: 2D6 + Electronics skill vs 8+. We model
+ * only physical characteristics, so there is no INT/EDU DM — the skill carries the
+ * throw, and the SRD unskilled −3 means it effectively takes the engineer.
+ */
+export const resolveHack = (hacker: Entity, rng?: Rng): HackResult => {
+  const [d1, d2] = roll2D6(rng)
+  const skill = hacker.skills[HACK_SKILL] ?? -3
+  const roll = d1 + d2 + skill
+  return {roll, dice: [d1, d2], skill, success: roll >= HACK_TARGET}
+}
+
 export type FirstAidResult = {roll: number; effect: number; heal: number}
 
 /** A Medicine check; on success restores 2 × Effect characteristic points. */
