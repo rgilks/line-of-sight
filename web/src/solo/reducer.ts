@@ -1,7 +1,14 @@
-// The single-player game reducer: a total, pure (state, action) → state. The only
-// impurity is an injectable `rng` for the combat throws (defaults to Math.random);
-// pass a seeded rng to replay a fight deterministically. Animation/timing lives in
-// the DOM shell (solo.ts), never here.
+// The single-player game engine, event-sourced to match the multiplayer
+// GameTable. `decide(state, action, rng)` validates a command and emits
+// SoloEvents — facts carrying the *resolved outcomes* (the rolled dice, the final
+// position, the damage dealt). `foldSolo(state, event)` applies an event
+// deterministically with NO rng. So a game replays from its event log faithfully
+// even across rule changes, and the SoloRoom persists/replays events exactly like
+// the table does. `reduce` is kept as a thin (decide → fold) shim for the local
+// /solo driver and the tests, so their behaviour is unchanged.
+//
+// The only impurity is the injectable `rng` for combat throws, and it lives only
+// in `decide` (where outcomes are rolled into events); fold never touches it.
 import {distanceToOccluder, doorReachForGrid, visibilityPolygon} from '../../../core/los'
 import {orderByInitiative, pointInPolygon} from '../../../core/rules'
 import {roll2D6, type Rng} from '../../../core/dice'
@@ -27,23 +34,22 @@ import {
   turnBudgetPx,
   withinReach,
   type Action,
+  type AttackFx,
   type CombatStance,
   type Entity,
+  type GroundItem,
   type ItemStack,
   type SoloState
 } from './model'
 
 const LOG_KEEP = 60
-const log = (state: SoloState, ...lines: string[]): SoloState => ({
-  ...state,
-  log: [...state.log, ...lines].slice(-LOG_KEEP)
-})
+const appendLines = (state: SoloState, lines: ReadonlyArray<string>): SoloState =>
+  lines.length === 0 ? state : {...state, log: [...state.log, ...lines].slice(-LOG_KEEP)}
 
 const cellKey = (cx: number, cy: number): string => `${cx},${cy}`
 
-// Cepheus action economy (see model.ts). The active entity's turn is a single
-// budget (moveRemainingPx). A minor action costs one 6 m move's worth; a
-// significant action costs two. Movement spends it continuously.
+// Cepheus action economy (see model.ts). A minor action costs one 6 m move's
+// worth; a significant action costs two.
 const minorCost = (state: SoloState, actor: Entity): number => moveBudgetPx(state.grid.gridScale, actor.moveMeters)
 const significantCost = (state: SoloState, actor: Entity): number => SIGNIFICANT_ACTION_COST * minorCost(state, actor)
 const enough = (state: SoloState, cost: number): boolean => state.moveRemainingPx + 0.5 >= cost
@@ -85,247 +91,6 @@ const checkLoss = (state: SoloState): SoloState => {
 const replace = (state: SoloState, id: string, change: (e: Entity) => Entity): Entity[] =>
   state.entities.map((e) => (e.id === id ? change(e) : e))
 
-// --- movement --------------------------------------------------------------
-const applyMove = (state: SoloState, to: {x: number; y: number}): SoloState => {
-  const actor = activeEntity(state)
-  if (!actor || !isActive(actor)) return state
-
-  const cell = cellOf(state.grid, to.x, to.y)
-  if (!isFloor(state.grid, cell.cx, cell.cy)) return log(state, 'That way is blocked.')
-
-  const dest = cellCenter(state.grid, cell.cx, cell.cy)
-  const distance = Math.hypot(dest.x - actor.x, dest.y - actor.y)
-  const moveCost = distance * movementCostMultiplier(actor)
-  if (distance < 0.5) return state
-  if (moveCost > state.moveRemainingPx + 0.5) return log(state, 'Out of movement this turn.')
-  if (!canSee(state, actor, dest.x, dest.y)) return log(state, "Can't move where you can't see.")
-  if (blockedCells(state, actor).has(cellKey(cell.cx, cell.cy))) return log(state, 'Something is in the way.')
-
-  return {
-    ...state,
-    entities: replace(state, actor.id, (e) => ({...e, x: dest.x, y: dest.y, aim: 0})), // moving breaks aim
-    moveRemainingPx: state.moveRemainingPx - moveCost
-  }
-}
-
-// --- stance ----------------------------------------------------------------
-const applySetStance = (state: SoloState, stance: CombatStance): SoloState => {
-  const actor = activeEntity(state)
-  if (!actor || !isActive(actor)) return state
-  if (actor.stance === stance) return state
-  const cost = minorCost(state, actor)
-  if (!enough(state, cost)) return log(state, `${actor.label} has no actions left this turn.`)
-  return log(
-    {
-      ...state,
-      entities: replace(state, actor.id, (e) => ({...e, stance})),
-      moveRemainingPx: state.moveRemainingPx - cost
-    },
-    `${actor.label} goes ${stanceLabel(stance).toLowerCase()}.`
-  )
-}
-
-// --- aim -------------------------------------------------------------------
-// Take aim: a significant action that adds +1 to the next attack (up to AIM_MAX),
-// stacking across rounds. Lost by moving or taking a wound; spent on the next shot.
-const applyAim = (state: SoloState): SoloState => {
-  const actor = activeEntity(state)
-  if (!actor || !isActive(actor) || state.actionUsed) return state
-  if (!enough(state, significantCost(state, actor))) return log(state, `${actor.label} has no action left this turn.`)
-  const aim = Math.min(actor.aim + 1, AIM_MAX)
-  return log(
-    {
-      ...state,
-      entities: replace(state, actor.id, (e) => ({...e, aim})),
-      actionUsed: true,
-      moveRemainingPx: state.moveRemainingPx - significantCost(state, actor)
-    },
-    `${actor.label} takes aim (+${aim}).`
-  )
-}
-
-// --- doors -----------------------------------------------------------------
-const applyToggleDoor = (state: SoloState, doorId: string, rng: Rng): SoloState => {
-  const actor = activeEntity(state)
-  if (!actor || !isActive(actor)) return state
-  const door = state.map.occluders.find((o) => o.id === doorId && o.type === 'door')
-  if (!door) return state
-  if (distanceToOccluder({x: actor.x, y: actor.y}, door) > doorReachForGrid(state.grid.gridScale)) {
-    return log(state, 'Too far from that door.')
-  }
-  const currentlyOpen = state.doorStates[doorId]?.open ?? false
-  const lock = state.locks[doorId]
-
-  // Opening a still-sealed door needs a keycard (key lock) or a successful hack
-  // (hack lock). Closing one is always allowed — only opening is gated.
-  if (!currentlyOpen && lock && !lock.unlocked) {
-    if (lock.kind === 'key') {
-      if (!hasKeycard(actor, lock.keyId)) {
-        return log(state, `That door is locked — needs a ${keyLabel(lock.keyId)} keycard.`)
-      }
-      const cost = minorCost(state, actor) // badging in is a minor action
-      if (!enough(state, cost)) return log(state, `${actor.label} has no actions left this turn.`)
-      return log(
-        {
-          ...state,
-          locks: {...state.locks, [doorId]: {...lock, unlocked: true}},
-          doorStates: {...state.doorStates, [doorId]: {open: true}},
-          moveRemainingPx: state.moveRemainingPx - cost
-        },
-        `${actor.label} badges the ${keyLabel(lock.keyId)} lock — access granted.`
-      )
-    }
-    // Hack lock: a significant action plus an Electronics check.
-    if (state.actionUsed) return state
-    const cost = significantCost(state, actor)
-    if (!enough(state, cost)) return log(state, `${actor.label} has no action left this turn.`)
-    const h = resolveHack(actor, rng)
-    const sign = h.skill >= 0 ? `+${h.skill}` : `${h.skill}`
-    const detail = `(2D6 ${h.dice[0]}+${h.dice[1]} ${sign} Electronics = ${h.roll} vs ${HACK_TARGET})`
-    if (!h.success) {
-      return log(
-        {...state, actionUsed: true, moveRemainingPx: state.moveRemainingPx - cost},
-        `${actor.label} fails to hack the lock ${detail}.`
-      )
-    }
-    return log(
-      {
-        ...state,
-        locks: {...state.locks, [doorId]: {...lock, unlocked: true}},
-        doorStates: {...state.doorStates, [doorId]: {open: true}},
-        actionUsed: true,
-        moveRemainingPx: state.moveRemainingPx - cost
-      },
-      `${actor.label} hacks the lock — ACCESS GRANTED ${detail}.`
-    )
-  }
-
-  // Normal door (or one already unlocked): toggle as a minor action.
-  const cost = minorCost(state, actor)
-  if (!enough(state, cost)) return log(state, `${actor.label} has no actions left this turn.`)
-  const open = !currentlyOpen
-  return log(
-    {...state, doorStates: {...state.doorStates, [doorId]: {open}}, moveRemainingPx: state.moveRemainingPx - cost},
-    open ? `${actor.label} opens a door.` : `${actor.label} closes a door.`
-  )
-}
-
-// --- attack ----------------------------------------------------------------
-const applyAttack = (state: SoloState, targetId: string, rng: Rng): SoloState => {
-  const actor = activeEntity(state)
-  if (!actor || !isActive(actor) || state.actionUsed) return state
-  if (!enough(state, significantCost(state, actor))) return log(state, `${actor.label} has no action left this turn.`)
-  const target = entityById(state, targetId)
-  if (!target || target.faction === actor.faction || isDead(target)) return state
-
-  const weapon = weaponById(actor.weaponId)
-  if (weapon.magazine !== undefined && actor.loadedRounds <= 0) {
-    return log(state, `${actor.label} is out of ammo — reload!`)
-  }
-
-  // You can only fire on a foe you can personally see — not one only an ally has
-  // line of sight to. No shooting through walls.
-  if (!canSeePoint(state, actor, target.x, target.y)) {
-    return log(state, `${actor.label} has no line of sight to ${target.label}.`)
-  }
-
-  const result = resolveAttack(actor, target, rng, state.grid.gridScale)
-  if (result.outOfRange) return log(state, `${target.label} is out of range.`)
-
-  const entities = state.entities.map((e) => {
-    let next = e
-    if (e.id === actor.id) {
-      next = {...next, aim: 0} // the shot is taken — spend the aim
-      if (weapon.magazine !== undefined) next = {...next, loadedRounds: next.loadedRounds - 1}
-    }
-    if (e.id === target.id && result.hit) next = applyDamage(next, result.damage) // applyDamage also clears the target's aim
-    return next
-  })
-
-  const lines = attackLog(actor, target, result)
-  const after = entities.find((e) => e.id === targetId)
-  if (after && isDead(after)) lines.push(`${target.label} is killed.`)
-  else if (after && isDown(after)) lines.push(`${target.label} is down.`)
-
-  // Record the shot so the DOM shell can play the matching sound + visual effect.
-  const lastAttack = {
-    attackerId: actor.id,
-    targetId,
-    weaponId: weapon.id,
-    hit: result.hit,
-    effect: result.effect,
-    damage: result.damage,
-    killed: !!(after && isDead(after))
-  }
-
-  return checkLoss(
-    log(
-      {
-        ...state,
-        entities,
-        actionUsed: true,
-        moveRemainingPx: state.moveRemainingPx - significantCost(state, actor),
-        lastAttack
-      },
-      ...lines
-    )
-  )
-}
-
-// --- reload ----------------------------------------------------------------
-const applyReload = (state: SoloState): SoloState => {
-  const actor = activeEntity(state)
-  if (!actor || !isActive(actor)) return state
-  const weapon = weaponById(actor.weaponId)
-  if (weapon.magazine === undefined) return state
-  const need = weapon.magazine - actor.loadedRounds
-  if (need <= 0) return log(state, `${actor.label}'s weapon is already loaded.`)
-  const stackIndex = actor.inventory.findIndex((s) => s.kind === 'ammo' && s.weaponId === actor.weaponId && s.count > 0)
-  if (stackIndex < 0) return log(state, `${actor.label} has no spare ammo.`)
-  const cost = minorCost(state, actor) // reloading is a minor action
-  if (!enough(state, cost)) return log(state, `${actor.label} has no actions left this turn.`)
-  const take = Math.min(need, actor.inventory[stackIndex].count)
-  const inventory = actor.inventory
-    .map((s, i) => (i === stackIndex ? {...s, count: s.count - take} : s))
-    .filter((s) => s.count > 0)
-  return log(
-    {
-      ...state,
-      entities: replace(state, actor.id, (e) => ({...e, loadedRounds: e.loadedRounds + take, inventory})),
-      moveRemainingPx: state.moveRemainingPx - cost
-    },
-    `${actor.label} reloads (${take} rounds).`
-  )
-}
-
-// --- medkit (first aid) ----------------------------------------------------
-const applyUseMedkit = (state: SoloState, targetId: string, rng: Rng): SoloState => {
-  const actor = activeEntity(state)
-  if (!actor || !isActive(actor) || state.actionUsed) return state
-  if (!enough(state, significantCost(state, actor))) return log(state, `${actor.label} has no action left this turn.`)
-  const medIndex = actor.inventory.findIndex((s) => s.kind === 'medkit' && s.count > 0)
-  if (medIndex < 0) return log(state, `${actor.label} has no medkit.`)
-  const target = entityById(state, targetId)
-  if (!target || target.faction !== 'pc' || isDead(target)) return state
-  if (!withinReach(actor, target, state.grid.gridScale)) return log(state, 'Move next to your patient.')
-
-  const aid = resolveFirstAid(actor, rng)
-  const spentInventory = actor.inventory
-    .map((s, i) => (i === medIndex ? {...s, count: s.count - 1} : s))
-    .filter((s) => s.count > 0)
-  const entities = state.entities.map((e) => {
-    let next = e
-    if (e.id === actor.id) next = {...next, inventory: spentInventory}
-    if (e.id === target.id && aid.heal > 0) next = applyHeal(next, aid.heal)
-    return next
-  })
-  return log(
-    {...state, entities, actionUsed: true, moveRemainingPx: state.moveRemainingPx - significantCost(state, actor)},
-    aid.heal > 0 ? `${actor.label} treats ${target.label} (+${aid.heal}).` : `${actor.label}'s first aid fails.`
-  )
-}
-
-// --- ground items ----------------------------------------------------------
 const mergeStack = (inventory: ItemStack[], stack: ItemStack): ItemStack[] => {
   const index = inventory.findIndex(
     (s) => s.kind === stack.kind && s.weaponId === stack.weaponId && s.keyId === stack.keyId
@@ -345,159 +110,566 @@ const lootLabel = (stack: ItemStack): string =>
           ? (ARMORS[stack.armorId ?? '']?.name ?? 'armour')
           : `${stack.count} medkit${stack.count > 1 ? 's' : ''}`
 
-// Equip a found weapon or armour on `actor`, dropping the gear it replaces onto the
-// floor (so nothing is lost and the squad can redistribute). Natural weapons have
-// no pickup, so they're never dropped. Returns the updated entities + ground.
-const equipGear = (
-  state: SoloState,
-  actor: Entity,
-  stack: ItemStack
-): {entities: Entity[]; ground: SoloState['ground']; lines: string[]} => {
+// The resolved equip outcome: which gear the actor ends with, the gear it drops
+// to the floor (so nothing is lost), and the log line(s). Pure — fold just
+// applies it. The dropped item's id derives from `state.ground.length`, so the
+// caller passes a state whose ground already reflects any item being picked up.
+type EquipOutcome = {
+  equip: {weaponId?: string; armorId?: string | null; loadedRounds?: number}
+  dropped: GroundItem | null
+  lines: string[]
+}
+const equipGear = (state: SoloState, actor: Entity, stack: ItemStack): EquipOutcome => {
   const dropId = `g-old-${actor.id}-${state.ground.length}`
   if (stack.kind === 'weapon' && stack.weaponId) {
     const weapon = weaponById(stack.weaponId)
     const old = weaponById(actor.weaponId)
-    const ground =
+    const dropped =
       old.id === weapon.id
-        ? state.ground
-        : [
-            ...state.ground,
-            {id: dropId, x: actor.x, y: actor.y, stack: {kind: 'weapon' as const, weaponId: old.id, count: 1}}
-          ]
-    const entities = replace(state, actor.id, (e) => ({...e, weaponId: weapon.id, loadedRounds: weapon.magazine ?? 0}))
+        ? null
+        : {id: dropId, x: actor.x, y: actor.y, stack: {kind: 'weapon' as const, weaponId: old.id, count: 1}}
     return {
-      entities,
-      ground,
+      equip: {weaponId: weapon.id, loadedRounds: weapon.magazine ?? 0},
+      dropped,
       lines: [`${actor.label} takes up the ${weapon.name}${weapon.magazine ? ' (loaded)' : ''}.`]
     }
   }
   const armor = ARMORS[stack.armorId ?? '']
-  const ground = actor.armorId
-    ? [
-        ...state.ground,
-        {id: dropId, x: actor.x, y: actor.y, stack: {kind: 'armor' as const, armorId: actor.armorId, count: 1}}
-      ]
-    : state.ground
-  const entities = replace(state, actor.id, (e) => ({...e, armorId: stack.armorId ?? null}))
-  return {entities, ground, lines: [`${actor.label} dons ${armor?.name ?? 'armour'} (AR ${armor?.ar ?? 0}).`]}
+  const dropped = actor.armorId
+    ? {id: dropId, x: actor.x, y: actor.y, stack: {kind: 'armor' as const, armorId: actor.armorId, count: 1}}
+    : null
+  return {
+    equip: {armorId: stack.armorId ?? null},
+    dropped,
+    lines: [`${actor.label} dons ${armor?.name ?? 'armour'} (AR ${armor?.ar ?? 0}).`]
+  }
 }
 
-const applyPickUp = (state: SoloState, groundItemId: string): SoloState => {
+// === Events: facts carrying resolved outcomes (the log of what happened). ===
+type EquipFields = {weaponId?: string; armorId?: string | null; loadedRounds?: number}
+export type SoloEvent =
+  | {t: 'Moved'; actorId: string; x: number; y: number; cost: number}
+  | {t: 'StanceSet'; actorId: string; stance: CombatStance; cost: number; line: string}
+  | {t: 'Aimed'; actorId: string; aim: number; cost: number; line: string}
+  | {
+      t: 'DoorChanged'
+      doorId: string | null
+      open: boolean | null
+      unlock: boolean
+      spendAction: boolean
+      cost: number
+      line: string
+    }
+  | {
+      t: 'Attacked'
+      attackerId: string
+      targetId: string
+      hit: boolean
+      damage: number
+      spendAmmo: boolean
+      fx: AttackFx
+      cost: number
+      lines: string[]
+    }
+  | {t: 'Reloaded'; actorId: string; stackIndex: number; take: number; cost: number; line: string}
+  | {t: 'Healed'; actorId: string; targetId: string; medIndex: number; heal: number; cost: number; line: string}
+  | {
+      t: 'PickedUp'
+      actorId: string
+      groundItemId: string
+      equip: EquipFields | null
+      stack: ItemStack | null
+      dropped: GroundItem | null
+      cost: number
+      lines: string[]
+    }
+  | {t: 'Dropped'; actorId: string; stackIndex: number; item: GroundItem; line: string}
+  | {
+      t: 'Searched'
+      actorId: string
+      containerId: string
+      equip: EquipFields | null
+      stack: ItemStack | null
+      dropped: GroundItem | null
+      cost: number
+      lines: string[]
+    }
+  | {t: 'PropPushed'; propId: string; x: number; y: number; cost: number; line: string}
+  | {t: 'TurnAdvanced'; turnPtr: number; round: number}
+  | {t: 'WaveAdded'; entities: Entity[]; wave: number; round: number; turnPtr: number; line: string}
+  | {t: 'Won'}
+
+const applyEquip = (state: SoloState, actorId: string, equip: EquipFields): Entity[] =>
+  replace(state, actorId, (e) => ({
+    ...e,
+    ...(equip.weaponId !== undefined ? {weaponId: equip.weaponId, loadedRounds: equip.loadedRounds ?? 0} : {}),
+    ...(equip.armorId !== undefined ? {armorId: equip.armorId} : {})
+  }))
+
+export const foldSolo = (state: SoloState, event: SoloEvent): SoloState => {
+  switch (event.t) {
+    case 'Moved':
+      return {
+        ...state,
+        entities: replace(state, event.actorId, (e) => ({...e, x: event.x, y: event.y, aim: 0})),
+        moveRemainingPx: state.moveRemainingPx - event.cost
+      }
+    case 'StanceSet':
+      return appendLines(
+        {
+          ...state,
+          entities: replace(state, event.actorId, (e) => ({...e, stance: event.stance})),
+          moveRemainingPx: state.moveRemainingPx - event.cost
+        },
+        [event.line]
+      )
+    case 'Aimed':
+      return appendLines(
+        {
+          ...state,
+          entities: replace(state, event.actorId, (e) => ({...e, aim: event.aim})),
+          actionUsed: true,
+          moveRemainingPx: state.moveRemainingPx - event.cost
+        },
+        [event.line]
+      )
+    case 'DoorChanged': {
+      let next: SoloState = {...state, moveRemainingPx: state.moveRemainingPx - event.cost}
+      if (event.spendAction) next = {...next, actionUsed: true}
+      if (event.doorId && event.unlock) {
+        next = {...next, locks: {...next.locks, [event.doorId]: {...next.locks[event.doorId], unlocked: true}}}
+      }
+      if (event.doorId && event.open !== null) {
+        next = {...next, doorStates: {...next.doorStates, [event.doorId]: {open: event.open}}}
+      }
+      return appendLines(next, [event.line])
+    }
+    case 'Attacked': {
+      const entities = state.entities.map((e) => {
+        let next = e
+        if (e.id === event.attackerId) {
+          next = {...next, aim: 0}
+          if (event.spendAmmo) next = {...next, loadedRounds: next.loadedRounds - 1}
+        }
+        if (e.id === event.targetId && event.hit) next = applyDamage(next, event.damage)
+        return next
+      })
+      return checkLoss(
+        appendLines(
+          {
+            ...state,
+            entities,
+            actionUsed: true,
+            moveRemainingPx: state.moveRemainingPx - event.cost,
+            lastAttack: event.fx
+          },
+          event.lines
+        )
+      )
+    }
+    case 'Reloaded': {
+      const actor = entityById(state, event.actorId)
+      if (!actor) return state
+      const inventory = actor.inventory
+        .map((s, i) => (i === event.stackIndex ? {...s, count: s.count - event.take} : s))
+        .filter((s) => s.count > 0)
+      return appendLines(
+        {
+          ...state,
+          entities: replace(state, event.actorId, (e) => ({
+            ...e,
+            loadedRounds: e.loadedRounds + event.take,
+            inventory
+          })),
+          moveRemainingPx: state.moveRemainingPx - event.cost
+        },
+        [event.line]
+      )
+    }
+    case 'Healed': {
+      const actor = entityById(state, event.actorId)
+      if (!actor) return state
+      const spent = actor.inventory
+        .map((s, i) => (i === event.medIndex ? {...s, count: s.count - 1} : s))
+        .filter((s) => s.count > 0)
+      const entities = state.entities.map((e) => {
+        let next = e
+        if (e.id === event.actorId) next = {...next, inventory: spent}
+        if (e.id === event.targetId && event.heal > 0) next = applyHeal(next, event.heal)
+        return next
+      })
+      return appendLines({...state, entities, actionUsed: true, moveRemainingPx: state.moveRemainingPx - event.cost}, [
+        event.line
+      ])
+    }
+    case 'PickedUp': {
+      let ground = state.ground.filter((g) => g.id !== event.groundItemId)
+      if (event.dropped) ground = [...ground, event.dropped]
+      let entities = state.entities
+      if (event.equip) entities = applyEquip(state, event.actorId, event.equip)
+      else if (event.stack) {
+        const stack = event.stack
+        entities = replace(state, event.actorId, (e) => ({...e, inventory: mergeStack(e.inventory, stack)}))
+      }
+      return appendLines({...state, entities, ground, moveRemainingPx: state.moveRemainingPx - event.cost}, event.lines)
+    }
+    case 'Dropped':
+      return appendLines(
+        {
+          ...state,
+          entities: replace(state, event.actorId, (e) => ({
+            ...e,
+            inventory: e.inventory.filter((_, i) => i !== event.stackIndex)
+          })),
+          ground: [...state.ground, event.item]
+        },
+        [event.line]
+      )
+    case 'Searched': {
+      const containers = state.containers.map((c) => (c.id === event.containerId ? {...c, searched: true} : c))
+      let ground = state.ground
+      if (event.dropped) ground = [...ground, event.dropped]
+      let entities = state.entities
+      if (event.equip) entities = applyEquip(state, event.actorId, event.equip)
+      else if (event.stack) {
+        const stack = event.stack
+        entities = replace(state, event.actorId, (e) => ({...e, inventory: mergeStack(e.inventory, stack)}))
+      }
+      return appendLines(
+        {...state, containers, entities, ground, moveRemainingPx: state.moveRemainingPx - event.cost},
+        event.lines
+      )
+    }
+    case 'PropPushed':
+      return appendLines(
+        {
+          ...state,
+          props: state.props.map((p) => (p.id === event.propId ? {...p, x: event.x, y: event.y} : p)),
+          actionUsed: true,
+          moveRemainingPx: state.moveRemainingPx - event.cost
+        },
+        [event.line]
+      )
+    case 'TurnAdvanced':
+      return checkLoss({
+        ...state,
+        turnPtr: event.turnPtr,
+        round: event.round,
+        moveRemainingPx: turnBudgetPx(state.grid.gridScale, state.entities[event.turnPtr]?.moveMeters),
+        actionUsed: false
+      })
+    case 'WaveAdded':
+      return appendLines(
+        {
+          ...state,
+          entities: event.entities,
+          wave: event.wave,
+          round: event.round,
+          turnPtr: event.turnPtr,
+          moveRemainingPx: turnBudgetPx(state.grid.gridScale, event.entities[event.turnPtr]?.moveMeters),
+          actionUsed: false
+        },
+        [event.line]
+      )
+    case 'Won':
+      return {...state, phase: {t: 'won'}}
+  }
+}
+
+// === decide: validate a command, roll outcomes, emit events (or reject). ===
+// `rejected` carries a feedback message (or null for a silent no-op); the shim
+// turns a message into a log line, and the SoloRoom returns it to the phone.
+export type DecideResult = {events: SoloEvent[]} | {rejected: string | null}
+const ok = (event: SoloEvent): DecideResult => ({events: [event]})
+const reject = (message: string | null = null): DecideResult => ({rejected: message})
+
+const decideMove = (state: SoloState, to: {x: number; y: number}): DecideResult => {
   const actor = activeEntity(state)
-  if (!actor || !isActive(actor)) return state
+  if (!actor || !isActive(actor)) return reject()
+  const cell = cellOf(state.grid, to.x, to.y)
+  if (!isFloor(state.grid, cell.cx, cell.cy)) return reject('That way is blocked.')
+  const dest = cellCenter(state.grid, cell.cx, cell.cy)
+  const distance = Math.hypot(dest.x - actor.x, dest.y - actor.y)
+  const moveCost = distance * movementCostMultiplier(actor)
+  if (distance < 0.5) return reject()
+  if (moveCost > state.moveRemainingPx + 0.5) return reject('Out of movement this turn.')
+  if (!canSee(state, actor, dest.x, dest.y)) return reject("Can't move where you can't see.")
+  if (blockedCells(state, actor).has(cellKey(cell.cx, cell.cy))) return reject('Something is in the way.')
+  return ok({t: 'Moved', actorId: actor.id, x: dest.x, y: dest.y, cost: moveCost})
+}
+
+const decideStance = (state: SoloState, stance: CombatStance): DecideResult => {
+  const actor = activeEntity(state)
+  if (!actor || !isActive(actor)) return reject()
+  if (actor.stance === stance) return reject()
+  const cost = minorCost(state, actor)
+  if (!enough(state, cost)) return reject(`${actor.label} has no actions left this turn.`)
+  return ok({
+    t: 'StanceSet',
+    actorId: actor.id,
+    stance,
+    cost,
+    line: `${actor.label} goes ${stanceLabel(stance).toLowerCase()}.`
+  })
+}
+
+const decideAim = (state: SoloState): DecideResult => {
+  const actor = activeEntity(state)
+  if (!actor || !isActive(actor) || state.actionUsed) return reject()
+  const cost = significantCost(state, actor)
+  if (!enough(state, cost)) return reject(`${actor.label} has no action left this turn.`)
+  const aim = Math.min(actor.aim + 1, AIM_MAX)
+  return ok({t: 'Aimed', actorId: actor.id, aim, cost, line: `${actor.label} takes aim (+${aim}).`})
+}
+
+const decideDoor = (state: SoloState, doorId: string, rng: Rng): DecideResult => {
+  const actor = activeEntity(state)
+  if (!actor || !isActive(actor)) return reject()
+  const door = state.map.occluders.find((o) => o.id === doorId && o.type === 'door')
+  if (!door) return reject()
+  if (distanceToOccluder({x: actor.x, y: actor.y}, door) > doorReachForGrid(state.grid.gridScale)) {
+    return reject('Too far from that door.')
+  }
+  const currentlyOpen = state.doorStates[doorId]?.open ?? false
+  const lock = state.locks[doorId]
+  if (!currentlyOpen && lock && !lock.unlocked) {
+    if (lock.kind === 'key') {
+      if (!hasKeycard(actor, lock.keyId))
+        return reject(`That door is locked — needs a ${keyLabel(lock.keyId)} keycard.`)
+      const cost = minorCost(state, actor)
+      if (!enough(state, cost)) return reject(`${actor.label} has no actions left this turn.`)
+      return ok({
+        t: 'DoorChanged',
+        doorId,
+        open: true,
+        unlock: true,
+        spendAction: false,
+        cost,
+        line: `${actor.label} badges the ${keyLabel(lock.keyId)} lock — access granted.`
+      })
+    }
+    if (state.actionUsed) return reject()
+    const cost = significantCost(state, actor)
+    if (!enough(state, cost)) return reject(`${actor.label} has no action left this turn.`)
+    const h = resolveHack(actor, rng)
+    const sign = h.skill >= 0 ? `+${h.skill}` : `${h.skill}`
+    const detail = `(2D6 ${h.dice[0]}+${h.dice[1]} ${sign} Electronics = ${h.roll} vs ${HACK_TARGET})`
+    if (!h.success) {
+      return ok({
+        t: 'DoorChanged',
+        doorId: null,
+        open: null,
+        unlock: false,
+        spendAction: true,
+        cost,
+        line: `${actor.label} fails to hack the lock ${detail}.`
+      })
+    }
+    return ok({
+      t: 'DoorChanged',
+      doorId,
+      open: true,
+      unlock: true,
+      spendAction: true,
+      cost,
+      line: `${actor.label} hacks the lock — ACCESS GRANTED ${detail}.`
+    })
+  }
+  const cost = minorCost(state, actor)
+  if (!enough(state, cost)) return reject(`${actor.label} has no actions left this turn.`)
+  const open = !currentlyOpen
+  return ok({
+    t: 'DoorChanged',
+    doorId,
+    open,
+    unlock: false,
+    spendAction: false,
+    cost,
+    line: open ? `${actor.label} opens a door.` : `${actor.label} closes a door.`
+  })
+}
+
+const decideAttack = (state: SoloState, targetId: string, rng: Rng): DecideResult => {
+  const actor = activeEntity(state)
+  if (!actor || !isActive(actor) || state.actionUsed) return reject()
+  if (!enough(state, significantCost(state, actor))) return reject(`${actor.label} has no action left this turn.`)
+  const target = entityById(state, targetId)
+  if (!target || target.faction === actor.faction || isDead(target)) return reject()
+  const weapon = weaponById(actor.weaponId)
+  if (weapon.magazine !== undefined && actor.loadedRounds <= 0) return reject(`${actor.label} is out of ammo — reload!`)
+  if (!canSeePoint(state, actor, target.x, target.y))
+    return reject(`${actor.label} has no line of sight to ${target.label}.`)
+  const result = resolveAttack(actor, target, rng, state.grid.gridScale)
+  if (result.outOfRange) return reject(`${target.label} is out of range.`)
+  const damaged = result.hit ? applyDamage(target, result.damage) : target
+  const lines = attackLog(actor, target, result)
+  if (isDead(damaged)) lines.push(`${target.label} is killed.`)
+  else if (isDown(damaged)) lines.push(`${target.label} is down.`)
+  const fx: AttackFx = {
+    attackerId: actor.id,
+    targetId,
+    weaponId: weapon.id,
+    hit: result.hit,
+    effect: result.effect,
+    damage: result.damage,
+    killed: isDead(damaged)
+  }
+  return ok({
+    t: 'Attacked',
+    attackerId: actor.id,
+    targetId,
+    hit: result.hit,
+    damage: result.damage,
+    spendAmmo: weapon.magazine !== undefined,
+    fx,
+    cost: significantCost(state, actor),
+    lines
+  })
+}
+
+const decideReload = (state: SoloState): DecideResult => {
+  const actor = activeEntity(state)
+  if (!actor || !isActive(actor)) return reject()
+  const weapon = weaponById(actor.weaponId)
+  if (weapon.magazine === undefined) return reject()
+  const need = weapon.magazine - actor.loadedRounds
+  if (need <= 0) return reject(`${actor.label}'s weapon is already loaded.`)
+  const stackIndex = actor.inventory.findIndex((s) => s.kind === 'ammo' && s.weaponId === actor.weaponId && s.count > 0)
+  if (stackIndex < 0) return reject(`${actor.label} has no spare ammo.`)
+  const cost = minorCost(state, actor)
+  if (!enough(state, cost)) return reject(`${actor.label} has no actions left this turn.`)
+  const take = Math.min(need, actor.inventory[stackIndex].count)
+  return ok({
+    t: 'Reloaded',
+    actorId: actor.id,
+    stackIndex,
+    take,
+    cost,
+    line: `${actor.label} reloads (${take} rounds).`
+  })
+}
+
+const decideMedkit = (state: SoloState, targetId: string, rng: Rng): DecideResult => {
+  const actor = activeEntity(state)
+  if (!actor || !isActive(actor) || state.actionUsed) return reject()
+  if (!enough(state, significantCost(state, actor))) return reject(`${actor.label} has no action left this turn.`)
+  const medIndex = actor.inventory.findIndex((s) => s.kind === 'medkit' && s.count > 0)
+  if (medIndex < 0) return reject(`${actor.label} has no medkit.`)
+  const target = entityById(state, targetId)
+  if (!target || target.faction !== 'pc' || isDead(target)) return reject()
+  if (!withinReach(actor, target, state.grid.gridScale)) return reject('Move next to your patient.')
+  const aid = resolveFirstAid(actor, rng)
+  return ok({
+    t: 'Healed',
+    actorId: actor.id,
+    targetId,
+    medIndex,
+    heal: aid.heal,
+    cost: significantCost(state, actor),
+    line: aid.heal > 0 ? `${actor.label} treats ${target.label} (+${aid.heal}).` : `${actor.label}'s first aid fails.`
+  })
+}
+
+const decidePickUp = (state: SoloState, groundItemId: string): DecideResult => {
+  const actor = activeEntity(state)
+  if (!actor || !isActive(actor)) return reject()
   const item = state.ground.find((g) => g.id === groundItemId)
-  if (!item) return state
-  if (Math.hypot(actor.x - item.x, actor.y - item.y) > 1.6 * state.grid.gridScale) {
-    return log(state, 'Too far to pick that up.')
-  }
-  const cost = minorCost(state, actor) // picking up is a minor action
-  if (!enough(state, cost)) return log(state, `${actor.label} has no actions left this turn.`)
-  const remaining = state.ground.filter((g) => g.id !== groundItemId)
-  // Weapons + armour equip on pickup (replaced gear drops to the floor); the rest
-  // stack into the pack.
+  if (!item) return reject()
+  if (Math.hypot(actor.x - item.x, actor.y - item.y) > 1.6 * state.grid.gridScale)
+    return reject('Too far to pick that up.')
+  const cost = minorCost(state, actor)
+  if (!enough(state, cost)) return reject(`${actor.label} has no actions left this turn.`)
   if (item.stack.kind === 'weapon' || item.stack.kind === 'armor') {
+    const remaining = state.ground.filter((g) => g.id !== groundItemId)
     const eq = equipGear({...state, ground: remaining}, actor, item.stack)
-    return log(
-      {...state, entities: eq.entities, ground: eq.ground, moveRemainingPx: state.moveRemainingPx - cost},
-      ...eq.lines
-    )
+    return ok({
+      t: 'PickedUp',
+      actorId: actor.id,
+      groundItemId,
+      equip: eq.equip,
+      stack: null,
+      dropped: eq.dropped,
+      cost,
+      lines: eq.lines
+    })
   }
-  return log(
-    {
-      ...state,
-      entities: replace(state, actor.id, (e) => ({...e, inventory: mergeStack(e.inventory, item.stack)})),
-      ground: remaining,
-      moveRemainingPx: state.moveRemainingPx - cost
-    },
-    `${actor.label} picks up ${lootLabel(item.stack)}.`
-  )
+  return ok({
+    t: 'PickedUp',
+    actorId: actor.id,
+    groundItemId,
+    equip: null,
+    stack: item.stack,
+    dropped: null,
+    cost,
+    lines: [`${actor.label} picks up ${lootLabel(item.stack)}.`]
+  })
 }
 
-const applyDrop = (state: SoloState, stackIndex: number): SoloState => {
+const decideDrop = (state: SoloState, stackIndex: number): DecideResult => {
   const actor = activeEntity(state)
-  if (!actor || !isActive(actor)) return state
+  if (!actor || !isActive(actor)) return reject()
   const stack = actor.inventory[stackIndex]
-  if (!stack) return state
+  if (!stack) return reject()
   const item = {id: `g-${actor.id}-${state.ground.length}-${stackIndex}`, x: actor.x, y: actor.y, stack}
-  return log(
-    {
-      ...state,
-      entities: replace(state, actor.id, (e) => ({...e, inventory: e.inventory.filter((_, i) => i !== stackIndex)})),
-      ground: [...state.ground, item]
-    },
-    `${actor.label} drops an item.`
-  )
+  return ok({t: 'Dropped', actorId: actor.id, stackIndex, item, line: `${actor.label} drops an item.`})
 }
 
-// --- search containers -----------------------------------------------------
-// Rummage an adjacent locker/cabinet/crate/terminal (a minor action): pocket its
-// loot and log any clue. Always succeeds when in reach — exploration is rewarded,
-// not gated behind a roll.
-const applySearch = (state: SoloState, containerId: string): SoloState => {
+const decideSearch = (state: SoloState, containerId: string): DecideResult => {
   const actor = activeEntity(state)
-  if (!actor || !isActive(actor)) return state
+  if (!actor || !isActive(actor)) return reject()
   const container = state.containers.find((c) => c.id === containerId)
-  if (!container || container.searched) return state
-  if (Math.hypot(actor.x - container.x, actor.y - container.y) > 1.6 * state.grid.gridScale) {
-    return log(state, 'Too far to search that.')
-  }
-  const cost = minorCost(state, actor) // searching is a minor action
-  if (!enough(state, cost)) return log(state, `${actor.label} has no actions left this turn.`)
-
-  const containers = state.containers.map((c) => (c.id === containerId ? {...c, searched: true} : c))
+  if (!container || container.searched) return reject()
+  if (Math.hypot(actor.x - container.x, actor.y - container.y) > 1.6 * state.grid.gridScale)
+    return reject('Too far to search that.')
+  const cost = minorCost(state, actor)
+  if (!enough(state, cost)) return reject(`${actor.label} has no actions left this turn.`)
   const lines = [`${actor.label} searches the ${containerLabel(container.kind)}.`]
-  let entities = state.entities
-  let ground = state.ground
+  let equip: EquipFields | null = null
+  let stack: ItemStack | null = null
+  let dropped: GroundItem | null = null
   if (container.loot) {
     const loot = container.loot
     lines.push(`  ${actor.label} finds ${lootLabel(loot)}.`)
     if (loot.kind === 'weapon' || loot.kind === 'armor') {
-      const eq = equipGear(state, actor, loot) // equips, dropping replaced gear nearby
-      entities = eq.entities
-      ground = eq.ground
+      const eq = equipGear(state, actor, loot)
+      equip = eq.equip
+      dropped = eq.dropped
     } else {
-      entities = replace(state, actor.id, (e) => ({...e, inventory: mergeStack(e.inventory, loot)}))
+      stack = loot
     }
   }
   if (container.clue) lines.push(`  ${container.clue}`)
   if (!container.loot && !container.clue) lines.push('  …nothing of use.')
-  return log({...state, containers, entities, ground, moveRemainingPx: state.moveRemainingPx - cost}, ...lines)
+  return ok({t: 'Searched', actorId: actor.id, containerId, equip, stack, dropped, cost, lines})
 }
 
-// --- crates / barricades ---------------------------------------------------
-// Shove an adjacent crate one cell directly away from the actor onto open floor.
-// Costs the significant action. Push crates into doorways to wall off the horde.
-const applyPush = (state: SoloState, propId: string): SoloState => {
+const decidePush = (state: SoloState, propId: string): DecideResult => {
   const actor = activeEntity(state)
-  if (!actor || !isActive(actor) || state.actionUsed) return state
-  if (!enough(state, significantCost(state, actor))) return log(state, `${actor.label} has no action left this turn.`)
+  if (!actor || !isActive(actor) || state.actionUsed) return reject()
+  if (!enough(state, significantCost(state, actor))) return reject(`${actor.label} has no action left this turn.`)
   const prop = state.props.find((p) => p.id === propId)
-  if (!prop) return state
+  if (!prop) return reject()
   const ac = cellOf(state.grid, actor.x, actor.y)
   const pc = cellOf(state.grid, prop.x, prop.y)
-  if (Math.abs(pc.cx - ac.cx) + Math.abs(pc.cy - ac.cy) !== 1) {
-    return log(state, 'Stand right next to the crate to push it.')
-  }
+  if (Math.abs(pc.cx - ac.cx) + Math.abs(pc.cy - ac.cy) !== 1)
+    return reject('Stand right next to the crate to push it.')
   const dest = {cx: pc.cx + Math.sign(pc.cx - ac.cx), cy: pc.cy + Math.sign(pc.cy - ac.cy)}
-  if (!isFloor(state.grid, dest.cx, dest.cy)) return log(state, "The crate won't budge — something behind it.")
-  if (blockedCells(state, actor).has(cellKey(dest.cx, dest.cy))) return log(state, 'Something is blocking the crate.')
+  if (!isFloor(state.grid, dest.cx, dest.cy)) return reject("The crate won't budge — something behind it.")
+  if (blockedCells(state, actor).has(cellKey(dest.cx, dest.cy))) return reject('Something is blocking the crate.')
   const at = cellCenter(state.grid, dest.cx, dest.cy)
-  return log(
-    {
-      ...state,
-      props: state.props.map((p) => (p.id === propId ? {...p, x: at.x, y: at.y} : p)),
-      actionUsed: true,
-      moveRemainingPx: state.moveRemainingPx - significantCost(state, actor)
-    },
-    `${actor.label} shoves a crate.`
-  )
+  return ok({
+    t: 'PropPushed',
+    propId,
+    x: at.x,
+    y: at.y,
+    cost: significantCost(state, actor),
+    line: `${actor.label} shoves a crate.`
+  })
 }
 
-// --- turn order ------------------------------------------------------------
-// Advance to the next living, conscious entity (PC or monster); wrap → next round.
-const applyEndTurn = (state: SoloState): SoloState => {
+const decideEndTurn = (state: SoloState): DecideResult => {
   const count = state.entities.length
-  if (count === 0) return state
+  if (count === 0) return reject()
   let ptr = state.turnPtr
   let round = state.round
   for (let step = 0; step < count; step += 1) {
@@ -508,18 +680,10 @@ const applyEndTurn = (state: SoloState): SoloState => {
     }
     if (isActive(state.entities[ptr])) break
   }
-  return checkLoss({
-    ...state,
-    turnPtr: ptr,
-    round,
-    moveRemainingPx: turnBudgetPx(state.grid.gridScale, state.entities[ptr]?.moveMeters),
-    actionUsed: false
-  })
+  return ok({t: 'TurnAdvanced', turnPtr: ptr, round})
 }
 
-// A fresh wave boards: add the monsters, re-roll initiative for everyone, and
-// hand the turn to the first living PC.
-const applyAddWave = (state: SoloState, monsters: Entity[], rng: Rng): SoloState => {
+const decideAddWave = (state: SoloState, monsters: Entity[], rng: Rng): DecideResult => {
   const rolled = [...state.entities, ...monsters].map((entity) => {
     const [a, b] = roll2D6(rng)
     return {...entity, initiative: a + b + dexDm(entity)}
@@ -529,54 +693,57 @@ const applyAddWave = (state: SoloState, monsters: Entity[], rng: Rng): SoloState
     0,
     ordered.findIndex((entity) => entity.faction === 'pc' && isActive(entity))
   )
-  return log(
-    {
-      ...state,
-      entities: ordered,
-      wave: state.wave + 1,
-      round: state.round + 1,
-      turnPtr: firstPc,
-      moveRemainingPx: turnBudgetPx(state.grid.gridScale, ordered[firstPc]?.moveMeters),
-      actionUsed: false
-    },
-    `Wave ${state.wave + 1} boards!`
-  )
+  return ok({
+    t: 'WaveAdded',
+    entities: ordered,
+    wave: state.wave + 1,
+    round: state.round + 1,
+    turnPtr: firstPc,
+    line: `Wave ${state.wave + 1} boards!`
+  })
 }
 
-// In multi-actor "companion" play (phones as controllers, see
-// docs/COMPANION-PLAY.md), a command names the actor issuing it via `byActor`. A
-// player may act only on their own character's turn, so any command whose issuer
-// is not the active entity is rejected — this is the authority gate that stops
-// one phone from driving another player's character. Single-player, the monster
+// In multi-actor "companion" play (see docs/COMPANION-PLAY.md) a command names the
+// actor issuing it via `byActor`. A player may act only on their own character's
+// turn — any command from a non-active actor is rejected (the authority gate that
+// stops one phone from driving another's character). Single-player, the monster
 // AI, and the wave director pass no `byActor` and are ungated.
-export const reduce = (state: SoloState, action: Action, rng: Rng = Math.random, byActor?: string): SoloState => {
-  if (byActor !== undefined && activeEntity(state)?.id !== byActor) return state
+export const decide = (state: SoloState, action: Action, rng: Rng = Math.random, byActor?: string): DecideResult => {
+  if (byActor !== undefined && activeEntity(state)?.id !== byActor) return reject()
   switch (action.t) {
     case 'Move':
-      return applyMove(state, action.to)
+      return decideMove(state, action.to)
     case 'ToggleDoor':
-      return applyToggleDoor(state, action.doorId, rng)
+      return decideDoor(state, action.doorId, rng)
     case 'Attack':
-      return applyAttack(state, action.targetId, rng)
+      return decideAttack(state, action.targetId, rng)
     case 'Reload':
-      return applyReload(state)
+      return decideReload(state)
     case 'UseMedkit':
-      return applyUseMedkit(state, action.targetId, rng)
+      return decideMedkit(state, action.targetId, rng)
     case 'PickUp':
-      return applyPickUp(state, action.groundItemId)
+      return decidePickUp(state, action.groundItemId)
     case 'Drop':
-      return applyDrop(state, action.stackIndex)
+      return decideDrop(state, action.stackIndex)
     case 'Search':
-      return applySearch(state, action.containerId)
+      return decideSearch(state, action.containerId)
     case 'PushProp':
-      return applyPush(state, action.propId)
+      return decidePush(state, action.propId)
     case 'SetStance':
-      return applySetStance(state, action.stance)
+      return decideStance(state, action.stance)
     case 'Aim':
-      return applyAim(state)
+      return decideAim(state)
     case 'AddWave':
-      return applyAddWave(state, action.monsters, rng)
+      return decideAddWave(state, action.monsters, rng)
     case 'EndTurn':
-      return applyEndTurn(state)
+      return decideEndTurn(state)
   }
+}
+
+// Thin compatibility shim: decide → fold. A rejection with a message appends that
+// feedback line (the old reducer's behaviour); a silent rejection is a no-op.
+export const reduce = (state: SoloState, action: Action, rng: Rng = Math.random, byActor?: string): SoloState => {
+  const result = decide(state, action, rng, byActor)
+  if ('rejected' in result) return result.rejected ? appendLines(state, [result.rejected]) : state
+  return result.events.reduce(foldSolo, state)
 }

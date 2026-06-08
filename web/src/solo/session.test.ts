@@ -22,7 +22,7 @@ describe('solo session', () => {
     if (!other) throw new Error('expected a second PC')
     const {session: after} = sessionStep(session, {action: {t: 'EndTurn'}, byActor: other.id})
     expect(after.state).toBe(session.state) // unchanged
-    expect(after.log).toHaveLength(0) // not recorded
+    expect(after.events).toHaveLength(0) // no events recorded
   })
 
   it('runs the monster AI when a PC ends its turn', () => {
@@ -38,9 +38,9 @@ describe('solo session', () => {
     expect(monsterPos(after)).not.toBe(before) // the horde advanced
   })
 
-  it('replays deterministically from seed + command log (DO restart)', () => {
+  it('replays deterministically from seed + event log (DO restart)', () => {
     const live = playTurns(createSession(777), 8)
-    const restored = replay(777, live.log)
+    const restored = replay(777, live.events)
     expect(JSON.stringify(restored.state.entities)).toBe(JSON.stringify(live.state.entities))
     expect(restored.state.turnPtr).toBe(live.state.turnPtr)
     expect(restored.state.round).toBe(live.state.round)
@@ -75,7 +75,7 @@ describe('solo session', () => {
     const moved = session.state.entities.find((e) => e.id === id)
     expect(!!moved && (moved.x !== from.x || moved.y !== from.y)).toBe(true)
     // The step is recorded and replays to the same position (deterministic).
-    const replayed = replay(1234, session.log).state.entities.find((e) => e.id === id)
+    const replayed = replay(1234, session.events).state.entities.find((e) => e.id === id)
     expect(replayed?.x).toBe(moved?.x)
     expect(replayed?.y).toBe(moved?.y)
   })

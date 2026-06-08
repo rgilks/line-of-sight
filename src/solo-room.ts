@@ -1,9 +1,9 @@
 // SoloRoom: a server-authoritative "Survive the Horde" game in one Durable
 // Object. It wraps the pure session core (web/src/solo/session): players POST
 // commands (each naming its character), the room applies them through the
-// session, runs the monster AI, persists the player-command log, and broadcasts
-// the new state to every connected viewer over SSE. The game is deterministic
-// from (seed + command log), so a restart replays the log to recover.
+// session, runs the monster AI, persists the resulting EVENT log, and broadcasts
+// the new state to every connected viewer over SSE. The game replays from
+// (seed + event log) to recover — the same event-sourced model as the GameTable.
 //
 // Isolated from the multiplayer GameTable — a separate DO class and routes
 // (/api/solo/:id/{stream,commands}); the live table is untouched. This is the
@@ -11,12 +11,13 @@
 import type {DurableObjectState} from './cf'
 import {createSession, replay, sessionStep, type SoloCommand, type SoloSession} from '../web/src/solo/session'
 import {projectController} from '../web/src/solo/projection'
+import type {SoloEvent} from '../web/src/solo/reducer'
 import type {Action, SoloState} from '../web/src/solo/model'
 
 const encoder = new TextEncoder()
-const CMD_PREFIX = 'cmd:'
-// Zero-padded so storage.list() (lexicographic) yields commands in apply order.
-const CMD_KEY = (n: number): string => `${CMD_PREFIX}${String(n).padStart(12, '0')}`
+const EVT_PREFIX = 'evt:'
+// Zero-padded so storage.list() (lexicographic) yields events in fold order.
+const EVT_KEY = (n: number): string => `${EVT_PREFIX}${String(n).padStart(12, '0')}`
 
 // A phone controlling a character carries its actor id (it gets the per-character
 // LOS-gated controller projection); the board display has none (omniscient view).
@@ -51,12 +52,13 @@ export class SoloRoom {
 
   constructor(state: DurableObjectState, _env: unknown) {
     this.storage = state.storage
-    // Durability: persist the seed + the player-command log; on restart replay
-    // them (the AI is re-derived) so a Worker/DO eviction loses nothing.
+    // Durability: persist the seed + the event log; on restart fold the events
+    // over a seed-derived genesis so a Worker/DO eviction loses nothing. The
+    // AI's turns are stored facts, not re-derived — the same model as GameTable.
     void state.blockConcurrencyWhile(async () => {
       const seed = await this.storage.get<number>('seed')
       if (seed === undefined) return
-      const stored = await this.storage.list<SoloCommand>({prefix: CMD_PREFIX})
+      const stored = await this.storage.list<SoloEvent>({prefix: EVT_PREFIX})
       this.session = replay(seed, [...stored.values()])
     })
   }
@@ -115,13 +117,16 @@ export class SoloRoom {
     if (typeof cmd.byActor !== 'string' || (!isStep && !isAction)) {
       return Response.json({error: 'Invalid command'}, {status: 400})
     }
-    const before = this.session.state
-    const {session, aiActions} = sessionStep(this.session, body as SoloCommand)
+    const startIndex = this.session.events.length
+    const {session, events} = sessionStep(this.session, body as SoloCommand)
     this.session = session
-    if (session.state === before) return Response.json({accepted: false}) // rejected: not your turn
-    // Persist only the player command — the AI turns are re-derived on replay.
-    void this.storage.put(CMD_KEY(session.log.length), body)
-    this.broadcast(aiActions)
+    if (events.length === 0) return Response.json({accepted: false}) // rejected: not your turn
+    // Persist the produced events (player command + the AI turns it triggered),
+    // zero-padded by absolute index so a restart folds them back in order.
+    events.forEach((event, i) => {
+      void this.storage.put(EVT_KEY(startIndex + i), event)
+    })
+    this.broadcast()
     return Response.json({accepted: true})
   }
 
@@ -135,18 +140,18 @@ export class SoloRoom {
   }
 
   // The update after a command: controllers get their re-projected view; the
-  // board gets the changed fields (no map) plus the AI actions for animation.
-  private updateFor(connection: Connection, state: SoloState, aiActions: Action[]): unknown {
+  // board gets the changed fields (no map) and re-derives motion from the deltas.
+  private updateFor(connection: Connection, state: SoloState): unknown {
     return connection.actor
       ? {type: 'update', view: 'controller', controller: projectController(state, connection.actor)}
-      : {type: 'update', view: 'board', state: forUpdate(state), aiActions}
+      : {type: 'update', view: 'board', state: forUpdate(state)}
   }
 
-  private broadcast(aiActions: Action[]): void {
+  private broadcast(): void {
     if (!this.session) return
     const state = this.session.state
     for (const [id, connection] of this.connections) {
-      void this.send(id, this.updateFor(connection, state, aiActions))
+      void this.send(id, this.updateFor(connection, state))
     }
   }
 
