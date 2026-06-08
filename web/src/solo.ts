@@ -196,6 +196,16 @@ const myTurn = (): boolean => {
   return seat === undefined || active.owner === seat
 }
 
+// A friendly label for a seat: "You" for mine, "P1"/"P2"/… (by join order) for the
+// others. Empty when there is no seat (offline). Drives the ownership chips + the
+// "whose turn" banner so it is clear which pieces are yours.
+const seatLabel = (seatId: string | undefined): string => {
+  if (!seatId || !state) return ''
+  if (seatId === mySeat()) return 'You'
+  const order = [...state.seats].sort((a, b) => a.joinedAt - b.joinedAt).findIndex((s) => s.id === seatId)
+  return order >= 0 ? `P${order + 1}` : 'P?'
+}
+
 // Install an authoritative state into the view: reset selection/animation, size
 // the canvas + fog, and frame the squad.
 const installState = (next: SoloState): void => {
@@ -1379,6 +1389,18 @@ const drawSelectionRing = (at: Point, faction: Entity['faction'], gridScale: num
   ctx.restore()
 }
 
+// A cyan ring under a piece YOU control (online only), so you can pick your
+// characters out on the shared board at a glance.
+const drawOwnerRing = (at: Point, gridScale: number): void => {
+  ctx.save()
+  ctx.strokeStyle = 'rgba(70, 224, 200, 0.9)'
+  ctx.lineWidth = Math.max(2, gridScale * 0.06)
+  ctx.beginPath()
+  ctx.arc(at.x, at.y, gridScale * 0.7, 0, Math.PI * 2)
+  ctx.stroke()
+  ctx.restore()
+}
+
 // Red dashed = the active character has a clear shot. Grey dotted = the foe is
 // visible to the squad but this character has no line of sight (no shot).
 const drawTargetingLine = (from: Point, to: Point, clear: boolean): void => {
@@ -1456,6 +1478,9 @@ const draw = (): void => {
         isPov: entity.id === actor?.id
       }
     )
+    if (mySeat() !== undefined && entity.faction === 'pc' && entity.owner === mySeat()) {
+      drawOwnerRing(at, s.map.gridScale)
+    }
     if (vitalityRatio(entity) < 1) drawHealthBar(at, entity, s.map.gridScale)
     if (entity.id === selectedId) drawSelectionRing(at, entity.faction, s.map.gridScale)
   }
@@ -1621,6 +1646,14 @@ const trackRowHtml = (s: SoloState, entity: Entity, rank: number, combat: TrackC
         ? ''
         : `<div class="solo-track-loadout">${escapeHtml(weaponCompactOf(entity))}</div>`
   const status = active ? '<span class="solo-track-now">NOW</span>' : ''
+  // Online, tag each character with its owner ("You" / "P2") so it is clear which
+  // pieces you control. Nothing offline (no seats).
+  const ownerChip =
+    entity.faction === 'pc' && mySeat() !== undefined && entity.owner
+      ? `<span class="solo-tag" style="${
+          entity.owner === mySeat() ? 'background:#1f5d3f;color:#cffbe6' : 'background:#33323a;color:#cfc8d8'
+        }">${escapeHtml(seatLabel(entity.owner))}</span>`
+      : ''
   const stanceTag =
     entity.faction === 'pc' && entity.stance !== 'standing'
       ? `<span class="solo-tag solo-tag-stance">${stanceLabel(entity.stance)}</span>`
@@ -1633,6 +1666,7 @@ const trackRowHtml = (s: SoloState, entity: Entity, rank: number, combat: TrackC
       <div class="solo-track-body">
         <div class="solo-track-head">
           <span class="solo-track-name">${escapeHtml(entity.label)}</span>
+          ${ownerChip}
           ${conditionBadge(entity)}
           ${stanceTag}
           ${status}
@@ -1755,7 +1789,16 @@ const renderPanel = (): void => {
         canAim: canSignificant && (actor?.aim ?? 0) < AIM_MAX,
         targetNote
       }
-  const busyBanner = busy ? '<div class="solo-busy-banner">Hostiles acting…</div>' : ''
+  // Banner driven by who is up: the horde, another player (online), or no banner on
+  // my own turn. Makes "whose turn is it" unambiguous in co-op.
+  const otherPlayerUp = !!actor && actor.faction === 'pc' && mySeat() !== undefined && actor.owner !== mySeat()
+  const bannerText =
+    actor?.faction === 'monster'
+      ? 'Hostiles acting…'
+      : otherPlayerUp
+        ? `${escapeHtml(actor.label)} — ${seatLabel(actor.owner)}'s turn`
+        : ''
+  const busyBanner = bannerText ? `<div class="solo-busy-banner">${bannerText}</div>` : ''
 
   panel.innerHTML = `
     <header class="solo-hud-top">
