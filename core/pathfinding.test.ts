@@ -52,4 +52,15 @@ describe('findPath', () => {
     expect(path).not.toBeNull()
     expect(path?.[path.length - 1]).toEqual(goal)
   })
+
+  it('handles a large grid without stalling (heap, not an O(n²) scan)', () => {
+    // Corner-to-corner on an 80×80 open grid, then a sealed-goal exhaustive search.
+    // With a linear-scan open set both are O(n²) and crawl; the heap keeps them quick.
+    const open = findPath({cx: 0, cy: 0}, {cx: 79, cy: 79}, 80, 80, {canEnter: () => true})
+    expect(open?.length).toBe(159) // 79 + 79 + 1
+    const sealed = findPath({cx: 0, cy: 0}, {cx: 79, cy: 79}, 80, 80, {
+      canEnter: (cx, cy) => !(cx === 78 && cy === 79) && !(cx === 79 && cy === 78) // wall off the goal
+    })
+    expect(sealed).toBeNull()
+  })
 })
