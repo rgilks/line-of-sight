@@ -1,0 +1,111 @@
+digraph MultiplayerArchitecture {
+  graph [
+    rankdir=TB,
+    bgcolor="#ffffff",
+    pad="0.55",
+    nodesep="0.55",
+    ranksep="0.85",
+    splines=polyline,
+    outputorder=edgesfirst,
+    compound=true,
+    newrank=true,
+    forcelabels=true,
+    fontname="Avenir",
+    label=<
+      <TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0">
+        <TR><TD><FONT POINT-SIZE="34"><B>Multiplayer Table</B></FONT></TD></TR>
+        <TR><TD><FONT POINT-SIZE="15" COLOR="#3f6ea5">Server-authoritative, per-player fog of war</FONT></TD></TR>
+      </TABLE>
+    >,
+    labelloc=t,
+    labeljust=c
+  ];
+
+  node [
+    shape=box,
+    style="rounded,filled",
+    margin="0.21,0.13",
+    width=3.05,
+    height=0.74,
+    fixedsize=false,
+    fontname="Avenir",
+    fontsize=18,
+    penwidth=2.4,
+    fontcolor="#14213d",
+    color="#2264c7",
+    fillcolor="#eaf3ff:#ffffff",
+    gradientangle=270
+  ];
+
+  edge [
+    color="#263a59",
+    fontname="Avenir",
+    fontsize=13,
+    fontcolor="#3d4a5c",
+    penwidth=2.2,
+    arrowsize=0.78
+  ];
+
+  // ---- Browsers (blue) ----
+  subgraph cluster_clients {
+    graph [
+      label=<
+        <TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="2">
+          <TR><TD ALIGN="LEFT"><FONT POINT-SIZE="17" COLOR="#1f5fb0"><B>BROWSERS</B></FONT></TD></TR>
+          <TR><TD ALIGN="LEFT"><FONT POINT-SIZE="12" COLOR="#3f6ea5">Same client (play.ts); role decides what it may see.</FONT></TD></TR>
+        </TABLE>
+      >,
+      labelloc=t,
+      labeljust=l,
+      color="#bcd8f7",
+      fillcolor="#f3f9ff",
+      style="rounded,filled",
+      penwidth=1.8,
+      margin=20
+    ];
+
+    HOST [label=<<B>GM host</B> · /<BR/><FONT POINT-SIZE="15">generates + publishes a deck, sees all</FONT>>, fillcolor="#e3efff:#ffffff", color="#1f5fb0", penwidth=3.0];
+    P1 [label=<<B>Player A</B> · /play<BR/><FONT POINT-SIZE="15">owns a token, own POV</FONT>>, fillcolor="#edf7ff:#ffffff", color="#2f80ed"];
+    P2 [label=<<B>Player B</B> · /play<BR/><FONT POINT-SIZE="15">owns a token, own POV</FONT>>, fillcolor="#edf7ff:#ffffff", color="#2f80ed"];
+  }
+
+  // ---- Cloudflare Worker + Durable Object (green / teal) ----
+  subgraph cluster_server {
+    graph [
+      label=<
+        <TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="2">
+          <TR><TD ALIGN="LEFT"><FONT POINT-SIZE="17" COLOR="#1e6b43"><B>CLOUDFLARE WORKER</B></FONT></TD></TR>
+          <TR><TD ALIGN="LEFT"><FONT POINT-SIZE="12" COLOR="#4e7a61">Routes /api/tables/:id/* to one Durable Object per table.</FONT></TD></TR>
+        </TABLE>
+      >,
+      labelloc=t,
+      labeljust=l,
+      color="#b8e5c8",
+      fillcolor="#f4fbf6",
+      style="rounded,filled",
+      penwidth=1.8,
+      margin=20
+    ];
+
+    DO [label=<<B>GameTable Durable Object</B><BR/><FONT POINT-SIZE="15">command log + per-player projection</FONT><BR/><FONT POINT-SIZE="13">single-threaded = free ordering</FONT>>, fillcolor="#eaf8ef:#ffffff", color="#22865a", width=3.6];
+    R2 [label=<<B>Private R2</B><BR/><FONT POINT-SIZE="15">GM map bytes, unguessable key</FONT>>, fillcolor="#e6fffb:#ffffff", color="#0f766e"];
+    {rank=same; DO; R2}
+  }
+
+  // ---- Shared core (purple) ----
+  LOS [label=<<B>core/los</B><BR/><FONT POINT-SIZE="15">hasLineOfSight / visibilityPolygon</FONT>>, fillcolor="#f5f3ff:#ffffff", color="#7c3aed", width=3.4];
+
+  // ---- Edges (only the two vertical ones drive rank; the rest are free) ----
+  HOST -> DO [label="publish board (occluders)"];
+  DO -> LOS [label="gate every token by the viewer's POV"];
+
+  HOST -> R2 [label="upload map (image)", style=dashed, color="#6b7280", fontcolor="#6b7280", constraint=false];
+  P1 -> DO [label="POST MoveToken", constraint=false];
+  P2 -> DO [label="POST MoveToken", constraint=false];
+
+  DO -> HOST [label="SSE: whole board", color="#22865a", fontcolor="#1e6b43", constraint=false];
+  DO -> P1 [label="SSE: only what A can see", color="#22865a", fontcolor="#1e6b43", constraint=false];
+  DO -> P2 [label="SSE: only what B can see", color="#22865a", fontcolor="#1e6b43", constraint=false];
+
+  R2 -> P1 [label="stream map bytes (private)", style=dashed, color="#6b7280", fontcolor="#6b7280", constraint=false];
+}

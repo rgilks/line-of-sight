@@ -145,24 +145,11 @@ position so it tracks a moving counter.
 
 ## Architecture overview
 
-```mermaid
-flowchart LR
-  subgraph Client["Browser (per player)"]
-    UI["Preact UI + canvas<br/>loads own map art"]
-  end
-  subgraph CF["Cloudflare"]
-    W["Worker<br/>routing + Discord auth"]
-    DO["Table Durable Object<br/>event log + command handler<br/>+ per-viewer projection"]
-    Core["core/los (pure)<br/>hasLineOfSight / visibilityPolygon"]
-  end
-  UI -- "POST command" --> W --> DO
-  DO -- "per-player view stream (SSE)" --> UI
-  DO -. imports .-> Core
-```
+![Multiplayer table](diagrams/multiplayer-architecture.png)
 
-One Durable Object per table. The Worker is a thin router (+ auth); all game
-state and coordination live in the DO. The deterministic core is imported by the
-DO for visibility gating.
+One Durable Object per table. The Worker is a thin router; all game state and
+coordination live in the DO, which imports the deterministic core to gate each
+token by the viewer's line of sight. GM-uploaded maps are stored privately in R2.
 
 ## Domain model
 

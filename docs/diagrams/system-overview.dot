@@ -45,17 +45,37 @@ digraph SystemOverview {
     arrowsize=0.78
   ];
 
-  // ---- Client surface (blue) ----
-  U1 [label=<<B>Browser</B><BR/><FONT POINT-SIZE="15">Preact + signals SPA</FONT>>];
-  IN [label=<<B>Local map images</B><BR/><FONT POINT-SIZE="15">user-selected, never uploaded</FONT>>, fillcolor="#edf7ff:#ffffff", color="#2f80ed"];
+  // ---- Browser: one Vite build, three apps + the generator (blue) ----
+  subgraph cluster_browser {
+    graph [
+      label=<
+        <TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="2">
+          <TR><TD ALIGN="LEFT"><FONT POINT-SIZE="17" COLOR="#1f5fb0"><B>BROWSER</B></FONT></TD></TR>
+          <TR><TD ALIGN="LEFT"><FONT POINT-SIZE="12" COLOR="#3f6ea5">One Vite build serves four routes from web/.</FONT></TD></TR>
+        </TABLE>
+      >,
+      labelloc=t,
+      labeljust=l,
+      color="#bcd8f7",
+      fillcolor="#f3f9ff",
+      style="rounded,filled",
+      penwidth=1.8,
+      margin=20
+    ];
 
-  // ---- Deterministic core (purple: pure, no side effects) ----
+    ED [label=<<B>Map editor</B><BR/><FONT POINT-SIZE="15">/edit · author, detect, export</FONT>>, fillcolor="#edf7ff:#ffffff", color="#2f80ed"];
+    TB [label=<<B>Multiplayer table</B><BR/><FONT POINT-SIZE="15">/ host · /play · per-POV fog</FONT>>, fillcolor="#edf7ff:#ffffff", color="#2f80ed"];
+    SO [label=<<B>Survive the Horde</B><BR/><FONT POINT-SIZE="15">/solo · single-player game</FONT>>, fillcolor="#edf7ff:#ffffff", color="#2f80ed"];
+    SY [label=<<B>Synthetic generator</B><BR/><FONT POINT-SIZE="15">web/src/synth · seeded decks</FONT>>, fillcolor="#fff4d1:#fffaf0", color="#d39a00"];
+  }
+
+  // ---- Shared deterministic core (purple) ----
   subgraph cluster_core {
     graph [
       label=<
         <TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="2">
-          <TR><TD ALIGN="LEFT"><FONT POINT-SIZE="17" COLOR="#5f3b8a"><B>DETERMINISTIC CORE</B></FONT></TD></TR>
-          <TR><TD ALIGN="LEFT"><FONT POINT-SIZE="12" COLOR="#6d4d8d">Pure TypeScript. No DOM, no Cloudflare. Same inputs produce same outputs.</FONT></TD></TR>
+          <TR><TD ALIGN="LEFT"><FONT POINT-SIZE="17" COLOR="#5f3b8a"><B>SHARED CORE — core/</B></FONT></TD></TR>
+          <TR><TD ALIGN="LEFT"><FONT POINT-SIZE="12" COLOR="#6d4d8d">Pure TypeScript. No DOM, no Cloudflare. Used by every app and the Worker.</FONT></TD></TR>
         </TABLE>
       >,
       labelloc=t,
@@ -67,17 +87,18 @@ digraph SystemOverview {
       margin=20
     ];
 
-    C1 [label=<<B>analyzeImageRgba</B><BR/><FONT POINT-SIZE="15">RGBA pixels to wall/door candidates</FONT>>, fillcolor="#f5f3ff:#ffffff", color="#7c3aed"];
-    C2 [label=<<B>visibilityPolygon / hasLineOfSight</B><BR/><FONT POINT-SIZE="15">occluders + viewpoint to visibility</FONT>>, fillcolor="#f5f3ff:#ffffff", color="#7c3aed"];
+    LOS [label=<<B>los</B><BR/><FONT POINT-SIZE="15">line of sight + wall/door detection</FONT>>, fillcolor="#f5f3ff:#ffffff", color="#7c3aed"];
+    RU [label=<<B>rules</B><BR/><FONT POINT-SIZE="15">Cepheus movement, initiative, model</FONT>>, fillcolor="#f5f3ff:#ffffff", color="#7c3aed"];
+    PF [label=<<B>pathfinding · dice</B><BR/><FONT POINT-SIZE="15">A* · seedable rolls</FONT>>, fillcolor="#f5f3ff:#ffffff", color="#7c3aed"];
   }
 
-  // ---- Cloudflare Worker (green: server code) ----
+  // ---- Cloudflare Worker + table authority (green / teal) ----
   subgraph cluster_worker {
     graph [
       label=<
         <TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="2">
           <TR><TD ALIGN="LEFT"><FONT POINT-SIZE="17" COLOR="#1e6b43"><B>CLOUDFLARE WORKER</B></FONT></TD></TR>
-          <TR><TD ALIGN="LEFT"><FONT POINT-SIZE="12" COLOR="#4e7a61">Thin shell: serves static assets and a health check at los.tre.systems.</FONT></TD></TR>
+          <TR><TD ALIGN="LEFT"><FONT POINT-SIZE="12" COLOR="#4e7a61">Serves the static build; hosts the multiplayer table authority.</FONT></TD></TR>
         </TABLE>
       >,
       labelloc=t,
@@ -89,22 +110,25 @@ digraph SystemOverview {
       margin=20
     ];
 
-    W1 [label=<<B>Static assets</B><BR/><FONT POINT-SIZE="15">dist/client (SPA fallback)</FONT>>, fillcolor="#eaf8ef:#ffffff", color="#22865a"];
-    W2 [label=<<B>GET /healthz</B><BR/><FONT POINT-SIZE="15">ok + service name</FONT>>, fillcolor="#eaf8ef:#ffffff", color="#22865a"];
+    WA [label=<<B>Static assets</B><BR/><FONT POINT-SIZE="15">dist/client (SPA fallback)</FONT>>, fillcolor="#eaf8ef:#ffffff", color="#22865a"];
+    DO [label=<<B>GameTable Durable Object</B><BR/><FONT POINT-SIZE="15">one per table · server-authoritative</FONT>>, fillcolor="#eaf8ef:#ffffff", color="#22865a"];
+    R2 [label=<<B>Private R2</B><BR/><FONT POINT-SIZE="15">GM map storage</FONT>>, fillcolor="#e6fffb:#ffffff", color="#0f766e"];
   }
 
-  // ---- Build (yellow: tooling step) ----
-  B1 [label=<<B>Vite build</B><BR/><FONT POINT-SIZE="15">web/ to dist/client</FONT>>, fillcolor="#fff4d1:#fffaf0", color="#d39a00"];
-
-  // ---- Output (teal persistence) / terminal success (bold green) ----
-  OUT [label=<<B>LOS sidecar JSON</B><BR/><FONT POINT-SIZE="15">clipboard or download</FONT>>, fillcolor="#d8f5de:#effcf2", color="#15803d", penwidth=3.2];
+  // ---- Editor output (terminal green) ----
+  SC [label=<<B>LOS sidecar JSON</B><BR/><FONT POINT-SIZE="15">clipboard or download</FONT>>, fillcolor="#d8f5de:#effcf2", color="#15803d", penwidth=3.2];
 
   // ---- Edges ----
-  B1 -> W1 [label="deploy"];
-  U1 -> W1 [label="loads SPA"];
-  U1 -> W2 [label="health check", style=dashed, color="#6b7280", fontcolor="#6b7280"];
-  IN -> U1 [label="drag/drop or picker"];
-  U1 -> C1 [label="analyze tiles", lhead=cluster_core];
-  U1 -> C2 [label="render + queries", lhead=cluster_core];
-  C1 -> OUT [label="reviewed occluders", ltail=cluster_core];
+  WA -> ED [label="serves the SPA", lhead=cluster_browser];
+  SY -> TB [label="generate deck"];
+  SY -> SO [label="generate deck"];
+  SY -> ED [style=dashed, color="#6b7280", fontcolor="#6b7280"];
+
+  ED -> LOS [label="analyze + visibility", lhead=cluster_core];
+  ED -> SC [label="reviewed occluders"];
+  SO -> PF [label="rules · dice · A* · LOS", lhead=cluster_core];
+
+  TB -> DO [label="commands + per-POV stream"];
+  DO -> LOS [label="gate tokens by line of sight"];
+  TB -> R2 [label="GM map (private)", style=dashed, color="#6b7280", fontcolor="#6b7280"];
 }

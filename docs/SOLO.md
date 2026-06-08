@@ -65,6 +65,8 @@ you're through its lock.
 
 ## Shape
 
+![Solo game loop](diagrams/solo-game-loop.png)
+
 The engine is pure and headless-testable; the DOM/canvas shell is the only part
 that touches the browser.
 

@@ -10,16 +10,21 @@ anything with clusters or many edges is a `.dot` here.
 | Diagram | Source | Rendered |
 | --- | --- | --- |
 | System overview | `system-overview.dot` | `system-overview.png` |
+| Multiplayer table | `multiplayer-architecture.dot` | `multiplayer-architecture.png` |
+| Solo game loop | `solo-game-loop.dot` | `solo-game-loop.png` |
 | Wall and door analysis pipeline | `analysis-pipeline.dot` | `analysis-pipeline.png` |
 | Visibility and fog rendering | `visibility-and-fog.dot` | `visibility-and-fog.png` |
 
 ## Reading order
 
-1. **System overview** for the whole SPA / core / Worker shape and where the
-   sidecar comes from.
-2. **Analysis pipeline** when changing wall/door detection in
+1. **System overview** for the three apps, the shared `core/`, and the Worker /
+   Durable Object / R2 shape.
+2. **Multiplayer table** for the server-authoritative per-POV design
+   ([`MULTIPLAYER.md`](../MULTIPLAYER.md)).
+3. **Solo game loop** for the reducer-driven turn loop ([`SOLO.md`](../SOLO.md)).
+4. **Analysis pipeline** when changing wall/door detection in
    [`core/los.ts`](../../core/los.ts).
-3. **Visibility and fog** when changing the POV, the visibility polygon, or the
+5. **Visibility and fog** when changing the POV, the visibility polygon, or the
    canvas render order in [`main.tsx`](../../web/src/main.tsx).
 
 ## Conventions
