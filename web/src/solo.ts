@@ -1134,22 +1134,26 @@ const drawFog = (s: SoloState): void => {
 // A small padlock at a sealed door — amber for a keycard lock, cyan for a
 // hackable one — on a dark backing disc so it reads over the deck art.
 const drawLockGlyph = (x: number, y: number, gs: number, kind: LockKind): void => {
-  const col = kind === 'hack' ? 'rgba(94, 214, 240, 0.96)' : 'rgba(255, 178, 60, 0.96)'
-  const w = gs * 0.32
-  const h = gs * 0.26
+  const col = kind === 'hack' ? 'rgba(94, 214, 240, 1)' : 'rgba(255, 178, 60, 1)'
+  const w = gs * 0.4
+  const h = gs * 0.34
   ctx.save()
   ctx.translate(x, y)
-  ctx.fillStyle = 'rgba(6, 9, 9, 0.78)'
+  ctx.fillStyle = 'rgba(6, 9, 9, 0.82)' // dark disc so the lock reads over the door art
   ctx.beginPath()
-  ctx.arc(0, 0, gs * 0.34, 0, Math.PI * 2)
+  ctx.arc(0, 0, gs * 0.42, 0, Math.PI * 2)
   ctx.fill()
   ctx.strokeStyle = col
-  ctx.lineWidth = Math.max(1.6, gs * 0.05)
+  ctx.lineWidth = Math.max(1.4, gs * 0.045)
   ctx.beginPath()
-  ctx.arc(0, -h * 0.2, w * 0.34, Math.PI, 0) // shackle
+  ctx.arc(0, 0, gs * 0.42, 0, Math.PI * 2) // tinted rim
+  ctx.stroke()
+  ctx.lineWidth = Math.max(1.8, gs * 0.06)
+  ctx.beginPath()
+  ctx.arc(0, -h * 0.22, w * 0.32, Math.PI, 0) // shackle
   ctx.stroke()
   ctx.fillStyle = col
-  ctx.fillRect(-w * 0.42, -h * 0.06, w * 0.84, h * 0.74) // body
+  ctx.fillRect(-w * 0.42, -h * 0.08, w * 0.84, h * 0.7) // body
   ctx.restore()
 }
 
@@ -1163,11 +1167,18 @@ const drawDoorStates = (s: SoloState): void => {
     const door = occluder as DoorOccluder
     const lock = s.locks[door.id]
     // A sealed door shows a padlock wherever the squad can see it; it is closed, so
-    // the open/close hint below doesn't apply.
+    // the open/close hint below doesn't apply. The midpoint sits on the wall line
+    // (LOS there is flaky), so test the two cell-centres the door separates — a PC
+    // in or seeing either side reveals the lock.
     if (lock && !lock.unlocked) {
       const mx = (door.x1 + door.x2) / 2
       const my = (door.y1 + door.y2) / 2
-      if (visibleToSquad(s, mx, my)) drawLockGlyph(mx, my, s.grid.gridScale, lock.kind)
+      const len = Math.hypot(door.x2 - door.x1, door.y2 - door.y1) || 1
+      const nx = (-(door.y2 - door.y1) / len) * s.grid.gridScale * 0.5
+      const ny = ((door.x2 - door.x1) / len) * s.grid.gridScale * 0.5
+      const seen =
+        visibleToSquad(s, mx + nx, my + ny) || visibleToSquad(s, mx - nx, my - ny) || visibleToSquad(s, mx, my)
+      if (seen) drawLockGlyph(mx, my, s.grid.gridScale, lock.kind)
       continue
     }
     const reachable = actor != null && actor.faction === 'pc' && distanceToOccluder({x: actor.x, y: actor.y}, door) <= reach
