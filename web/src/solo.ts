@@ -73,6 +73,18 @@ let state: SoloState | null = null
 let showGrid = false
 let logExpanded = false // combat log: two lines by default, expandable
 let selectedId: string | null = null // the entity the player has tapped (target / patient)
+// Desired scroll the camera eases toward (null = at rest / user-controlled). Set by
+// focusOnActive; stepped in the rAF loop so switching characters pans, not snaps.
+let camAnim: {left: number; top: number} | null = null
+// A tap on open floor is held briefly so a quick second tap reads as a double-tap
+// (→ end turn) instead of a move. null = nothing pending.
+let pendingMove: {to: Point; timer: ReturnType<typeof setTimeout>} | null = null
+const cancelPendingMove = (): void => {
+  if (pendingMove) {
+    clearTimeout(pendingMove.timer)
+    pendingMove = null
+  }
+}
 let reachable: Array<{cx: number; cy: number}> = [] // cells the active PC can move to (recomputed per action)
 let monsterCounter = 0
 
@@ -186,8 +198,9 @@ const frame = (t: number): void => {
     const actor = activeEntity(state)
     if (actor && anim.has(actor.id)) focusOnActive()
   }
+  const camMoving = stepCamera()
   draw()
-  if (moving || effectsActive(t)) ensureRaf()
+  if (moving || effectsActive(t) || camMoving) ensureRaf()
 }
 
 // ---- offscreen fog layers (sized per map) --------------------------------
@@ -479,7 +492,7 @@ const newGame = (seed = Math.floor(Math.random() * 100000)): void => {
   canvas.height = map.height
   sizeFogLayers(map.width, map.height)
   focusOnSquad()
-  focusOnActive()
+  focusOnActive(false) // initial framing snaps; turn changes pan
   renderPanel()
   requestDraw()
 }
@@ -647,6 +660,7 @@ const canAttackTarget = (target: Entity): boolean => {
 // End the player's turn, then hand off to the monster AI.
 const endTurn = (): void => {
   if (busy || !state || state.phase.t !== 'playerTurn') return
+  cancelPendingMove()
   playUi('endTurn')
   dispatch({t: 'EndTurn'})
   void runMonsters()
@@ -729,16 +743,48 @@ const focusOnSquad = (): void => {
   boardViewport.scrollTop = cy * zoom - availH / 2
 }
 
+// Apply a desired scroll: eased over a few frames when `animate` (so switching
+// characters pans across), or snapped instantly (initial framing, zoom, drag).
+const aimCamera = (left: number, top: number, animate: boolean): void => {
+  if (!state || !boardViewport) return
+  const maxLeft = Math.max(0, state.map.width * zoom - boardViewport.clientWidth)
+  const maxTop = Math.max(0, state.map.height * zoom - boardViewport.clientHeight)
+  const L = Math.min(maxLeft, Math.max(0, left))
+  const T = Math.min(maxTop, Math.max(0, top))
+  if (animate) {
+    camAnim = {left: L, top: T}
+    ensureRaf()
+  } else {
+    camAnim = null
+    boardViewport.scrollLeft = L
+    boardViewport.scrollTop = T
+  }
+}
+
+// Ease the viewport toward camAnim; returns true while still travelling.
+const CAM_EASE = 0.2
+const stepCamera = (): boolean => {
+  if (!camAnim || !boardViewport) return false
+  const dl = camAnim.left - boardViewport.scrollLeft
+  const dt = camAnim.top - boardViewport.scrollTop
+  if (Math.abs(dl) < 0.5 && Math.abs(dt) < 0.5) {
+    boardViewport.scrollLeft = camAnim.left
+    boardViewport.scrollTop = camAnim.top
+    camAnim = null
+    return false
+  }
+  boardViewport.scrollLeft += dl * CAM_EASE
+  boardViewport.scrollTop += dt * CAM_EASE
+  return true
+}
+
 // Pan the viewport so a board point sits in the middle of the visible map area.
-const focusOnPoint = (x: number, y: number): void => {
+const focusOnPoint = (x: number, y: number, animate = true): void => {
   if (!state || !boardViewport) return
   const availW = boardViewport.clientWidth
   const availH = boardViewport.clientHeight
   if (availW <= 0 || availH <= 0) return
-  const maxScrollX = Math.max(0, state.map.width * zoom - availW)
-  const maxScrollY = Math.max(0, state.map.height * zoom - availH)
-  boardViewport.scrollLeft = Math.min(maxScrollX, Math.max(0, x * zoom - availW / 2))
-  boardViewport.scrollTop = Math.min(maxScrollY, Math.max(0, y * zoom - availH / 2))
+  aimCamera(x * zoom - availW / 2, y * zoom - availH / 2, animate)
 }
 
 // The living enemy nearest the actor (for PCs, only ones the squad can see).
@@ -759,7 +805,7 @@ const nearestEnemyOf = (s: SoloState, actor: Entity): Entity | undefined => {
 
 // Centre on whoever holds the initiative — but pan to keep the nearest enemy in
 // view too, even if that pushes the active character toward an edge.
-const focusOnActive = (): void => {
+const focusOnActive = (animate = true): void => {
   if (!state || !boardViewport) return
   const actor = activeEntity(state)
   if (!actor) return
@@ -769,7 +815,7 @@ const focusOnActive = (): void => {
   const at = renderPos.get(actor.id) ?? {x: actor.x, y: actor.y}
   const enemy = nearestEnemyOf(state, actor)
   if (!enemy) {
-    focusOnPoint(at.x, at.y)
+    focusOnPoint(at.x, at.y, animate)
     return
   }
   const z = zoom
@@ -803,6 +849,7 @@ const setZoom = (
   zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, next))
   updateCanvasDisplaySize()
   if (anchor && boardViewport) {
+    camAnim = null // a manual zoom takes the camera; cancel any pan in flight
     boardViewport.scrollLeft = anchor.boardX * zoom - anchor.viewportX
     boardViewport.scrollTop = anchor.boardY * zoom - anchor.viewportY
   }
@@ -835,6 +882,7 @@ const onBoardDragMove = (event: PointerEvent): void => {
     boardViewport.classList.add('is-panning')
   }
   event.preventDefault()
+  camAnim = null // user is panning by hand; release the camera
   boardViewport.scrollLeft = boardDrag.scrollLeft - dx
   boardViewport.scrollTop = boardDrag.scrollTop - dy
 }
@@ -925,6 +973,7 @@ const onTouchMove = (event: TouchEvent): void => {
     if (Math.hypot(dx, dy) > 6) touchMoved = true
     if (touchMoved) {
       event.preventDefault()
+      camAnim = null // user is panning by hand; release the camera
       boardViewport.scrollLeft = touchPan.scrollLeft - dx
       boardViewport.scrollTop = touchPan.scrollTop - dy
     }
@@ -1016,12 +1065,39 @@ const entityHitAt = (point: Point): Entity | null => {
   return best?.entity ?? null
 }
 
+// Walk the active PC toward a tapped open-floor point (or show why it's blocked).
+const TAP_END_MS = 220 // a second open-floor tap within this window ends the turn
+const doMove = (point: Point): void => {
+  if (!state || busy || state.phase.t !== 'playerTurn') return
+  const actor = activeEntity(state)
+  if (!actor || actor.faction !== 'pc') return
+  const from = {x: actor.x, y: actor.y}
+  const logLen = state.log.length
+  playerAct({t: 'Move', to: point})
+  const moved = entityById(state, actor.id)
+  if (moved && (moved.x !== from.x || moved.y !== from.y)) {
+    playUi('move')
+  } else if (state.log.length > logLen) {
+    // The move was refused — show why, right where they clicked.
+    const cell = cellOf(state.grid, point.x, point.y)
+    const at = cellCenter(state.grid, cell.cx, cell.cy)
+    spawnDenied(at, state.log[state.log.length - 1], state.map.gridScale)
+    playUi('denied')
+    requestDraw()
+  }
+}
+
 // Act at a screen point: toggle an adjacent door, select a tapped entity (target /
-// patient), else move the active PC there.
+// patient), search a container, else move the active PC there. A double-tap on
+// open floor ends the turn (hands off to the next combatant).
 function actAt(clientX: number, clientY: number): void {
   if (!state || busy) return
   const actor = activeEntity(state)
   if (!actor || actor.faction !== 'pc') return
+  // A move-tap is held for TAP_END_MS; anything that lands before it (this tap)
+  // cancels it. Two open-floor taps in a row → end turn instead of two moves.
+  const hadPendingMove = pendingMove !== null
+  cancelPendingMove()
   const point = boardPointFromXY(clientX, clientY)
   const doorId = doorHitAt(point)
   if (doorId) {
@@ -1070,20 +1146,19 @@ function actAt(clientX: number, clientY: number): void {
     playerAct({t: 'Search', containerId: container.id})
     return
   }
-  const moverId = actor.id
-  const from = {x: actor.x, y: actor.y}
-  const logLen = state.log.length
-  playerAct({t: 'Move', to: point})
-  const moved = entityById(state, moverId)
-  if (moved && (moved.x !== from.x || moved.y !== from.y)) {
-    playUi('move')
-  } else if (state.log.length > logLen) {
-    // The move was refused — show why, right where they clicked.
-    const cell = cellOf(state.grid, point.x, point.y)
-    const at = cellCenter(state.grid, cell.cx, cell.cy)
-    spawnDenied(at, state.log[state.log.length - 1], state.map.gridScale)
-    playUi('denied')
-    requestDraw()
+  // Open floor: a second tap (the move is still pending) ends the turn; otherwise
+  // hold the move briefly so a double-tap can be caught.
+  if (hadPendingMove) {
+    endTurn()
+    return
+  }
+  pendingMove = {
+    to: point,
+    timer: setTimeout(() => {
+      const to = pendingMove?.to
+      pendingMove = null
+      if (to) doMove(to)
+    }, TAP_END_MS)
   }
 }
 
@@ -1894,7 +1969,7 @@ const mount = (): void => {
   canvas.addEventListener('touchend', onTouchEnd)
   window.addEventListener('resize', () => {
     updateCanvasDisplaySize()
-    focusOnActive()
+    focusOnActive(false)
   })
   // Unlock the Web Audio context on the first interaction so weapon sounds play.
   window.addEventListener('pointerdown', () => primeAudio(), {once: true})
