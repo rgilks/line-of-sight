@@ -685,3 +685,74 @@ body {
     width: min(300px, 88vw);
   }
 }
+
+/* Board display (route `/board`): a read-only shared-screen view of the table —
+   controls hidden, canvas non-interactive — with a join panel so phones join as
+   the controllers (see docs/COMPANION-PLAY.md). Scoped to the `.board-display`
+   root class so the host and player views are untouched. */
+.board-display .play-shell {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.board-display .play-drawer,
+.board-display .play-drawer-toggle,
+.board-display .play-hint {
+  display: none;
+}
+
+.board-display canvas {
+  pointer-events: none;
+}
+
+.board-join {
+  position: fixed;
+  right: max(16px, env(safe-area-inset-right));
+  bottom: max(16px, env(safe-area-inset-bottom));
+  z-index: 20;
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  padding: 14px 14px 12px;
+  background: rgba(5, 12, 8, 0.86);
+  border: 1px solid var(--border-strong);
+  border-radius: 14px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(3px);
+}
+
+.board-join-eyebrow {
+  font-family: "Orbitron", sans-serif;
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  color: var(--green);
+}
+
+.board-join-qr {
+  width: 168px;
+  height: 168px;
+  display: grid;
+  place-items: center;
+  padding: 8px;
+  background: #fff;
+  border-radius: 8px;
+}
+
+.board-join-qr svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.board-join-url {
+  max-width: 184px;
+  font-size: 12px;
+  text-align: center;
+  color: rgba(244, 246, 243, 0.9);
+  word-break: break-all;
+}
+
+.board-join-table {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: rgba(244, 246, 243, 0.55);
+}

@@ -61,6 +61,13 @@ for (const image of counterPortraits.values()) {
 // with ?gm=1). The host renders as a GM (sees all, no fog) plus a hosting panel.
 const params = new URLSearchParams(location.search)
 const isHost = location.pathname === '/' || location.pathname === '/host'
+// `/board` is a read-only shared-screen display (a TV/monitor): the omniscient
+// table view with the controls hidden and a join QR, so phones act as the
+// controllers (see docs/COMPANION-PLAY.md). It joins an existing table via
+// ?table= and never hosts. The class is set before mount() so the canvas sizes
+// to the single-column (drawer-less) layout from the first frame.
+const isBoard = location.pathname === '/board'
+if (isBoard) document.documentElement.classList.add('board-display')
 
 // A host keeps a stable table id across reloads: reuse ?table= if present,
 // otherwise mint one and reflect it into the URL so F5 rejoins the same table
@@ -81,7 +88,7 @@ const tableId = resolveTableId()
 // deck. A host arriving with an id already in the URL is a reload ⇒ reconnect
 // without republishing so connected players keep the same map.
 const hostShouldPublish = isHost && !params.get('table')
-const isGm = isHost || params.get('gm') === '1'
+const isGm = isHost || isBoard || params.get('gm') === '1'
 
 const you = signal<string | null>(null)
 const board = signal<Board | null>(null)
@@ -1503,7 +1510,34 @@ const wireChat = (): void => {
   })
 }
 
+// A read-only board display for a TV/monitor: hide the controls and show a join
+// panel (the table code, the player link, and a scannable QR) so phones can join
+// as the controllers. The QR encoder loads lazily, so only the board route pays
+// for it.
+const setupBoardDisplay = async (): Promise<void> => {
+  const joinUrl = playerPlayUrl(tableId)
+  const overlay = document.createElement('aside')
+  overlay.className = 'board-join'
+  overlay.innerHTML = `
+    <span class="board-join-eyebrow">SCAN TO JOIN</span>
+    <div class="board-join-qr" aria-hidden="true"></div>
+    <code class="board-join-url">${escapeHtml(joinUrl)}</code>
+    <span class="board-join-table">table ${escapeHtml(tableId)}</span>`
+  document.body.appendChild(overlay)
+  try {
+    const {default: qrcode} = await import('qrcode-generator')
+    const qr = qrcode(0, 'M')
+    qr.addData(joinUrl)
+    qr.make()
+    const slot = overlay.querySelector('.board-join-qr')
+    if (slot) slot.innerHTML = qr.createSvgTag({cellSize: 5, margin: 1, scalable: true})
+  } catch {
+    /* The QR is an enhancement; the printed link is the fallback. */
+  }
+}
+
 mount()
+if (isBoard) void setupBoardDisplay()
 
 // Register the service worker so the app is installable as a PWA (home-screen on
 // iOS/iPad, standalone window). The SW never caches the live game API.

@@ -25,7 +25,10 @@ export default defineConfig({
         index: entry('index.html'),
         play: entry('play.html'),
         edit: entry('edit.html'),
-        solo: entry('solo.html')
+        solo: entry('solo.html'),
+        // board (route `/board`) is a read-only shared-screen table display
+        // (TV/monitor) with a join QR; it also runs web/src/play.ts.
+        board: entry('board.html')
       }
     }
   },
