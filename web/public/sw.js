@@ -1,12 +1,30 @@
-// Minimal service worker: enough for installability and a fast app-shell, but
-// deliberately NOT caching the live multiplayer API or map images (those must
-// always hit the network — a stale board or fog would be wrong). Network-first
-// for navigations, cache-first for the static app shell.
-const SHELL = 'los-shell-v1'
+// Service worker for installability AND a fully offline solo game. It precaches
+// the solo + controller app shell plus the lazy 3D-dice chunk (so the first
+// OFFLINE attack can still load the roller) from a build-generated manifest, then
+// serves network-first with a cache fallback. It deliberately never caches the
+// live multiplayer API or map images — a stale board or fog would be wrong, and a
+// cached SSE stream would be catastrophic.
+const SHELL = 'los-shell-v2'
+
+// Precache the offline shell from the build-generated list (hashed asset names,
+// the lazy three.js dice chunk, /gltf/dice.*, and the /solo + /controller
+// navigations). Best-effort and resilient: a missing entry or an offline install
+// never rejects — runtime caching still fills the shell on first online use.
+const precache = async () => {
+  const cache = await caches.open(SHELL)
+  try {
+    const res = await fetch('/precache.json', {cache: 'no-cache'})
+    if (!res.ok) return
+    const urls = await res.json()
+    await Promise.all(urls.map((u) => cache.add(new Request(u, {cache: 'reload'})).catch(() => {})))
+  } catch {
+    /* offline at install (or no manifest yet) — runtime caching covers it */
+  }
+}
 
 self.addEventListener('install', (event) => {
   self.skipWaiting()
-  event.waitUntil(caches.open(SHELL))
+  event.waitUntil(precache())
 })
 
 self.addEventListener('activate', (event) => {

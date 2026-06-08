@@ -1,8 +1,36 @@
-import {defineConfig} from 'vite'
+import {defineConfig, type Plugin} from 'vite'
 
 // Resolve an entry HTML relative to this config (project root), without needing
 // node types in the typecheck — only URL + import.meta.url, both standard ESM.
 const entry = (name: string): string => new URL(`./web/${name}`, import.meta.url).pathname
+
+// Emit `precache.json` (read by web/public/sw.js on install) listing the offline
+// shell for the PWA entries — the /solo and /controller navigations, the static
+// /gltf/dice.* model, and the full static+dynamic import closure of those two
+// entries (which pulls in the lazily-imported 3D-dice chunk). Hashed filenames
+// come straight from the bundle, so the list can never drift from what shipped.
+const precacheManifest = (): Plugin => ({
+  name: 'precache-manifest',
+  apply: 'build',
+  generateBundle(_options, bundle) {
+    const closure = new Set<string>()
+    const visit = (fileName: string): void => {
+      if (closure.has(fileName)) return
+      closure.add(fileName)
+      const chunk = bundle[fileName]
+      if (!chunk || chunk.type !== 'chunk') return
+      for (const css of chunk.viteMetadata?.importedCss ?? []) closure.add(css)
+      for (const next of [...chunk.imports, ...chunk.dynamicImports]) visit(next)
+    }
+    for (const file of Object.values(bundle)) {
+      if (file.type === 'chunk' && file.isEntry && (file.name === 'solo' || file.name === 'controller')) {
+        visit(file.fileName)
+      }
+    }
+    const urls = ['/solo', '/controller', '/gltf/dice.gltf', '/gltf/dice.bin', ...[...closure].map((f) => `/${f}`)]
+    this.emitFile({type: 'asset', fileName: 'precache.json', source: JSON.stringify(urls)})
+  }
+})
 
 // Minimal env read without pulling in @types/node (kept out of the typecheck).
 declare const process: {env: Record<string, string | undefined>}
@@ -10,6 +38,7 @@ const apiTarget = (): string => process.env.LOS_API_TARGET ?? 'https://los.tre.s
 
 export default defineConfig({
   root: 'web',
+  plugins: [precacheManifest()],
   test: {
     include: ['src/**/*.test.ts', '../src/**/*.test.ts', '../core/**/*.test.ts']
   },

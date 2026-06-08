@@ -72,11 +72,18 @@ const ensureOverlay = (container: HTMLElement): HTMLDivElement => {
 const ensureRoller = async (): Promise<DiceRoller> => {
   if (roller) return roller
   if (!loading) {
-    loading = import('@rgilks/cepheus-dice').then(({createDiceRoller}) => {
-      const target = overlay ?? ensureOverlay(host ?? document.body)
-      roller = createDiceRoller(target, DICE_OPTIONS)
-      return roller
-    })
+    loading = import('@rgilks/cepheus-dice')
+      .then(({createDiceRoller}) => {
+        const target = overlay ?? ensureOverlay(host ?? document.body)
+        roller = createDiceRoller(target, DICE_OPTIONS)
+        return roller
+      })
+      .catch((error) => {
+        // A failed import (e.g. offline before the chunk cached) must not poison
+        // future rolls — clear the cached promise so a later attempt retries.
+        loading = null
+        throw error
+      })
   }
   return loading
 }

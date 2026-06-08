@@ -55,10 +55,14 @@ import {
 import type {AttackFx} from './solo/model'
 import {createTweenLoop} from './viewport'
 import {installErrorReporting} from './error-reporting'
+import {registerServiceWorker} from './register-sw'
 import './solo.css'
 
 // Surface uncaught errors / rejections in the console (see error-reporting.ts).
 installErrorReporting('solo')
+// Install as an offline PWA: the SW precaches the shell + the 3D-dice chunk, so
+// after a first online visit the whole game loads and plays with no network.
+registerServiceWorker()
 
 // ---- movement animation (tween) ------------------------------------------
 // Mirrors the multiplayer client's ease so glides feel identical. The shared
@@ -221,28 +225,33 @@ const afterTurnUpkeep = (): void => {
 const runMonsters = async (): Promise<void> => {
   busy = true
   renderPanel()
-  afterTurnUpkeep()
-  let guard = 0
-  while (state && state.phase.t === 'playerTurn' && activeEntity(state)?.faction === 'monster' && guard < 400) {
-    guard += 1
-    const id = (activeEntity(state) as Entity).id
-    const plan = decideMonster(state, id)
-    for (const cell of plan.moves) {
-      if (!state) break
-      dispatch({t: 'Move', to: cellCenter(state.grid, cell.cx, cell.cy)})
-      await waitTween(id)
-    }
-    if (state && state.phase.t === 'playerTurn' && plan.attackTargetId) {
-      const prevFx = state.lastAttack
-      dispatch({t: 'Attack', targetId: plan.attackTargetId})
-      await delay(fireAttackFx(prevFx) ? 560 : 220)
-    }
-    if (state) dispatch({t: 'EndTurn'})
+  // try/finally so an unexpected throw mid-AI can never strand `busy` and freeze
+  // the player out of their next turn.
+  try {
     afterTurnUpkeep()
+    let guard = 0
+    while (state && state.phase.t === 'playerTurn' && activeEntity(state)?.faction === 'monster' && guard < 400) {
+      guard += 1
+      const id = (activeEntity(state) as Entity).id
+      const plan = decideMonster(state, id)
+      for (const cell of plan.moves) {
+        if (!state) break
+        dispatch({t: 'Move', to: cellCenter(state.grid, cell.cx, cell.cy)})
+        await waitTween(id)
+      }
+      if (state && state.phase.t === 'playerTurn' && plan.attackTargetId) {
+        const prevFx = state.lastAttack
+        dispatch({t: 'Attack', targetId: plan.attackTargetId})
+        await delay(fireAttackFx(prevFx) ? 560 : 220)
+      }
+      if (state) dispatch({t: 'EndTurn'})
+      afterTurnUpkeep()
+    }
+  } finally {
+    busy = false
+    renderPanel()
+    requestDraw()
   }
-  busy = false
-  renderPanel()
-  requestDraw()
 }
 
 // A player action during their own turn (movement, an action, a door, a push).
@@ -284,31 +293,44 @@ const onAttack = async (targetId: string): Promise<void> => {
   const gridScale = state.grid.gridScale
   busy = true
   renderPanel()
-  // First roll lazy-loads three.js (showDice kicks the dynamic import); the layer
-  // appears immediately and rollDice awaits the roller.
-  showDice(boardViewport)
   const prevFx = state.lastAttack
-  // First roll: the 2D6 to-hit (shown). The settled faces are authoritative — they
-  // feed the reducer below, so the dice on screen ARE the to-hit that's resolved.
-  const toHit = await rollDice([1, 1])
-  const faces = [...toHit.faces]
-  // On a hit, roll and SHOW the weapon's damage dice; their settled faces feed the
-  // reducer's damage roll, so the dice on screen are the damage that's applied
-  // (plus the weapon's flat modifier and the Effect).
-  const pred = predictAttack(actor, target, gridScale, faces[0] ?? 1, faces[1] ?? 1)
-  if (pred.hit) {
-    const dmgDice = parseDamage(weaponById(actor.weaponId).damage).count
-    await delay(220)
-    const damage = await rollDice(new Array(dmgDice).fill(1))
-    faces.push(...damage.faces)
+  // The 3D dice are a flourish over an authoritative throw, never a gate. Roll them
+  // when they load; if they can't (e.g. offline before the chunk was cached), fall
+  // back to a no-dice attack so the turn still resolves. try/finally guarantees
+  // `busy` is always cleared — a thrown roll must never freeze the game.
+  try {
+    let faces: number[] | null = null
+    try {
+      // First roll lazy-loads three.js (showDice kicks the dynamic import); the
+      // layer appears immediately and rollDice awaits the roller.
+      showDice(boardViewport)
+      // First roll: the 2D6 to-hit (shown). The settled faces are authoritative —
+      // they feed the reducer below, so the dice on screen ARE the resolved to-hit.
+      const toHit = await rollDice([1, 1])
+      faces = [...toHit.faces]
+      // On a hit, roll and SHOW the weapon's damage dice; their settled faces feed
+      // the reducer's damage roll, so the dice on screen are the damage applied
+      // (plus the weapon's flat modifier and the Effect).
+      const pred = predictAttack(actor, target, gridScale, faces[0] ?? 1, faces[1] ?? 1)
+      if (pred.hit) {
+        const dmgDice = parseDamage(weaponById(actor.weaponId).damage).count
+        await delay(220)
+        const damage = await rollDice(new Array(dmgDice).fill(1))
+        faces.push(...damage.faces)
+      }
+    } catch {
+      faces = null // dice unavailable — resolve the attack with the engine's own rng
+    }
+    // With faces: the on-screen dice drive the throw. Without: the reducer rolls.
+    dispatch({t: 'Attack', targetId}, faces ? queuedFaces(faces) : undefined)
+    if (faces) await delay(520)
+    hideDice()
+    if (fireAttackFx(prevFx)) await delay(720)
+  } finally {
+    busy = false
+    renderPanel()
+    requestDraw()
   }
-  dispatch({t: 'Attack', targetId}, queuedFaces(faces))
-  await delay(520)
-  hideDice()
-  if (fireAttackFx(prevFx)) await delay(720)
-  busy = false
-  renderPanel()
-  requestDraw()
 }
 
 // Can the active character attack `target` right now — their turn, their own line
