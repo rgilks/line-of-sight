@@ -4,9 +4,9 @@
 // AI lives in exactly one place), persists the event log to IndexedDB, and
 // delivers produced events to subscribers for animation. Resume folds the saved
 // log over the seed-derived genesis — identical to the server's replay().
-import type {SoloState} from '../solo/model'
-import {createSession, replay, step, type SoloCommand, type SoloSession} from '../solo/session'
-import {loadGame, saveGame} from '../solo/idb'
+import {activeEntity, type SoloState} from '../solo/model'
+import {createSession, replay, runAi, step, type SoloCommand, type SoloSession} from '../solo/session'
+import {clearGame, loadGame, saveGame} from '../solo/idb'
 import type {Room, RoomListener} from './room'
 
 const randomSeed = (): number => Math.floor(Math.random() * 100000)
@@ -37,6 +37,15 @@ export class LocalRoom implements Room {
     return room
   }
 
+  // Start a brand-new game under this id, discarding any saved progress ("New
+  // deck"). Always fresh — unlike open(), which resumes when a save exists.
+  static async fresh(gameId: string, seed?: number): Promise<LocalRoom> {
+    await clearGame(gameId)
+    const room = new LocalRoom(createSession(seed ?? randomSeed()), gameId)
+    room.scheduleSave()
+    return room
+  }
+
   getState(): SoloState {
     return this.session.state
   }
@@ -52,6 +61,18 @@ export class LocalRoom implements Room {
   async submit(command: SoloCommand, rng?: () => number): Promise<void> {
     const {state, events} = step(this.session.state, command, rng ?? this.session.rng)
     if (events.length === 0) return // rejected: not your turn / illegal
+    this.session = {...this.session, state, events: [...this.session.events, ...events]}
+    this.scheduleSave()
+    for (const listener of this.listeners) await listener(events, state)
+  }
+
+  // After resuming a game that was closed mid-horde-turn, the active entity is a
+  // monster; run the AI to completion so control returns to the player rather than
+  // stalling. The produced events are persisted and animated like any other batch.
+  async resumeIdleAi(): Promise<void> {
+    if (activeEntity(this.session.state)?.faction !== 'monster') return
+    const {state, events} = runAi(this.session.state, this.session.rng)
+    if (events.length === 0) return
     this.session = {...this.session, state, events: [...this.session.events, ...events]}
     this.scheduleSave()
     for (const listener of this.listeners) await listener(events, state)

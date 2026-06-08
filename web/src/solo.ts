@@ -13,7 +13,7 @@ import {pointInPolygon} from '../../core/rules'
 import {ARMORS, weaponById} from './solo/gear'
 import {parseDamage, predictAttack, rangeBandFor} from './solo/combat'
 import {decideMonster} from './solo/ai'
-import {buildWave, createSoloGame} from './solo/setup'
+import {buildWave} from './solo/setup'
 // The 3D dice live in a shared module that dynamic-import()s three.js on first
 // roll, so it is NOT in this page's initial bundle (the solo chunk stays light).
 import {diceVisible, hideDice, rollDice, showDice} from './dice-overlay'
@@ -40,9 +40,9 @@ import {
   type SoloState
 } from './solo/model'
 import {cellCenter, cellOf, isFloor} from './solo/grid'
-import {reduce, reduceWithEvents, type SoloEvent} from './solo/reducer'
-import {replay} from './solo/session'
-import {loadGame, saveGame, type SavedGame} from './solo/idb'
+import {foldSolo, reduce, type SoloEvent} from './solo/reducer'
+import {LocalRoom} from './room/local-room'
+import type {Room} from './room/room'
 import {
   clearEffects,
   drawEffects,
@@ -174,22 +174,17 @@ const sizeFogLayers = (w: number, h: number): void => {
 // The in-memory event log (the same SoloEvents the server stores), persisted to
 // IndexedDB so closing the tab and reopening resumes the exact game. There is one
 // solo game per browser, so a single fixed id suffices.
+// ---- the Room: one engine backing this view (offline now, server later) ----
+// solo.ts is a view over a Room. A LocalRoom runs the event-sourced engine in the
+// browser and persists to IndexedDB; the SAME interface becomes a RemoteRoom (the
+// server) later. `state` here is the DISPLAY state — folded from the Room's event
+// batches one event at a time so the monster glide animates — and it catches up to
+// the Room's authoritative state at the end of each batch (input is locked then).
 const GAME_ID = 'current'
-let events: SoloEvent[] = []
-let currentSeed = 0
-let saveTimer: ReturnType<typeof setTimeout> | null = null
+let room: Room | null = null
 
-// Coalesce rapid writes (a monster turn dispatches many events) into one save.
-const scheduleSave = (): void => {
-  if (saveTimer !== null) clearTimeout(saveTimer)
-  saveTimer = setTimeout(() => {
-    saveTimer = null
-    void saveGame(GAME_ID, {seed: currentSeed, events: [...events], updatedAt: Date.now()})
-  }, 250)
-}
-
-// Install an authoritative state (fresh or replayed) into the view: reset
-// selection/animation, size the canvas + fog, and frame the squad.
+// Install an authoritative state into the view: reset selection/animation, size
+// the canvas + fog, and frame the squad.
 const installState = (next: SoloState): void => {
   selectedId = null
   busy = false
@@ -207,116 +202,88 @@ const installState = (next: SoloState): void => {
   requestDraw()
 }
 
-// Start a fresh game on `seed`, replacing any saved progress.
-const newGame = (seed = Math.floor(Math.random() * 100000)): void => {
-  currentSeed = seed
-  events = []
-  installState(createSoloGame(seed)) // pure, shared with the server-authoritative room
-  scheduleSave()
-}
-
-// Resume a persisted game by folding its events over the seed-derived genesis —
-// the SAME replay() the server Durable Object uses to recover after a restart.
-const resumeGame = (saved: SavedGame): void => {
-  currentSeed = saved.seed
-  events = [...saved.events]
-  installState(replay(saved.seed, saved.events).state)
-  // If the tab closed mid-horde-turn, the active entity is a monster; finish the
-  // monster turns so control returns to the player rather than stalling.
-  if (state && activeEntity(state)?.faction === 'monster') void runMonsters()
-}
-
-// Resume a saved game when one exists and matches the requested seed (or no seed
-// was asked for); otherwise start fresh. Async because IndexedDB is async — the
-// canvas is already mounted, so there is at most a brief blank before first paint.
-const bootGame = async (requestedSeed?: number): Promise<void> => {
-  const saved = await loadGame(GAME_ID)
-  if (saved && saved.events.length > 0 && (requestedSeed === undefined || requestedSeed === saved.seed)) {
-    resumeGame(saved)
-  } else {
-    newGame(requestedSeed)
-  }
-}
-
-// ---- dispatch: reduce + animate the result --------------------------------
-const dispatch = (action: Parameters<typeof reduce>[1], rng?: () => number): void => {
-  if (!state) return
-  const before = new Map(state.entities.map((entity) => [entity.id, {x: entity.x, y: entity.y}]))
-  const wasLost = state.phase.t === 'lost'
-  // decide → fold, capturing the events so they can be persisted for offline
-  // resume (the same facts the server stores and replays).
-  const result = reduceWithEvents(state, action, rng)
-  state = result.state
-  if (result.events.length > 0) {
-    events.push(...result.events)
-    scheduleSave()
-  }
-  for (const entity of state.entities) {
-    const old = before.get(entity.id)
-    if (old && (old.x !== entity.x || old.y !== entity.y)) {
-      startEase(entity.id, renderPos.get(entity.id) ?? old, {x: entity.x, y: entity.y})
+// Fold + animate one batch of engine events into the display state, preserving the
+// per-move monster glide and weapon effects. Player attacks own their dice + fx
+// sequence in onAttack, so this fires the auto-fx only for monster attackers.
+const playEvents = async (batch: SoloEvent[]): Promise<void> => {
+  for (const event of batch) {
+    if (!state) return
+    const before = new Map(state.entities.map((entity) => [entity.id, {x: entity.x, y: entity.y}]))
+    const wasLost = state.phase.t === 'lost'
+    const prevFx = state.lastAttack
+    state = foldSolo(state, event)
+    for (const entity of state.entities) {
+      const old = before.get(entity.id)
+      if (old && (old.x !== entity.x || old.y !== entity.y)) {
+        startEase(entity.id, renderPos.get(entity.id) ?? old, {x: entity.x, y: entity.y})
+      }
     }
-  }
-  if (!wasLost && state.phase.t === 'lost') playUi('lose')
-  if (action.t === 'EndTurn' || action.t === 'AddWave') focusOnActive()
-  renderPanel()
-  requestDraw()
-}
-
-// When the squad has cleared every monster, spawn the next wave at the airlocks —
-// or, if the final wave is down, win.
-const afterTurnUpkeep = (): void => {
-  if (!state || state.phase.t !== 'playerTurn') return
-  if (state.entities.some((entity) => entity.faction === 'monster' && !isDead(entity))) return
-  if (state.wave >= state.wavesTotal) {
-    state = {...state, phase: {t: 'won'}}
-    playUi('win')
+    if (!wasLost && state.phase.t === 'lost') playUi('lose')
+    if (event.t === 'TurnAdvanced' || event.t === 'WaveAdded') focusOnActive()
+    if (event.t === 'WaveAdded') playUi('wave')
+    if (event.t === 'Won') playUi('win')
     renderPanel()
     requestDraw()
-    return
-  }
-  playUi('wave')
-  dispatch({t: 'AddWave', monsters: buildWave(state.map, state.grid, state.wave + 1)})
-}
-
-// Run monster turns to completion: each plans (decideMonster), glides its steps,
-// then attacks. Player input is locked meanwhile.
-const runMonsters = async (): Promise<void> => {
-  busy = true
-  renderPanel()
-  // try/finally so an unexpected throw mid-AI can never strand `busy` and freeze
-  // the player out of their next turn.
-  try {
-    afterTurnUpkeep()
-    let guard = 0
-    while (state && state.phase.t === 'playerTurn' && activeEntity(state)?.faction === 'monster' && guard < 400) {
-      guard += 1
-      const id = (activeEntity(state) as Entity).id
-      const plan = decideMonster(state, id)
-      for (const cell of plan.moves) {
-        if (!state) break
-        dispatch({t: 'Move', to: cellCenter(state.grid, cell.cx, cell.cy)})
-        await waitTween(id)
-      }
-      if (state && state.phase.t === 'playerTurn' && plan.attackTargetId) {
-        const prevFx = state.lastAttack
-        dispatch({t: 'Attack', targetId: plan.attackTargetId})
+    // Pace by event type, matching the old runMonsters/onAttack feel: glide each
+    // monster move, and play a monster attack's effect with its impact delay.
+    if (event.t === 'Moved') {
+      if (entityById(state, event.actorId)?.faction === 'monster') await waitTween(event.actorId)
+    } else if (event.t === 'Attacked') {
+      if (entityById(state, event.attackerId)?.faction === 'monster') {
         await delay(fireAttackFx(prevFx) ? 560 : 220)
       }
-      if (state) dispatch({t: 'EndTurn'})
-      afterTurnUpkeep()
     }
-  } finally {
-    busy = false
-    renderPanel()
-    requestDraw()
   }
+}
+
+// Issue a player command for the active character through the Room. byActor is the
+// active PC (the local player owns every piece), so the engine's authority gate
+// always passes; the optional rng carries solo's on-screen 3D-dice faces.
+const submitCommand = (action: Parameters<typeof reduce>[1], rng?: () => number): Promise<void> => {
+  if (!room || !state) return Promise.resolve()
+  const active = activeEntity(state)
+  if (!active) return Promise.resolve()
+  return room.submit({byActor: active.id, action}, rng)
+}
+
+// Point the view at a Room: subscribe the animation pump, show its current state,
+// and — if it resumed mid-horde-turn — finish the monster turns.
+const useRoom = async (next: Room): Promise<void> => {
+  room?.close()
+  room = next
+  room.subscribe(playEvents)
+  installState(room.getState())
+  if (next instanceof LocalRoom && activeEntity(next.getState())?.faction === 'monster') {
+    busy = true
+    renderPanel()
+    try {
+      await next.resumeIdleAi()
+    } finally {
+      busy = false
+      renderPanel()
+      requestDraw()
+    }
+  }
+}
+
+// Start a brand-new game ("New deck"), discarding saved progress.
+const newGame = async (): Promise<void> => {
+  await useRoom(await LocalRoom.fresh(GAME_ID))
+}
+
+// Boot: resume a saved game when it matches the requested seed (or none was asked
+// for), else start fresh. Async because IndexedDB is async — the canvas is already
+// mounted, so there is at most a brief blank before first paint.
+const bootGame = async (requestedSeed?: number): Promise<void> => {
+  await useRoom(await LocalRoom.open(GAME_ID, requestedSeed))
 }
 
 // A player action during their own turn (movement, an action, a door, a push).
+// The Room folds + animates the produced events through the subscribed pump; the
+// fold runs synchronously, so movement stays responsive (no await here).
 const playerAct = (action: Parameters<typeof reduce>[1]): void => {
   if (busy || !state || state.phase.t !== 'playerTurn') return
-  dispatch(action)
+  void submitCommand(action)
 }
 
 // If the just-dispatched action resolved a fresh attack (a new lastAttack object),
@@ -380,8 +347,10 @@ const onAttack = async (targetId: string): Promise<void> => {
     } catch {
       faces = null // dice unavailable — resolve the attack with the engine's own rng
     }
-    // With faces: the on-screen dice drive the throw. Without: the reducer rolls.
-    dispatch({t: 'Attack', targetId}, faces ? queuedFaces(faces) : undefined)
+    // With faces: the on-screen dice drive the throw. Without: the engine rolls.
+    // The Room folds the Attacked event (the pump skips auto-fx for PC attackers),
+    // so after this resolves state.lastAttack holds the result for the fx below.
+    await submitCommand({t: 'Attack', targetId}, faces ? queuedFaces(faces) : undefined)
     if (faces) await delay(520)
     hideDice()
     if (fireAttackFx(prevFx)) await delay(720)
@@ -411,13 +380,22 @@ const canAttackTarget = (target: Entity): boolean => {
   return weapon.magazine === undefined || actor.loadedRounds > 0
 }
 
-// End the player's turn, then hand off to the monster AI.
-const endTurn = (): void => {
+// End the player's turn. The engine runs the monster AI (and any wave upkeep) to
+// completion inside the same command; the pump animates the resulting events while
+// input is locked, then returns control to the player.
+const endTurn = async (): Promise<void> => {
   if (busy || !state || state.phase.t !== 'playerTurn') return
   cancelPendingMove()
   playUi('endTurn')
-  dispatch({t: 'EndTurn'})
-  void runMonsters()
+  busy = true
+  renderPanel()
+  try {
+    await submitCommand({t: 'EndTurn'})
+  } finally {
+    busy = false
+    renderPanel()
+    requestDraw()
+  }
 }
 
 // The floating End-Turn button shows only while it's the player's turn to act.
@@ -1758,7 +1736,7 @@ const renderPanel = (): void => {
     logExpanded = !logExpanded
     renderPanel()
   })
-  panel.querySelector<HTMLButtonElement>('#solo-new')?.addEventListener('click', () => newGame())
+  panel.querySelector<HTMLButtonElement>('#solo-new')?.addEventListener('click', () => void newGame())
   panel.querySelector<HTMLInputElement>('#solo-grid')?.addEventListener('change', (event) => {
     showGrid = (event.target as HTMLInputElement).checked
     requestDraw()
@@ -1816,7 +1794,6 @@ mount()
 if (import.meta.env.DEV) {
   ;(window as unknown as {__solo: unknown}).__solo = {
     newGame,
-    dispatch,
     peek: () => state,
     cellOf: (x: number, y: number) => (state ? cellOf(state.grid, x, y) : null),
     // Test helpers (dev only): reposition an entity, select a target, force redraw.
@@ -1838,7 +1815,7 @@ if (import.meta.env.DEV) {
     },
     attack: (id: string) => onAttack(id),
     endTurn: async () => {
-      endTurn()
+      void endTurn()
       // give the async monster driver time to finish (tweens + beats)
       for (let i = 0; i < 200 && busy; i += 1) await delay(30)
     },
