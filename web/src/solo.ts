@@ -30,7 +30,9 @@ import {ARMORS, weaponById} from './solo/gear'
 import {parseDamage, predictAttack, rangeBandFor} from './solo/combat'
 import {decideMonster} from './solo/ai'
 import {planLockAndLoot} from './solo/loot'
-import {createDiceRoller, type DiceRoller} from '@rgilks/cepheus-dice'
+// The 3D dice live in a shared module that dynamic-import()s three.js on first
+// roll, so it is NOT in this page's initial bundle (the solo chunk stays light).
+import {diceVisible, hideDice, rollDice, showDice} from './dice-overlay'
 import {
   activeEntity,
   canSeePoint,
@@ -73,14 +75,13 @@ const WAVES_TOTAL = 3
 // (follow-camera + dice-overlay hold + draw).
 const MOVE_EASE_MS = 320
 let busy = false // true while the monster AI is taking its turns (locks player input)
-let diceUp = false // true while the dice overlay is shown (hold the camera)
 
 // Per-frame work for the rAF loop. Returns whether to keep ticking beyond the
 // tween: while the camera is gliding or effects are still animating.
 const onFrame = (t: number, moving: boolean): boolean => {
   // Follow the active token as it glides (the camera keeps it framed with the
   // nearest enemy). Skip while the dice overlay is up so it doesn't drift.
-  if (moving && state && !diceUp) {
+  if (moving && state && !diceVisible()) {
     const actor = activeEntity(state)
     if (actor && anim.has(actor.id)) focusOnActive()
   }
@@ -123,8 +124,6 @@ let canvas: HTMLCanvasElement
 let ctx: CanvasRenderingContext2D
 let panel: HTMLDivElement
 let boardViewport: HTMLDivElement
-let diceOverlay: HTMLDivElement
-let diceRoller: DiceRoller
 let endFab: HTMLButtonElement | null = null // floating End-Turn button over the board
 
 // An rng that yields the given die faces first (mapped to rollD6 buckets), then
@@ -522,24 +521,6 @@ const playerAct = (action: Parameters<typeof reduce>[1]): void => {
   dispatch(action)
 }
 
-const showDice = (): void => {
-  // The overlay lives inside the scrollable board, so when the player has zoomed
-  // in and panned, a plain inset:0 overlay scrolls away with the content. Pin it
-  // over the *visible* viewport (offset by the current scroll) so the dice always
-  // land centred on screen at the same size, whatever the zoom/pan.
-  diceOverlay.style.left = `${boardViewport.scrollLeft}px`
-  diceOverlay.style.top = `${boardViewport.scrollTop}px`
-  diceOverlay.style.width = `${boardViewport.clientWidth}px`
-  diceOverlay.style.height = `${boardViewport.clientHeight}px`
-  diceOverlay.style.display = 'block'
-  diceUp = true
-  diceRoller.resize()
-}
-const hideDice = (): void => {
-  diceOverlay.style.display = 'none'
-  diceUp = false
-}
-
 // If the just-dispatched action resolved a fresh attack (a new lastAttack object),
 // play its weapon sound + projectile/strike + impact effect. Returns whether it fired.
 const fireAttackFx = (prev: AttackFx | undefined): boolean => {
@@ -573,10 +554,13 @@ const onAttack = async (targetId: string): Promise<void> => {
   const gridScale = state.grid.gridScale
   busy = true
   renderPanel()
-  showDice()
+  // First roll lazy-loads three.js (showDice kicks the dynamic import); the layer
+  // appears immediately and rollDice awaits the roller.
+  showDice(boardViewport)
   const prevFx = state.lastAttack
-  // First roll: the 2D6 to-hit (shown).
-  const toHit = await diceRoller.roll(2)
+  // First roll: the 2D6 to-hit (shown). The settled faces are authoritative — they
+  // feed the reducer below, so the dice on screen ARE the to-hit that's resolved.
+  const toHit = await rollDice([1, 1])
   const faces = [...toHit.faces]
   // On a hit, roll and SHOW the weapon's damage dice; their settled faces feed the
   // reducer's damage roll, so the dice on screen are the damage that's applied
@@ -585,7 +569,7 @@ const onAttack = async (targetId: string): Promise<void> => {
   if (pred.hit) {
     const dmgDice = parseDamage(weaponById(actor.weaponId).damage).count
     await delay(220)
-    const damage = await diceRoller.roll(dmgDice)
+    const damage = await rollDice(new Array(dmgDice).fill(1))
     faces.push(...damage.faces)
   }
   dispatch({t: 'Attack', targetId}, queuedFaces(faces))
@@ -1982,16 +1966,6 @@ const mount = (): void => {
   app.querySelector('.solo-shell')?.appendChild(endFab)
   window.addEventListener('keydown', onKey)
 
-  diceOverlay = document.createElement('div')
-  diceOverlay.id = 'solo-dice'
-  boardViewport.appendChild(diceOverlay)
-  diceRoller = createDiceRoller(diceOverlay, {
-    colors: {body: '#ecd5bb', pip: '#222222'},
-    modelUrl: '/gltf/dice.gltf',
-    // 'void': dice spotlit over the dimmed board, not the green tray box.
-    lighting: 'void'
-  })
-
   const seedParam = new URLSearchParams(location.search).get('seed')
   const seed = seedParam !== null && Number.isFinite(Number(seedParam)) ? Number(seedParam) : undefined
   newGame(seed)
@@ -2049,8 +2023,8 @@ if (import.meta.env.DEV) {
     },
     // Preview the dice overlay without driving a full attack (visual tuning only).
     rollDice: async (n = 2) => {
-      showDice()
-      await diceRoller.roll(n)
+      showDice(boardViewport)
+      await rollDice(new Array(n).fill(1))
     },
     hideDice,
     // Slow effects down (or back to 1) for inspection.

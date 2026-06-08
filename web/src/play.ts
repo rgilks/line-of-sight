@@ -35,6 +35,10 @@ import {
 import {publishGeneratedDeck, randomSeed} from './host'
 import {playerPlayUrl} from './table-links'
 import {createTweenLoop} from './viewport'
+// 3D initiative dice, shared with the solo game. The module dynamic-import()s
+// three.js on first roll, so it stays out of this page's initial bundle and only
+// loads the first time a player rolls initiative.
+import {hideDice, rollDice, showDice} from './dice-overlay'
 import './play.css'
 
 preloadCounterPortraits()
@@ -192,6 +196,51 @@ const boardGeometryChanged = (previous: Board | null, next: Board): boolean => {
   return JSON.stringify(previous.occluders) !== JSON.stringify(next.occluders)
 }
 
+// The local player's last-seen initiative dice, so a fresh server roll (the value
+// going from absent to present) fires the 3D dice exactly once per roll — not on
+// every re-projection that still carries the same dice.
+let lastShownInitiativeDice: [number, number] | null = null
+let initiativeDiceRolling = false
+
+// When THIS player's initiative result arrives, play the 3D dice as a brief
+// overlay settling beside the (server-authoritative) initiative number. The roll
+// is physics-only — the displayed initiative comes from the server — so this is a
+// pure flourish. Lazy (three.js loads on first roll) and non-blocking: if the dice
+// module fails to load, gameplay continues with no 3D dice.
+const maybePlayInitiativeDice = (previous: CombatState | null, nextCombat: CombatState | null): void => {
+  if (isGm || !boardViewport) return
+  const mine = combatantForPlayer(nextCombat, you.value)
+  const dice = mine?.dice ?? null
+  // Reset the gate when combat ends or this player leaves it, so the next combat's
+  // roll is detected afresh.
+  if (!dice) {
+    lastShownInitiativeDice = null
+    return
+  }
+  const before = combatantForPlayer(previous, you.value)?.dice ?? null
+  // Only a *new* roll: dice were absent (or different) last we saw, and we haven't
+  // already shown this exact pair.
+  const isFreshRoll = !before
+  const alreadyShown =
+    lastShownInitiativeDice && lastShownInitiativeDice[0] === dice[0] && lastShownInitiativeDice[1] === dice[1]
+  if (!isFreshRoll || alreadyShown || initiativeDiceRolling) return
+  lastShownInitiativeDice = dice
+  initiativeDiceRolling = true
+  showDice(boardViewport)
+  // rollDice rolls one physical die per face; the server's [a, b] is what the
+  // initiative number reflects, so the throw is a flourish, not the source of truth.
+  void rollDice(dice)
+    .catch(() => {
+      /* three.js failed to load — drop the flourish, keep playing */
+    })
+    .finally(() => {
+      window.setTimeout(() => {
+        hideDice()
+        initiativeDiceRolling = false
+      }, 520)
+    })
+}
+
 const applyView = (
   next: Board,
   nextTokens: Token[],
@@ -199,10 +248,12 @@ const applyView = (
   nextCombat: CombatState | null
 ): void => {
   const previous = board.value
+  const previousCombat = combat.value
   const geometryChanged = boardGeometryChanged(previous, next)
   reconcileRenderPos(nextTokens, geometryChanged)
   says.value = nextSays
   combat.value = nextCombat
+  maybePlayInitiativeDice(previousCombat, nextCombat)
   board.value = next
   tokens.value = nextTokens
   if (targetTokenId.value && !nextTokens.some((token) => token.id === targetTokenId.value)) {
