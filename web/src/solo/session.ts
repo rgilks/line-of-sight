@@ -12,9 +12,12 @@ import {decide, foldSolo, type SoloEvent} from './reducer'
 import {buildWave, createSoloGame} from './setup'
 import {activeEntity, entityById, isDead, type Action, type Entity, type SoloState} from './model'
 
-// A player command, naming the actor (character) issuing it: either an atomic
-// action, or a d-pad step (a unit direction resolved to a one-cell Move).
-export type SoloCommand = {byActor: string} & ({action: Action} | {step: {dx: number; dy: number}})
+// A player command, naming the actor (character) issuing it and — in multiplayer —
+// the seat (`byPlayer`) so the engine can check that seat owns the active piece.
+// Either an atomic action, or a d-pad step (a unit direction resolved to a one-cell
+// Move). `byActor` is optional so seat-lifecycle commands (ClaimSeat/ReleaseSeat),
+// which are ungated by turn, can omit it.
+export type SoloCommand = {byActor?: string; byPlayer?: string} & ({action: Action} | {step: {dx: number; dy: number}})
 
 // A session bundles the authoritative state with its seeded rng and the persisted
 // event log, so it can be replayed to recover after a restart.
@@ -34,13 +37,19 @@ const advance = (
 }
 
 // A d-pad step → a one-cell Move, after checking the issuer is active.
-const stepCommand = (state: SoloState, dir: {dx: number; dy: number}, byActor: string, rng: () => number) => {
-  if (activeEntity(state)?.id !== byActor) return advance(state, () => ({rejected: null}))
+const stepCommand = (
+  state: SoloState,
+  dir: {dx: number; dy: number},
+  byActor: string | undefined,
+  byPlayer: string | undefined,
+  rng: () => number
+) => {
+  if (byActor === undefined || activeEntity(state)?.id !== byActor) return advance(state, () => ({rejected: null}))
   const actor = entityById(state, byActor)
   if (!actor) return advance(state, () => ({rejected: null}))
   const c = cellOf(state.grid, actor.x, actor.y)
   const to = cellCenter(state.grid, c.cx + Math.sign(dir.dx), c.cy + Math.sign(dir.dy))
-  return advance(state, () => decide(state, {t: 'Move', to}, rng))
+  return advance(state, () => decide(state, {t: 'Move', to}, rng, byActor, byPlayer))
 }
 
 // When the squad has cleared the deck, spawn the next wave at the airlocks — or,
@@ -95,8 +104,8 @@ export const step = (
 ): {state: SoloState; events: SoloEvent[]; rejected: string | null} => {
   const player =
     'step' in command
-      ? stepCommand(state, command.step, command.byActor, rng)
-      : advance(state, () => decide(state, command.action, rng, command.byActor))
+      ? stepCommand(state, command.step, command.byActor, command.byPlayer, rng)
+      : advance(state, () => decide(state, command.action, rng, command.byActor, command.byPlayer))
   if (player.events.length === 0) return {state, events: [], rejected: player.rejected}
   const ai = runAi(player.state, rng)
   return {state: ai.state, events: [...player.events, ...ai.events], rejected: null}

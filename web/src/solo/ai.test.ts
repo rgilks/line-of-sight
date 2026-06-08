@@ -48,6 +48,7 @@ const makeState = (entities: Entity[]): SoloState => {
     grid,
     doorStates: {},
     sightRadius: 1000,
+    seats: [],
     entities,
     ground: [],
     props: [],

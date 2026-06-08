@@ -287,6 +287,7 @@ export const createSoloGame = (seed: number, rng: Rng = Math.random): SoloState 
       map.occluders.filter((o) => o.type === 'door').map((d) => [d.id, {open: locks[d.id] ? false : true}])
     ),
     sightRadius: SIGHT_RADIUS,
+    seats: [], // no seats offline; multiplayer adds them on join (see seats.ts)
     entities,
     ground,
     props,

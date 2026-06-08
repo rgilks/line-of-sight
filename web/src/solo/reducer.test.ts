@@ -4,7 +4,7 @@ import type {Occluder} from '../../../core/los'
 import type {Rng} from '../../../core/dice'
 import {buildWalkGrid} from './grid'
 import {moveBudgetPx, turnBudgetPx, type Container, type Entity, type SoloState} from './model'
-import {reduce} from './reducer'
+import {decide, foldSolo, reduce} from './reducer'
 
 // A 10×10 open room (cells 1..8 are floor) at 30px/cell, no occluders unless
 // supplied — so line of sight is unobstructed and we test budget/walk/occupancy.
@@ -48,6 +48,7 @@ const makeState = (entities: Entity[], occluders: Occluder[] = []): SoloState =>
     grid,
     doorStates: {},
     sightRadius: 1000,
+    seats: [],
     entities,
     ground: [],
     props: [],
@@ -406,5 +407,28 @@ describe('solo reducer — multi-actor authority', () => {
     const state = makeState([pc('a', 2, 2, 0)])
     const next = reduce(state, {t: 'Move', to: east})
     expect(next.entities[0].x).toBeCloseTo(east.x)
+  })
+})
+
+describe('solo reducer — seats & ownership', () => {
+  it('claiming the first seat assigns every PC to it', () => {
+    const state = makeState([pc('a', 2, 2, 0), pc('b', 3, 3, 1)])
+    const result = decide(state, {t: 'ClaimSeat', seatId: 's1', joinedAt: 1})
+    if ('rejected' in result) throw new Error('claim should be accepted')
+    const next = result.events.reduce(foldSolo, state)
+    expect(next.seats.map((s) => s.id)).toEqual(['s1'])
+    expect(next.entities.every((e) => e.owner === 's1')).toBe(true)
+  })
+
+  it('gates commands to the seat that owns the active piece (and is a no-op offline)', () => {
+    let state = makeState([pc('a', 2, 2, 0)])
+    state = reduce(state, {t: 'ClaimSeat', seatId: 's1', joinedAt: 1}) // s1 owns the only PC
+    state = reduce(state, {t: 'ClaimSeat', seatId: 's2', joinedAt: 2}) // 1 PC → s1 keeps it, s2 spectates
+    const active = state.entities[state.turnPtr]
+    expect(active.owner).toBe('s1')
+    // Wrong owner → rejected; owner → accepted; no byPlayer (offline) → ungated.
+    expect('rejected' in decide(state, {t: 'Aim'}, Math.random, active.id, 's2')).toBe(true)
+    expect('rejected' in decide(state, {t: 'Aim'}, Math.random, active.id, 's1')).toBe(false)
+    expect('rejected' in decide(state, {t: 'Aim'}, Math.random, active.id)).toBe(false)
   })
 })

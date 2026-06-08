@@ -39,8 +39,10 @@ import {
   type Entity,
   type GroundItem,
   type ItemStack,
+  type Seat,
   type SoloState
 } from './model'
+import {redistribute, type SeatAssignment} from './seats'
 
 const LOG_KEEP = 60
 const appendLines = (state: SoloState, lines: ReadonlyArray<string>): SoloState =>
@@ -198,6 +200,16 @@ export type SoloEvent =
   | {t: 'TurnAdvanced'; turnPtr: number; round: number}
   | {t: 'WaveAdded'; entities: Entity[]; wave: number; round: number; turnPtr: number; line: string}
   | {t: 'Won'}
+  // A player joins / leaves; `assignments` is the FULL post-redistribution piece
+  // ownership (fold applies it wholesale — no recompute, so replay is exact).
+  | {t: 'SeatClaimed'; seat: Seat; assignments: SeatAssignment[]}
+  | {t: 'SeatReleased'; seatId: string; assignments: SeatAssignment[]}
+
+// Apply a full ownership assignment to the PCs (null → unowned).
+const applyOwners = (entities: Entity[], assignments: SeatAssignment[]): Entity[] => {
+  const owners = new Map(assignments.map((a) => [a.pcId, a.owner]))
+  return entities.map((e) => (owners.has(e.id) ? {...e, owner: owners.get(e.id) ?? undefined} : e))
+}
 
 const applyEquip = (state: SoloState, actorId: string, equip: EquipFields): Entity[] =>
   replace(state, actorId, (e) => ({
@@ -373,6 +385,14 @@ export const foldSolo = (state: SoloState, event: SoloEvent): SoloState => {
       )
     case 'Won':
       return {...state, phase: {t: 'won'}}
+    case 'SeatClaimed':
+      return {...state, seats: [...state.seats, event.seat], entities: applyOwners(state.entities, event.assignments)}
+    case 'SeatReleased':
+      return {
+        ...state,
+        seats: state.seats.filter((s) => s.id !== event.seatId),
+        entities: applyOwners(state.entities, event.assignments)
+      }
   }
 }
 
@@ -703,13 +723,45 @@ const decideAddWave = (state: SoloState, monsters: Entity[], rng: Rng): DecideRe
   })
 }
 
+// Seat lifecycle: a player joins / leaves, which redistributes piece ownership
+// across the present seats (see seats.ts). Ungated by turn — anyone may claim a
+// free seat at any time (open join). The event carries the full new ownership map.
+const decideClaimSeat = (state: SoloState, seatId: string, joinedAt: number): DecideResult => {
+  if (state.seats.some((s) => s.id === seatId)) return reject() // already seated
+  const seats: Seat[] = [...state.seats, {id: seatId, joinedAt}]
+  const pcs = state.entities.filter((e) => e.faction === 'pc')
+  return ok({
+    t: 'SeatClaimed',
+    seat: {id: seatId, joinedAt},
+    assignments: redistribute(seats, pcs, activeEntity(state)?.id)
+  })
+}
+
+const decideReleaseSeat = (state: SoloState, seatId: string): DecideResult => {
+  if (!state.seats.some((s) => s.id === seatId)) return reject() // not seated
+  const seats = state.seats.filter((s) => s.id !== seatId)
+  const pcs = state.entities.filter((e) => e.faction === 'pc')
+  return ok({t: 'SeatReleased', seatId, assignments: redistribute(seats, pcs, activeEntity(state)?.id)})
+}
+
 // In multi-actor "companion" play (see docs/COMPANION-PLAY.md) a command names the
-// actor issuing it via `byActor`. A player may act only on their own character's
-// turn — any command from a non-active actor is rejected (the authority gate that
-// stops one phone from driving another's character). Single-player, the monster
-// AI, and the wave director pass no `byActor` and are ungated.
-export const decide = (state: SoloState, action: Action, rng: Rng = Math.random, byActor?: string): DecideResult => {
+// actor issuing it via `byActor`, and the seat (player) via `byPlayer`. A command is
+// accepted only on the active character's turn (`byActor`) AND, when a seat is
+// named, only if that seat OWNS the active character (`byPlayer`) — the authority
+// gate that stops one phone from driving another's piece. Single-player, the monster
+// AI, and the wave director pass neither and are ungated; seat claims are ungated by
+// turn. Offline (`byPlayer` unset) the ownership clause is a no-op.
+export const decide = (
+  state: SoloState,
+  action: Action,
+  rng: Rng = Math.random,
+  byActor?: string,
+  byPlayer?: string
+): DecideResult => {
+  if (action.t === 'ClaimSeat') return decideClaimSeat(state, action.seatId, action.joinedAt)
+  if (action.t === 'ReleaseSeat') return decideReleaseSeat(state, action.seatId)
   if (byActor !== undefined && activeEntity(state)?.id !== byActor) return reject()
+  if (byPlayer !== undefined && entityById(state, byActor ?? '')?.owner !== byPlayer) return reject()
   switch (action.t) {
     case 'Move':
       return decideMove(state, action.to)
@@ -749,9 +801,10 @@ export const reduceWithEvents = (
   state: SoloState,
   action: Action,
   rng: Rng = Math.random,
-  byActor?: string
+  byActor?: string,
+  byPlayer?: string
 ): {state: SoloState; events: SoloEvent[]} => {
-  const result = decide(state, action, rng, byActor)
+  const result = decide(state, action, rng, byActor, byPlayer)
   if ('rejected' in result) {
     return {state: result.rejected ? appendLines(state, [result.rejected]) : state, events: []}
   }
@@ -759,5 +812,10 @@ export const reduceWithEvents = (
 }
 
 // Thin compatibility shim: decide → fold, discarding the event log.
-export const reduce = (state: SoloState, action: Action, rng: Rng = Math.random, byActor?: string): SoloState =>
-  reduceWithEvents(state, action, rng, byActor).state
+export const reduce = (
+  state: SoloState,
+  action: Action,
+  rng: Rng = Math.random,
+  byActor?: string,
+  byPlayer?: string
+): SoloState => reduceWithEvents(state, action, rng, byActor, byPlayer).state

@@ -91,7 +91,17 @@ export type Entity = {
   order: number // stable join index; ties in initiative break by this
   // monster-only behaviour hint (Phase 4 AI); PCs leave it undefined.
   behaviour?: 'hunter' | 'lurker'
+  // Multiplayer seat ownership: the id of the seat (player) that controls this PC.
+  // Unset means unclaimed / host / AI-controlled. Offline solo leaves every owner
+  // unset and the local player commands whichever PC is active.
+  owner?: string
 }
+
+// A connected player in multiplayer companion play. The earliest-joined seat is the
+// host; pieces redistribute across present seats as they join and leave (see
+// seats.ts). `joinedAt` is a monotonic stamp from the server (not wall-clock), so it
+// orders seats deterministically for replay.
+export type Seat = {id: string; joinedAt: number}
 
 /** Crouched characters move at half speed — each metre costs double budget. */
 export const movementCostMultiplier = (entity: Entity): number => (entity.stance === 'crouched' ? 2 : 1)
@@ -150,6 +160,7 @@ export type SoloState = {
   grid: WalkGrid
   doorStates: DoorStates
   sightRadius: number
+  seats: Seat[] // connected players (multiplayer); empty offline. Earliest = host.
   entities: Entity[] // PCs + monsters, in initiative order
   ground: GroundItem[] // loot on the floor
   props: Prop[] // pushable crates / barricade material
@@ -180,6 +191,10 @@ export type Action =
   | {t: 'Aim'}
   | {t: 'AddWave'; monsters: Entity[]}
   | {t: 'EndTurn'}
+  // Multiplayer seat lifecycle (ungated by turn): a player joins / leaves, which
+  // redistributes piece ownership across the present seats.
+  | {t: 'ClaimSeat'; seatId: string; joinedAt: number}
+  | {t: 'ReleaseSeat'; seatId: string}
 
 export const activeEntity = (state: SoloState): Entity | undefined => state.entities[state.turnPtr]
 
