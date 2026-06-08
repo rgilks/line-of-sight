@@ -805,7 +805,9 @@ const nearestEnemyOf = (s: SoloState, actor: Entity): Entity | undefined => {
 
 // Centre on whoever holds the initiative — but pan to keep the nearest enemy in
 // view too, even if that pushes the active character toward an edge.
-const focusOnActive = (animate = true): void => {
+// `animate` eases the camera (smooth pan); it defaults off while the monster AI is
+// running so the horde's turn isn't slowed by easing the camera every step.
+const focusOnActive = (animate = !busy): void => {
   if (!state || !boardViewport) return
   const actor = activeEntity(state)
   if (!actor) return
