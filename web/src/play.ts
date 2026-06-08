@@ -34,6 +34,7 @@ import {
 } from '../../src/protocol'
 import {publishGeneratedDeck, randomSeed} from './host'
 import {playerPlayUrl} from './table-links'
+import {createTweenLoop} from './viewport'
 import './play.css'
 
 preloadCounterPortraits()
@@ -93,13 +94,10 @@ const maxZoom = 4
 let loadedMapKey = ''
 
 // Movement animation: renderPos is each token's currently-drawn position; anim
-// holds in-flight eases. The rAF loop (rafId/dirty) is the sole owner of draw()
-// — see requestDraw/frame below. Kept distinct from fitFrame.
+// holds in-flight eases. The shared tween/rAF core lives in viewport.ts; the rAF
+// loop is the sole owner of draw() — see requestDraw/onFrame below. Kept distinct
+// from fitFrame.
 const MOVE_EASE_MS = 350
-type Anim = {fromX: number; fromY: number; toX: number; toY: number; start: number}
-const renderPos = new Map<string, Point>()
-const anim = new Map<string, Anim>()
-let rafId = 0
 let dirty = false
 
 // Player fog memory: an offscreen mask of everywhere this player's POV has ever
@@ -238,9 +236,23 @@ const updateCanvasDisplaySize = (): void => {
 
 // ---- Movement animation -----------------------------------------------------
 
-const now = (): number => performance.now()
 // Wall-clock epoch ms, to compare against a say's server `sentAt`.
 const nowEpoch = (): number => Date.now()
+
+// Per-frame work for the rAF loop. Returns whether to keep ticking beyond the
+// tween: while a chat bubble is still fading.
+const onFrame = (_t: number, _moving: boolean): boolean => {
+  draw()
+  dirty = false
+  return bubblesActive(nowEpoch())
+}
+
+const {renderPos, anim, startEase, ensureRaf} = createTweenLoop({easeMs: MOVE_EASE_MS, onFrame})
+
+const requestDraw = (): void => {
+  dirty = true
+  ensureRaf()
+}
 
 const positionOf = (token: Token): Point => renderPos.get(token.id) ?? {x: token.x, y: token.y}
 
@@ -278,45 +290,6 @@ const reconcileRenderPos = (nextTokens: Token[], geometryChanged: boolean): void
     }
   }
   requestDraw()
-}
-
-const startEase = (id: string, from: Point, to: Point): void => {
-  anim.set(id, {fromX: from.x, fromY: from.y, toX: to.x, toY: to.y, start: now()})
-  ensureRaf()
-}
-
-// Advance every in-flight ease to time `t`. Returns whether any remain unsettled.
-const stepRenderPos = (t: number): boolean => {
-  let moving = false
-  for (const [id, a] of anim) {
-    const progress = Math.min(1, (t - a.start) / MOVE_EASE_MS)
-    const eased = 1 - (1 - progress) ** 3 // ease-out cubic
-    renderPos.set(id, {
-      x: a.fromX + (a.toX - a.fromX) * eased,
-      y: a.fromY + (a.toY - a.fromY) * eased
-    })
-    if (progress >= 1) anim.delete(id)
-    else moving = true
-  }
-  return moving
-}
-
-const requestDraw = (): void => {
-  dirty = true
-  ensureRaf()
-}
-
-const ensureRaf = (): void => {
-  if (rafId === 0) rafId = requestAnimationFrame(frame)
-}
-
-const frame = (t: number): void => {
-  rafId = 0
-  const moving = stepRenderPos(t)
-  draw()
-  dirty = false
-  // Keep ticking while tokens glide OR while a chat bubble is still fading.
-  if (moving || bubblesActive(nowEpoch())) ensureRaf()
 }
 
 const fitBoardToViewport = (): void => {

@@ -61,10 +61,41 @@ import {buildWalkGrid, cellCenter, cellOf, isFloor, type Cell, type WalkGrid} fr
 import {reduce} from './solo/reducer'
 import {clearEffects, drawEffects, effectsActive, playUi, primeAudio, setFxTimeScale, spawnAttackFx, spawnDenied, spawnHint} from './solo/fx'
 import type {AttackFx} from './solo/model'
+import {createTweenLoop} from './viewport'
 import './solo.css'
 
 const SIGHT_RADIUS = 700
 const WAVES_TOTAL = 3
+
+// ---- movement animation (tween) ------------------------------------------
+// Mirrors the multiplayer client's ease so glides feel identical. The shared
+// tween/rAF core lives in viewport.ts; here we wire in solo's per-frame work
+// (follow-camera + dice-overlay hold + draw).
+const MOVE_EASE_MS = 320
+let busy = false // true while the monster AI is taking its turns (locks player input)
+let diceUp = false // true while the dice overlay is shown (hold the camera)
+
+// Per-frame work for the rAF loop. Returns whether to keep ticking beyond the
+// tween: while the camera is gliding or effects are still animating.
+const onFrame = (t: number, moving: boolean): boolean => {
+  // Follow the active token as it glides (the camera keeps it framed with the
+  // nearest enemy). Skip while the dice overlay is up so it doesn't drift.
+  if (moving && state && !diceUp) {
+    const actor = activeEntity(state)
+    if (actor && anim.has(actor.id)) focusOnActive()
+  }
+  const camMoving = stepCamera()
+  draw()
+  return effectsActive(t) || camMoving
+}
+
+const {renderPos, anim, startEase, waitTween, ensureRaf, requestDraw} = createTweenLoop({
+  easeMs: MOVE_EASE_MS,
+  onFrame
+})
+
+const positionOf = (entity: Entity): Point => renderPos.get(entity.id) ?? {x: entity.x, y: entity.y}
+const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
 preloadCounterPortraits()
 for (const image of counterPortraits.values()) image.addEventListener('load', requestDraw)
@@ -127,81 +158,6 @@ let boardDrag: {
 let touchPan: {x: number; y: number; scrollLeft: number; scrollTop: number} | null = null
 let pinch: {startDist: number; startZoom: number; boardX: number; boardY: number} | null = null
 let touchMoved = false
-
-// ---- movement animation (tween) ------------------------------------------
-// Mirrors the multiplayer client's ease so glides feel identical. renderPos is
-// each entity's drawn position; the rAF loop is the sole owner of draw().
-const MOVE_EASE_MS = 320
-type Anim = {fromX: number; fromY: number; toX: number; toY: number; start: number}
-const renderPos = new Map<string, Point>()
-const anim = new Map<string, Anim>()
-const tweenWaiters = new Map<string, Array<() => void>>()
-let rafId = 0
-let busy = false // true while the monster AI is taking its turns (locks player input)
-let diceUp = false // true while the dice overlay is shown (hold the camera)
-
-const now = (): number => performance.now()
-const positionOf = (entity: Entity): Point => renderPos.get(entity.id) ?? {x: entity.x, y: entity.y}
-const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
-
-// Resolves once entity `id`'s in-flight glide finishes (or immediately if none).
-const waitTween = (id: string): Promise<void> =>
-  new Promise((resolve) => {
-    if (!anim.has(id)) {
-      resolve()
-      return
-    }
-    const waiters = tweenWaiters.get(id) ?? []
-    waiters.push(resolve)
-    tweenWaiters.set(id, waiters)
-  })
-
-const startEase = (id: string, from: Point, to: Point): void => {
-  anim.set(id, {fromX: from.x, fromY: from.y, toX: to.x, toY: to.y, start: now()})
-  ensureRaf()
-}
-
-const stepRenderPos = (t: number): boolean => {
-  let moving = false
-  for (const [id, a] of anim) {
-    const progress = Math.min(1, (t - a.start) / MOVE_EASE_MS)
-    const eased = 1 - (1 - progress) ** 3
-    renderPos.set(id, {x: a.fromX + (a.toX - a.fromX) * eased, y: a.fromY + (a.toY - a.fromY) * eased})
-    if (progress >= 1) {
-      anim.delete(id)
-      const waiters = tweenWaiters.get(id)
-      if (waiters) {
-        tweenWaiters.delete(id)
-        for (const resolve of waiters) resolve()
-      }
-    } else {
-      moving = true
-    }
-  }
-  return moving
-}
-
-function requestDraw(): void {
-  ensureRaf()
-}
-
-const ensureRaf = (): void => {
-  if (rafId === 0) rafId = requestAnimationFrame(frame)
-}
-
-const frame = (t: number): void => {
-  rafId = 0
-  const moving = stepRenderPos(t)
-  // Follow the active token as it glides (the camera keeps it framed with the
-  // nearest enemy). Skip while the dice overlay is up so it doesn't drift.
-  if (moving && state && !diceUp) {
-    const actor = activeEntity(state)
-    if (actor && anim.has(actor.id)) focusOnActive()
-  }
-  const camMoving = stepCamera()
-  draw()
-  if (moving || effectsActive(t) || camMoving) ensureRaf()
-}
 
 // ---- offscreen fog layers (sized per map) --------------------------------
 const explored = document.createElement('canvas')
