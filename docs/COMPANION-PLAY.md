@@ -8,8 +8,10 @@ strip — never a copy of the map. It is the "companion controller / second
 screen" pattern (think a console companion app, or Jackbox) applied to a
 turn-based tactical fight.
 
-This is a design and build plan, not yet built. It targets the solo combat
-engine (`web/src/solo/`) promoted to run inside the multiplayer Durable Object.
+Companion play is live. `/solo-board` shows the deck on a shared screen with a
+join QR; `/controller` is the phone gamepad. It runs on a `SoloRoom` Durable
+Object (`src/solo-room.ts`) wrapping the solo combat engine (`web/src/solo/`),
+server-authoritative and per-character fog-gated.
 
 ## Why this fits line-of-sight
 
@@ -150,29 +152,38 @@ screen-locks and roams Wi-Fi constantly, so a reconnect must re-attach to the sa
 character. The proven pattern to copy is cepheus-online's `eventSeq` + snapshot
 resume (this is also backlog item 1d).
 
-## Build order
+## How it's built
 
-Each phase ships standalone and de-risks the next.
+- **Board display** — `web/src/solo-board.ts` (route `/solo-board`) streams the
+  room's omniscient state and renders the deck with squad-vision fog (reusing
+  `renderMap`, `drawCounterToken`, and `visibilityPolygon`), animating moves
+  through the shared tween loop, plus the join QR.
+- **Server-authoritative room** — `src/solo-room.ts` (a `SoloRoom` Durable Object
+  bound as `SOLO_ROOMS`) wraps the pure session core `web/src/solo/session.ts`:
+  it applies player commands, runs the monster AI and waves, persists `(seed +
+  player commands)`, and replays to recover. Routes are
+  `/api/solo/:id/{stream,commands}`.
+- **Per-character projection** — `web/src/solo/projection.ts` `projectController`
+  builds each phone's LOS-gated view (HUD, visible foes with hit chance, in-reach
+  items, doors, and 8-way step legality). The board (no actor) gets the omniscient
+  view instead.
+- **Phone controller** — `web/src/controller.ts` (route `/controller`): the
+  two-thumb gamepad — status strip, foe/item/door lists, action buttons, and a
+  d-pad whose illegal directions grey out. A character picker shows when no actor
+  is set, so one board QR is enough to join.
+- **Authority** — the reducer's `byActor` gate applies a command only when its
+  issuer is the active character, so one phone can never drive another's.
 
-1. **Board view (read-only public projection).** A "board" viewer role and a
-   `/board` route that renders the full deck plus a join QR. Pure plumbing on the
-   existing decide/fold/projectFor spine; no new commands. Proves the
-   one-board / many-clients split end to end.
-2. **Server-authoritative engine.** Promote the solo reducer into the Durable
-   Object as a multi-actor room (character ids on commands, per-character fog),
-   persisted and replayed through the event log.
-3. **Controller projection.** Add `projectController()` and a controller view
-   message carrying the per-character HUD, opponent list, in-reach items, and
-   visible doors — LOS-gated server-side. Tested adversarially for leaks before
-   any UI, the way the GameTable security tests cover the token projection.
-4. **Phone controller UI.** A `/controller` route: the two-thumb layout, status
-   strip, lists, dedicated buttons, and haptics, wiring the id-based commands over
-   the existing POST path.
-5. **Movement.** Move-to-target (A\* one cell per tick) as the primary mover and
-   the d-pad with live per-direction legality as fine adjust.
-6. **Create, claim, reconnect.** A character create/import screen (pre-gens or the
-   `ccg.ts` import seam), the QR claim handshake binding a stable character id to
-   the phone, and stream resume so a reconnect re-attaches.
+## Remaining polish
+
+- Step-by-step animation of the AI's moves on the board (the room already streams
+  the `aiActions`; the board currently glides to the settled positions).
+- Stable phone-to-character binding and stream resume, so a screen-lock or Wi-Fi
+  roam re-attaches rather than re-subscribing (backlog item 1d's pattern).
+- A server-pathed "move toward a named target" command beside the d-pad, and
+  haptics on the phone.
+- Door open/closed and lock glyphs drawn on the board; a phone character
+  create/import screen (the `ccg.ts` seam) beside the pre-gens.
 
 ## Where it lives
 

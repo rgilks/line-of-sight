@@ -18,10 +18,9 @@ formats in more depth.
 - [SOLO.md](SOLO.md) — the single-player game at `/solo` ("Survive the Horde"):
   Cepheus turn-based combat against boarding waves, a pure reducer + monster AI,
   and barricades. Reuses the shared `core/`.
-- [COMPANION-PLAY.md](COMPANION-PLAY.md) — design + build plan for phones-as-
-  controllers play: the map on a shared screen, each player driving their
-  character from a phone (gamepad, nearest-opponents list, pick up/drop) over the
-  table's per-viewer projection. Forward-looking.
+- [COMPANION-PLAY.md](COMPANION-PLAY.md) — phones-as-controllers play (live): the
+  deck on a shared screen (`/solo-board`), each player driving their character
+  from a phone (`/controller`) over a server-authoritative, fog-gated SoloRoom.
 - [CV_REVIEW_PIPELINE.md](CV_REVIEW_PIPELINE.md) — branch experiment for
   improving CV-generated wall/door sidecars through local visual overlay review.
 - [WALL_DOOR_DETECTION.md](WALL_DOOR_DETECTION.md) — research + recommended
