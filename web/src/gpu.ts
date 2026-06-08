@@ -15,4 +15,3 @@ export const detectWebGpu = async (): Promise<string> => {
     return 'Blocked'
   }
 }
-

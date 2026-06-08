@@ -260,7 +260,13 @@ const applyAttack = (state: SoloState, targetId: string, rng: Rng): SoloState =>
 
   return checkLoss(
     log(
-      {...state, entities, actionUsed: true, moveRemainingPx: state.moveRemainingPx - significantCost(state, actor), lastAttack},
+      {
+        ...state,
+        entities,
+        actionUsed: true,
+        moveRemainingPx: state.moveRemainingPx - significantCost(state, actor),
+        lastAttack
+      },
       ...lines
     )
   )
@@ -274,9 +280,7 @@ const applyReload = (state: SoloState): SoloState => {
   if (weapon.magazine === undefined) return state
   const need = weapon.magazine - actor.loadedRounds
   if (need <= 0) return log(state, `${actor.label}'s weapon is already loaded.`)
-  const stackIndex = actor.inventory.findIndex(
-    (s) => s.kind === 'ammo' && s.weaponId === actor.weaponId && s.count > 0
-  )
+  const stackIndex = actor.inventory.findIndex((s) => s.kind === 'ammo' && s.weaponId === actor.weaponId && s.count > 0)
   if (stackIndex < 0) return log(state, `${actor.label} has no spare ammo.`)
   const cost = minorCost(state, actor) // reloading is a minor action
   if (!enough(state, cost)) return log(state, `${actor.label} has no actions left this turn.`)
@@ -356,13 +360,23 @@ const equipGear = (
     const ground =
       old.id === weapon.id
         ? state.ground
-        : [...state.ground, {id: dropId, x: actor.x, y: actor.y, stack: {kind: 'weapon' as const, weaponId: old.id, count: 1}}]
+        : [
+            ...state.ground,
+            {id: dropId, x: actor.x, y: actor.y, stack: {kind: 'weapon' as const, weaponId: old.id, count: 1}}
+          ]
     const entities = replace(state, actor.id, (e) => ({...e, weaponId: weapon.id, loadedRounds: weapon.magazine ?? 0}))
-    return {entities, ground, lines: [`${actor.label} takes up the ${weapon.name}${weapon.magazine ? ' (loaded)' : ''}.`]}
+    return {
+      entities,
+      ground,
+      lines: [`${actor.label} takes up the ${weapon.name}${weapon.magazine ? ' (loaded)' : ''}.`]
+    }
   }
   const armor = ARMORS[stack.armorId ?? '']
   const ground = actor.armorId
-    ? [...state.ground, {id: dropId, x: actor.x, y: actor.y, stack: {kind: 'armor' as const, armorId: actor.armorId, count: 1}}]
+    ? [
+        ...state.ground,
+        {id: dropId, x: actor.x, y: actor.y, stack: {kind: 'armor' as const, armorId: actor.armorId, count: 1}}
+      ]
     : state.ground
   const entities = replace(state, actor.id, (e) => ({...e, armorId: stack.armorId ?? null}))
   return {entities, ground, lines: [`${actor.label} dons ${armor?.name ?? 'armour'} (AR ${armor?.ar ?? 0}).`]}

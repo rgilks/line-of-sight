@@ -85,12 +85,20 @@ describe('projectFor — token fog gating', () => {
     expect(projectFor(closed, player('a'), NOW).tokens.map((t) => t.ownerId)).toEqual(['a'])
 
     const open = splitState(dooredBoard(true))
-    expect(projectFor(open, player('a'), NOW).tokens.map((t) => t.ownerId).sort()).toEqual(['a', 'b'])
+    expect(
+      projectFor(open, player('a'), NOW)
+        .tokens.map((t) => t.ownerId)
+        .sort()
+    ).toEqual(['a', 'b'])
   })
 
   it('shows every token to the GM, even across a wall', () => {
     const state = splitState(walledBoard())
-    expect(projectFor(state, GM, NOW).tokens.map((t) => t.ownerId).sort()).toEqual(['a', 'b'])
+    expect(
+      projectFor(state, GM, NOW)
+        .tokens.map((t) => t.ownerId)
+        .sort()
+    ).toEqual(['a', 'b'])
   })
 })
 
@@ -229,7 +237,7 @@ describe('decide — GM-only commands reject a non-GM', () => {
 })
 
 describe('fold — events advance the canonical state', () => {
-  const seq = (event: EventInput, n: number): DomainEvent => ({...event, seq: n} as DomainEvent)
+  const seq = (event: EventInput, n: number): DomainEvent => ({...event, seq: n}) as DomainEvent
 
   it('records and orders a full combat round', () => {
     const state = splitState(walledBoard())

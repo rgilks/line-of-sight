@@ -57,8 +57,7 @@ describe('generateMap', () => {
         const a = m.rooms[i]
         const b = m.rooms[j]
         const overlap =
-          Math.max(a.x, b.x) < Math.min(a.x + a.w, b.x + b.w) &&
-          Math.max(a.y, b.y) < Math.min(a.y + a.h, b.y + b.h)
+          Math.max(a.x, b.x) < Math.min(a.x + a.w, b.x + b.w) && Math.max(a.y, b.y) < Math.min(a.y + a.h, b.y + b.h)
         expect(overlap).toBe(false)
       }
   })
@@ -71,13 +70,9 @@ describe('generateMap', () => {
     const regionAt = (px: number, py: number): number => {
       const cx = px / g
       const cy = py / g
-      const ri = m.rooms.findIndex(
-        (r) => cx >= r.x && cx <= r.x + r.w && cy >= r.y && cy <= r.y + r.h
-      )
+      const ri = m.rooms.findIndex((r) => cx >= r.x && cx <= r.x + r.w && cy >= r.y && cy <= r.y + r.h)
       if (ri >= 0) return ri
-      const inCorridor = m.corridors.some(
-        (c) => cx >= c.x && cx <= c.x + c.w && cy >= c.y && cy <= c.y + c.h
-      )
+      const inCorridor = m.corridors.some((c) => cx >= c.x && cx <= c.x + c.w && cy >= c.y && cy <= c.y + c.h)
       return inCorridor ? CORRIDOR : -1
     }
 
@@ -117,19 +112,11 @@ describe('generateMap', () => {
     const onSegment = (px: number, py: number, w: {x1: number; y1: number; x2: number; y2: number}): boolean => {
       if (Math.abs(w.y1 - w.y2) < eps) {
         // horizontal
-        return (
-          Math.abs(py - w.y1) < eps &&
-          px >= Math.min(w.x1, w.x2) - eps &&
-          px <= Math.max(w.x1, w.x2) + eps
-        )
+        return Math.abs(py - w.y1) < eps && px >= Math.min(w.x1, w.x2) - eps && px <= Math.max(w.x1, w.x2) + eps
       }
       if (Math.abs(w.x1 - w.x2) < eps) {
         // vertical
-        return (
-          Math.abs(px - w.x1) < eps &&
-          py >= Math.min(w.y1, w.y2) - eps &&
-          py <= Math.max(w.y1, w.y2) + eps
-        )
+        return Math.abs(px - w.x1) < eps && py >= Math.min(w.y1, w.y2) - eps && py <= Math.max(w.y1, w.y2) + eps
       }
       return false // diagonal wall — not an axis-aligned sealer
     }

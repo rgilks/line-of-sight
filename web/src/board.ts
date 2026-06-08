@@ -36,9 +36,7 @@ import {markExplored} from './visibility'
 
 const imageFilesFrom = (files: Iterable<File>): File[] =>
   Array.from(files).filter(
-    (file) =>
-      file.type.startsWith('image/') ||
-      /\.(avif|bmp|gif|jpe?g|png|webp)$/i.test(file.name)
+    (file) => file.type.startsWith('image/') || /\.(avif|bmp|gif|jpe?g|png|webp)$/i.test(file.name)
   )
 
 const loadImage = async (file: File): Promise<Tile> =>
@@ -300,9 +298,7 @@ const transformOccluder = (occluder: Occluder, placement: Placement): Occluder =
     y2: occluder.y2 + placement.y
   }
 
-  return occluder.type === 'door'
-    ? {...base, type: 'door', open: occluder.open}
-    : {...base, type: 'wall'}
+  return occluder.type === 'door' ? {...base, type: 'door', open: occluder.open} : {...base, type: 'wall'}
 }
 
 type LineOccluder = WallOccluder | DoorOccluder
@@ -325,9 +321,7 @@ const intervalFor = (occluder: LineOccluder, axis: 'horizontal' | 'vertical'): [
 }
 
 const mergeIntervals = (intervals: Array<[number, number]>): Array<[number, number]> => {
-  const sorted = intervals
-    .filter(([start, end]) => end - start >= minCarvedWallLength)
-    .sort(([a], [b]) => a - b)
+  const sorted = intervals.filter(([start, end]) => end - start >= minCarvedWallLength).sort(([a], [b]) => a - b)
   const merged: Array<[number, number]> = []
 
   for (const [start, end] of sorted) {
@@ -473,10 +467,7 @@ export const sealDoorWallJunctions = (items: Occluder[]): Occluder[] => {
       const doorLine = lineCoordinate(door, wallAxis)
       if (Math.abs(doorLine - wallLine) > doorCarveTolerance) continue
 
-      const [doorStart, doorEnd] = intervalFor(
-        adjustedDoors.get(door.id) ?? door,
-        wallAxis
-      )
+      const [doorStart, doorEnd] = intervalFor(adjustedDoors.get(door.id) ?? door, wallAxis)
 
       if (wallEnd <= doorStart && doorStart - wallEnd <= junctionSealDistance) {
         wallEnd = doorStart

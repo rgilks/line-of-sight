@@ -37,13 +37,9 @@ const reportDir = path.join(root, 'reports')
 
 const ensureDirs = async () => {
   await Promise.all(
-    [
-      detectedSidecarDir,
-      detectedOverlayDir,
-      correctedSidecarDir,
-      correctedOverlayDir,
-      reportDir
-    ].map((directory) => mkdir(directory, {recursive: true}))
+    [detectedSidecarDir, detectedOverlayDir, correctedSidecarDir, correctedOverlayDir, reportDir].map((directory) =>
+      mkdir(directory, {recursive: true})
+    )
   )
 }
 
@@ -58,11 +54,7 @@ const sidecarPathFor = (directory, slug) => path.join(directory, `${slug}.sideca
 const overlayPathFor = (directory, slug) => path.join(directory, `${slug}.overlay.png`)
 
 const svgEscape = (value) =>
-  value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
+  value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
 const renderOverlay = async ({mapPath, sidecar, overlayPath, title}) => {
   const walls = sidecar.occluders.filter((occluder) => occluder.type === 'wall')
@@ -89,7 +81,10 @@ const renderOverlay = async ({mapPath, sidecar, overlayPath, title}) => {
     `<svg width="${sidecar.width}" height="${sidecar.height}" xmlns="http://www.w3.org/2000/svg">${wallLines}${doorLines}${label}</svg>`
   )
 
-  await sharp(mapPath).composite([{input: svg, top: 0, left: 0}]).png().toFile(overlayPath)
+  await sharp(mapPath)
+    .composite([{input: svg, top: 0, left: 0}])
+    .png()
+    .toFile(overlayPath)
 }
 
 const renderContactSheet = async ({rows, layer, outPath}) => {
@@ -101,9 +96,7 @@ const renderContactSheet = async ({rows, layer, outPath}) => {
 
   for (const row of rows) {
     const source =
-      layer === 'reviewed'
-        ? (row.corrected?.overlayPath ?? row.detected.overlayPath)
-        : row[layer]?.overlayPath
+      layer === 'reviewed' ? (row.corrected?.overlayPath ?? row.detected.overlayPath) : row[layer]?.overlayPath
     if (!source) continue
     const image = sharp(source).resize({width: thumbWidth})
     const buffer = await image.png().toBuffer()
@@ -164,10 +157,7 @@ const rows = []
 for (const mapPath of maps) {
   const absoluteMapPath = path.resolve(mapPath)
   const slug = slugFor(mapPath)
-  const {data, info} = await sharp(absoluteMapPath)
-    .ensureAlpha()
-    .raw()
-    .toBuffer({resolveWithObject: true})
+  const {data, info} = await sharp(absoluteMapPath).ensureAlpha().raw().toBuffer({resolveWithObject: true})
   const occluders = analyzeImageRgba(info.width, info.height, data, gridScale)
   const sidecar = {
     assetRef: mapPath,

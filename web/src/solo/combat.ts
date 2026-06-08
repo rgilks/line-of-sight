@@ -119,19 +119,55 @@ export const resolveAttack = (attacker: Entity, target: Entity, rng?: Rng, gridS
   // Range/stance are checked before rolling, so an illegal shot consumes no dice.
   const band = rangeBandFor(distancePx(attacker, target), gridScale)
   if (weapon.rangeDm[band] === undefined || blockedByStance(attacker, weapon.skill)) {
-    return {outOfRange: true, hit: false, roll: 0, effect: 0, band, damage: 0, dice: [0, 0], dm: ZERO_DM, damageDice: [], weaponMod, armour}
+    return {
+      outOfRange: true,
+      hit: false,
+      roll: 0,
+      effect: 0,
+      band,
+      damage: 0,
+      dice: [0, 0],
+      dm: ZERO_DM,
+      damageDice: [],
+      weaponMod,
+      armour
+    }
   }
   const [d1, d2] = roll2D6(rng)
   const p = predictAttack(attacker, target, gridScale, d1, d2)
   if (!p.hit) {
-    return {outOfRange: false, hit: false, roll: p.roll, effect: p.effect, band: p.band, damage: 0, dice: [d1, d2], dm: p.dm, damageDice: [], weaponMod, armour}
+    return {
+      outOfRange: false,
+      hit: false,
+      roll: p.roll,
+      effect: p.effect,
+      band: p.band,
+      damage: 0,
+      dice: [d1, d2],
+      dm: p.dm,
+      damageDice: [],
+      weaponMod,
+      armour
+    }
   }
   const damageDice: number[] = []
   for (let i = 0; i < count; i += 1) damageDice.push(rollD6(rng))
   const raw = damageDice.reduce((sum, die) => sum + die, 0) + weaponMod + p.effect
   let damage = raw - armour
   damage = p.effect >= 6 ? Math.max(1, damage) : Math.max(0, damage)
-  return {outOfRange: false, hit: true, roll: p.roll, effect: p.effect, band: p.band, damage, dice: [d1, d2], dm: p.dm, damageDice, weaponMod, armour}
+  return {
+    outOfRange: false,
+    hit: true,
+    roll: p.roll,
+    effect: p.effect,
+    band: p.band,
+    damage,
+    dice: [d1, d2],
+    dm: p.dm,
+    damageDice,
+    weaponMod,
+    armour
+  }
 }
 
 /** Human-readable log lines for a resolved attack — the full to-hit and damage maths. */

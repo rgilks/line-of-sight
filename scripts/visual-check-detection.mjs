@@ -4,13 +4,13 @@
  * Requires Geomorphs/ locally. Writes PNGs under /tmp/los-detection-review/.
  */
 import sharp from 'sharp'
-import { chromium } from 'playwright'
-import { mkdirSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
-import { analyzeImageRgba } from '../web/src/los-core.ts'
+import {chromium} from 'playwright'
+import {mkdirSync, writeFileSync} from 'node:fs'
+import {join} from 'node:path'
+import {analyzeImageRgba} from '../web/src/los-core.ts'
 
 const outDir = join('/tmp', 'los-detection-review')
-mkdirSync(outDir, { recursive: true })
+mkdirSync(outDir, {recursive: true})
 
 const maps = [
   'Geomorphs/Standard Geomorphs/102 Research Deck.jpg',
@@ -21,7 +21,7 @@ const maps = [
 const gridScale = 50
 
 for (const mapPath of maps) {
-  const { data, info } = await sharp(mapPath).ensureAlpha().raw().toBuffer({ resolveWithObject: true })
+  const {data, info} = await sharp(mapPath).ensureAlpha().raw().toBuffer({resolveWithObject: true})
   const occluders = analyzeImageRgba(info.width, info.height, data, gridScale)
   const walls = occluders.filter((o) => o.type === 'wall')
   const doors = occluders.filter((o) => o.type === 'door')
@@ -45,22 +45,25 @@ for (const mapPath of maps) {
 
   const base = mapPath.split('/').pop().replace('.jpg', '')
   const outPath = join(outDir, `${base}-overlay.png`)
-  await sharp(mapPath).composite([{ input: svg, top: 0, left: 0 }]).png().toFile(outPath)
+  await sharp(mapPath)
+    .composite([{input: svg, top: 0, left: 0}])
+    .png()
+    .toFile(outPath)
 
   writeFileSync(
     join(outDir, `${base}-stats.json`),
-    JSON.stringify({ map: base, walls: walls.length, doors: doors.length, outPath }, null, 2)
+    JSON.stringify({map: base, walls: walls.length, doors: doors.length, outPath}, null, 2)
   )
   console.log(`${base}: ${walls.length} walls, ${doors.length} doors → ${outPath}`)
 }
 
 const baseUrl = process.env.LOS_BASE_URL ?? 'http://127.0.0.1:5173'
-const browser = await chromium.launch({ headless: true })
-const page = await browser.newPage({ viewport: { width: 1400, height: 900 } })
+const browser = await chromium.launch({headless: true})
+const page = await browser.newPage({viewport: {width: 1400, height: 900}})
 
 try {
-  await page.goto(`${baseUrl}/`, { waitUntil: 'networkidle', timeout: 30_000 })
-  await page.locator('#boardCanvas').waitFor({ state: 'attached', timeout: 10_000 })
+  await page.goto(`${baseUrl}/`, {waitUntil: 'networkidle', timeout: 30_000})
+  await page.locator('#boardCanvas').waitFor({state: 'attached', timeout: 10_000})
 
   const fileInput = page.locator('input[type="file"]')
   await fileInput.setInputFiles(maps[0])
@@ -70,11 +73,11 @@ try {
       const status = document.querySelector('#runtimeStatus')
       return status && /Analyzed .* tile\(s\)/i.test(status.textContent ?? '')
     },
-    { timeout: 120_000 }
+    {timeout: 120_000}
   )
 
   const appShot = join(outDir, 'app-research-deck-canvas.png')
-  await page.locator('#boardCanvas').screenshot({ path: appShot })
+  await page.locator('#boardCanvas').screenshot({path: appShot})
   console.log(`App canvas screenshot → ${appShot}`)
 } finally {
   await browser.close()

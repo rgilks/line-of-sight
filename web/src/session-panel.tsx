@@ -10,15 +10,7 @@ const Icon = ({children}: {children: JSX.Element | JSX.Element[]}): JSX.Element 
   </svg>
 )
 
-const CopyButton = ({
-  label,
-  url,
-  className = ''
-}: {
-  label: string
-  url: string
-  className?: string
-}): JSX.Element => {
+const CopyButton = ({label, url, className = ''}: {label: string; url: string; className?: string}): JSX.Element => {
   const [copied, setCopied] = useState(false)
   return (
     <button
@@ -78,8 +70,8 @@ export const SessionPanel = (): JSX.Element => {
       <div className="panel session-intro">
         <h2>Run a session</h2>
         <p className="panel-lead">
-          Load your map, publish it to a table, then share the invite link. Open GM view to see every
-          counter and control doors while players explore.
+          Load your map, publish it to a table, then share the invite link. Open GM view to see every counter and
+          control doors while players explore.
         </p>
       </div>
 
@@ -172,9 +164,9 @@ export const SessionPanel = (): JSX.Element => {
 
       <div className="panel session-footer">
         <p>
-          <strong>During play:</strong> keep GM view open on a second screen. After the first publish,
-          walls, doors, and map layout edits in the editor sync to connected players automatically;
-          use Republish only if you need to force a full refresh.
+          <strong>During play:</strong> keep GM view open on a second screen. After the first publish, walls, doors, and
+          map layout edits in the editor sync to connected players automatically; use Republish only if you need to
+          force a full refresh.
         </p>
         <p className="player-join-hint">
           Players can also go to{' '}

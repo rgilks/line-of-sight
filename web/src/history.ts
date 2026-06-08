@@ -24,14 +24,11 @@ import {
 import {markExplored} from './visibility'
 import {notifyTableBoardChanged} from './publish'
 
-const cloneOccluders = (items: Occluder[]): Occluder[] =>
-  items.map((occluder) => ({...occluder}))
+const cloneOccluders = (items: Occluder[]): Occluder[] => items.map((occluder) => ({...occluder}))
 
 const cloneTokens = (items: Token[]): Token[] => items.map((token) => ({...token}))
 
-const cloneDoorStates = (
-  states: Record<string, {open: boolean}>
-): Record<string, {open: boolean}> =>
+const cloneDoorStates = (states: Record<string, {open: boolean}>): Record<string, {open: boolean}> =>
   Object.fromEntries(Object.entries(states).map(([id, state]) => [id, {...state}]))
 
 const editorSnapshot = (): EditorSnapshot => ({
@@ -57,9 +54,7 @@ const restoreEditorSnapshot = (snapshot: EditorSnapshot): void => {
   occluders.value = cloneOccluders(snapshot.occluders)
   doorStates.value = cloneDoorStates(snapshot.doorStates)
   tokens.value = cloneTokens(snapshot.tokens)
-  selectedOccluderId.value = occluders.value.some(
-    (occluder) => occluder.id === snapshot.selectedOccluderId
-  )
+  selectedOccluderId.value = occluders.value.some((occluder) => occluder.id === snapshot.selectedOccluderId)
     ? snapshot.selectedOccluderId
     : null
   selectedTokenId.value = tokens.value.some((token) => token.id === snapshot.selectedTokenId)

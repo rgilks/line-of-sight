@@ -127,12 +127,7 @@ describe('canToggleDoorFrom', () => {
   })
 })
 
-const combatant = (
-  playerId: string,
-  label: string,
-  initiative: number | null,
-  order: number
-): Combatant => ({
+const combatant = (playerId: string, label: string, initiative: number | null, order: number): Combatant => ({
   playerId,
   tokenId: `token-${playerId}`,
   label,
@@ -147,11 +142,7 @@ describe('combat helpers', () => {
     const p1 = combatant('p1', 'P1', 8, 0)
     const p2 = combatant('p2', 'P2', 12, 1)
     const p3 = combatant('p3', 'P3', 8, 2)
-    expect(orderCombatantsByInitiative([p1, p2, p3]).map((entry) => entry.playerId)).toEqual([
-      'p2',
-      'p1',
-      'p3'
-    ])
+    expect(orderCombatantsByInitiative([p1, p2, p3]).map((entry) => entry.playerId)).toEqual(['p2', 'p1', 'p3'])
   })
 
   it('is ready only after every combatant has initiative and a turn index exists', () => {

@@ -12,8 +12,8 @@
   --border-strong: rgba(var(--green-rgb), 0.45);
   --glow-soft: rgba(var(--green-rgb), 0.08);
   --glow: rgba(var(--green-rgb), 0.45);
-  --font-display: 'Orbitron', sans-serif;
-  --font-ui: 'JetBrains Mono', 'SF Mono', Menlo, ui-monospace, monospace;
+  --font-display: "Orbitron", sans-serif;
+  --font-ui: "JetBrains Mono", "SF Mono", Menlo, ui-monospace, monospace;
 }
 
 * {
@@ -42,8 +42,7 @@ body {
   min-height: 100dvh;
   overflow: hidden;
   /* Keep content clear of the notch / home indicator when standalone. */
-  padding: env(safe-area-inset-top) env(safe-area-inset-right)
-    env(safe-area-inset-bottom) env(safe-area-inset-left);
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
 }
 
 .play-shell {
@@ -638,9 +637,7 @@ body {
   min-height: 0;
   height: 100%;
   overflow: hidden;
-  background:
-    radial-gradient(ellipse at 50% 0%, rgba(var(--green-rgb), 0.04), transparent 48%),
-    var(--ink);
+  background: radial-gradient(ellipse at 50% 0%, rgba(var(--green-rgb), 0.04), transparent 48%), var(--ink);
 }
 
 .play-board-viewport {

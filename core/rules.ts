@@ -5,14 +5,7 @@
 //
 // Network/transport shapes (Command, DomainEvent, ViewMessage, ChatSay) live in
 // src/protocol.ts, which re-exports the domain types it embeds from here.
-import {
-  doorReachForGrid,
-  distanceToOccluder,
-  hasLineOfSight,
-  visibilityPolygon,
-  type Occluder,
-  type Point
-} from './los'
+import {doorReachForGrid, distanceToOccluder, hasLineOfSight, visibilityPolygon, type Occluder, type Point} from './los'
 
 // Re-exported so callers can import the LOS gate from one place (this module).
 export {hasLineOfSight}
@@ -129,9 +122,7 @@ const isDoorOpen = (board: Board, doorId: string, fallback: boolean): boolean =>
   board.doorStates[doorId]?.open ?? fallback
 
 export const metersPerSquare = (board: Board): number =>
-  board.metersPerSquare && board.metersPerSquare > 0
-    ? board.metersPerSquare
-    : CEPHEUS_METERS_PER_SQUARE
+  board.metersPerSquare && board.metersPerSquare > 0 ? board.metersPerSquare : CEPHEUS_METERS_PER_SQUARE
 
 export const tokenMoveMeters = (token: Token, board: Board): number => {
   const meters = token.moveMeters ?? board.defaultMoveMeters ?? CEPHEUS_DEFAULT_MOVE_METERS
@@ -159,10 +150,7 @@ export const activeCombatant = (combat: CombatState | null): Combatant | null =>
   return combat.combatants[combat.turnIndex] ?? null
 }
 
-export const combatantForPlayer = (
-  combat: CombatState | null,
-  playerId: PlayerId | null
-): Combatant | null => {
+export const combatantForPlayer = (combat: CombatState | null, playerId: PlayerId | null): Combatant | null => {
   if (!combat || !playerId) return null
   return combat.combatants.find((combatant) => combatant.playerId === playerId) ?? null
 }
@@ -184,8 +172,7 @@ export const orderByInitiative = <T extends InitiativeOrdered>(combatants: T[]):
   })
 
 /** Back-compat alias: the multiplayer code calls this name. */
-export const orderCombatantsByInitiative = (combatants: Combatant[]): Combatant[] =>
-  orderByInitiative(combatants)
+export const orderCombatantsByInitiative = (combatants: Combatant[]): Combatant[] => orderByInitiative(combatants)
 
 export const pointInPolygon = (point: Point, polygon: Point[]): boolean => {
   let inside = false
@@ -195,8 +182,7 @@ export const pointInPolygon = (point: Point, polygon: Point[]): boolean => {
     const crosses =
       currentPoint.y > point.y !== previousPoint.y > point.y &&
       point.x <
-        ((previousPoint.x - currentPoint.x) * (point.y - currentPoint.y)) /
-          (previousPoint.y - currentPoint.y) +
+        ((previousPoint.x - currentPoint.x) * (point.y - currentPoint.y)) / (previousPoint.y - currentPoint.y) +
           currentPoint.x
     if (crosses) inside = !inside
   }
@@ -240,12 +226,8 @@ export const validateTokenMove = (
   return {ok: true}
 }
 
-export const canMoveTokenTo = (
-  viewer: Token,
-  board: Board,
-  destination: Point,
-  options?: {gm?: boolean}
-): boolean => validateTokenMove(viewer, board, destination, options).ok
+export const canMoveTokenTo = (viewer: Token, board: Board, destination: Point, options?: {gm?: boolean}): boolean =>
+  validateTokenMove(viewer, board, destination, options).ok
 
 /** How close (in board pixels) a player's token must be to a door to toggle it. */
 export const doorReach = (board: Board): number => doorReachForGrid(board.gridScale)

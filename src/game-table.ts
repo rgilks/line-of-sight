@@ -41,11 +41,7 @@ const encoder = new TextEncoder()
 // A DomainEvent minus its seq — what `decide` emits, before the shell assigns
 // the monotonic seq. Distributive over the union so it preserves each variant's
 // per-type fields (a plain Omit would collapse them).
-export type EventInput = DomainEvent extends infer E
-  ? E extends DomainEvent
-    ? Omit<E, 'seq'>
-    : never
-  : never
+export type EventInput = DomainEvent extends infer E ? (E extends DomainEvent ? Omit<E, 'seq'> : never) : never
 
 type Connection = {writer: WritableStreamDefaultWriter<Uint8Array>; gm: boolean}
 
@@ -86,8 +82,7 @@ export type Projection = {
   combat: CombatState | null
 }
 
-const clamp = (value: number, min: number, max: number): number =>
-  Math.min(max, Math.max(min, value))
+const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value))
 
 // Drop says older than the TTL, then cap to the most recent SAY_MAX. Pure: takes
 // `now` rather than reading the clock.
@@ -118,13 +113,9 @@ const projectCombat = (state: TableState, viewer: Actor): CombatState | null => 
   if (viewer.gm) return state.combat
 
   const visiblePlayerIds = new Set(projectTokens(state, viewer).map((token) => token.ownerId))
-  const combatants = state.combat.combatants.filter((combatant) =>
-    visiblePlayerIds.has(combatant.playerId)
-  )
+  const combatants = state.combat.combatants.filter((combatant) => visiblePlayerIds.has(combatant.playerId))
   const active = activeCombatant(state.combat)
-  const turnIndex = active
-    ? combatants.findIndex((combatant) => combatant.playerId === active.playerId)
-    : null
+  const turnIndex = active ? combatants.findIndex((combatant) => combatant.playerId === active.playerId) : null
   return {
     ...state.combat,
     combatants,
@@ -254,9 +245,7 @@ export const decide = (state: TableState, actor: Actor, command: Command, ctx: D
     if (board.playerDoorControl === false && !actor.gm) {
       return {error: 'Doors are locked — GM only'}
     }
-    const door = board.occluders.find(
-      (occluder) => occluder.type === 'door' && occluder.id === command.doorId
-    )
+    const door = board.occluders.find((occluder) => occluder.type === 'door' && occluder.id === command.doorId)
     if (!door) return {error: 'Unknown door'}
     const token = state.tokens.get(actor.playerId) ?? null
     if (!canToggleDoorFrom(token, board, door, {gm: actor.gm})) {
@@ -379,9 +368,7 @@ export const fold = (state: TableState, event: DomainEvent): TableState => {
     case 'InitiativeRolled': {
       if (!state.combat) return state
       const combatants = state.combat.combatants.map((entry) =>
-        entry.playerId === event.playerId
-          ? {...entry, dice: event.dice, initiative: event.initiative}
-          : entry
+        entry.playerId === event.playerId ? {...entry, dice: event.dice, initiative: event.initiative} : entry
       )
       const ready = combatants.every((entry) => entry.initiative != null)
       state.combat = {
@@ -738,9 +725,7 @@ const hashFloat = (n: number): number => {
 // A seed-stable shuffle of [0..count) via sort by hash — small n, so simplicity
 // over Fisher-Yates. Same (count, salt) ⇒ same order.
 const shuffleIndices = (count: number, salt: number): number[] =>
-  Array.from({length: count}, (_, i) => i).sort(
-    (a, b) => hashFloat(salt + a * 7.13) - hashFloat(salt + b * 7.13)
-  )
+  Array.from({length: count}, (_, i) => i).sort((a, b) => hashFloat(salt + a * 7.13) - hashFloat(salt + b * 7.13))
 
 const rollD6 = (): number => {
   const bytes = new Uint8Array(1)

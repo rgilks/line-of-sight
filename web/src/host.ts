@@ -33,10 +33,7 @@ export type PublishedDeck = {seed: number; rooms: number}
  * Generate a deck for `seed`, upload its image, and publish the board to
  * `tableId`. Returns a small summary for status text. Throws on network failure.
  */
-export const publishGeneratedDeck = async (
-  tableId: string,
-  seed: number
-): Promise<PublishedDeck> => {
+export const publishGeneratedDeck = async (tableId: string, seed: number): Promise<PublishedDeck> => {
   const map = generateMap(defaultSpec(seed))
   const image = await renderDeckImage(map)
 

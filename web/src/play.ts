@@ -245,12 +245,7 @@ const maybePlayInitiativeDice = (previous: CombatState | null, nextCombat: Comba
     })
 }
 
-const applyView = (
-  next: Board,
-  nextTokens: Token[],
-  nextSays: ChatSay[],
-  nextCombat: CombatState | null
-): void => {
+const applyView = (next: Board, nextTokens: Token[], nextSays: ChatSay[], nextCombat: CombatState | null): void => {
   const previous = board.value
   const previousCombat = combat.value
   const geometryChanged = boardGeometryChanged(previous, next)
@@ -270,10 +265,7 @@ const applyView = (
     status.value = isGm ? 'Table map updated.' : 'The GM updated the map.'
   }
   const boardLayoutChanged =
-    !previous ||
-    previous.width !== next.width ||
-    previous.height !== next.height ||
-    previous.assetRef !== next.assetRef
+    !previous || previous.width !== next.width || previous.height !== next.height || previous.assetRef !== next.assetRef
   if (boardLayoutChanged) {
     // Player: open zoomed-in centered on their token. GM: fit the whole board.
     scheduleInitialView()
@@ -328,8 +320,7 @@ const reconcileRenderPos = (nextTokens: Token[], geometryChanged: boolean): void
       continue
     }
     const active = anim.get(token.id)
-    const targetUnchanged =
-      active && Math.hypot(active.toX - target.x, active.toY - target.y) <= 1
+    const targetUnchanged = active && Math.hypot(active.toX - target.x, active.toY - target.y) <= 1
     if (targetUnchanged) continue // echo of a move already animating — let it finish
     if (Math.hypot(current.x - target.x, current.y - target.y) <= 1) {
       renderPos.set(token.id, target)
@@ -799,9 +790,7 @@ const handleBoardTap = (clientX: number, clientY: number): void => {
   // Optimistically glide from the current drawn position to the destination,
   // then post. The authoritative echo confirms the ease (reconcileRenderPos).
   startEase(me.id, positionOf(me), point)
-  tokens.value = tokens.value.map((token) =>
-    token.id === me.id ? {...token, x: point.x, y: point.y} : token
-  )
+  tokens.value = tokens.value.map((token) => (token.id === me.id ? {...token, x: point.x, y: point.y} : token))
   post({type: 'MoveToken', x: point.x, y: point.y})
 }
 
@@ -948,8 +937,7 @@ const draw = (): void => {
 
 // True while any chat bubble is still within its visible+fade lifetime — used to
 // keep the rAF loop ticking so bubbles fade out smoothly and then disappear.
-const bubblesActive = (t: number): boolean =>
-  says.value.some((say) => t - say.sentAt < SAY_VISIBLE_MS + SAY_FADE_MS)
+const bubblesActive = (t: number): boolean => says.value.some((say) => t - say.sentAt < SAY_VISIBLE_MS + SAY_FADE_MS)
 
 const bubbleAlpha = (say: ChatSay, t: number): number => {
   const age = t - say.sentAt
@@ -1162,8 +1150,7 @@ const escapeHtml = (value: string): string =>
 // The collapsed-drawer rail: visible portraits out of combat, initiative order
 // during combat. The server already filters this per viewer.
 const portraitForKind = (kind: string): string =>
-  counterDefinitions.find((d) => d.kind === kind)?.portrait ??
-  counterDefinitions[0].portrait
+  counterDefinitions.find((d) => d.kind === kind)?.portrait ?? counterDefinitions[0].portrait
 
 const tokenForCombatant = (combatant: Combatant): Token | null =>
   tokens.value.find((token) => token.ownerId === combatant.playerId) ?? null

@@ -1,14 +1,7 @@
 import {describe, expect, it} from 'vitest'
-import {
-  analyzeImageRgba,
-  hasLineOfSight,
-  visibilityPolygon,
-  type Occluder,
-  type Point
-} from './los'
+import {analyzeImageRgba, hasLineOfSight, visibilityPolygon, type Occluder, type Point} from './los'
 
-const blankRgba = (width: number, height: number): Uint8ClampedArray =>
-  new Uint8ClampedArray(width * height * 4)
+const blankRgba = (width: number, height: number): Uint8ClampedArray => new Uint8ClampedArray(width * height * 4)
 
 const setDark = (rgba: Uint8ClampedArray, width: number, x: number, y: number): void => {
   const index = (y * width + x) * 4
@@ -84,22 +77,14 @@ describe('analyzeImageRgba', () => {
   })
 
   it('detects a horizontal wall from a dark band on a grid line', () => {
-    const walls = analyzeImageRgba(200, 200, horizontalWallImage(), 50).filter(
-      (occluder) => occluder.type === 'wall'
-    )
+    const walls = analyzeImageRgba(200, 200, horizontalWallImage(), 50).filter((occluder) => occluder.type === 'wall')
 
     expect(walls.length).toBeGreaterThan(0)
-    expect(
-      walls.some(
-        (wall) => Math.abs(wall.y1 - wall.y2) < 1 && Math.abs(wall.y1 - 100) <= 25
-      )
-    ).toBe(true)
+    expect(walls.some((wall) => Math.abs(wall.y1 - wall.y2) < 1 && Math.abs(wall.y1 - 100) <= 25)).toBe(true)
   })
 
   it('assigns stable, zero-padded, position-ordered wall ids', () => {
-    const walls = analyzeImageRgba(200, 200, horizontalWallImage(), 50).filter(
-      (occluder) => occluder.type === 'wall'
-    )
+    const walls = analyzeImageRgba(200, 200, horizontalWallImage(), 50).filter((occluder) => occluder.type === 'wall')
 
     expect(walls[0]?.id).toBe('wall-0001')
   })
@@ -112,9 +97,7 @@ describe('analyzeImageRgba', () => {
     fillBand(rgba, width, 98, 103, 0, 150)
     fillBand(rgba, width, 98, 103, 200, width)
 
-    const doors = analyzeImageRgba(width, height, rgba, 50).filter(
-      (occluder) => occluder.type === 'door'
-    )
+    const doors = analyzeImageRgba(width, height, rgba, 50).filter((occluder) => occluder.type === 'door')
 
     expect(doors.length).toBeGreaterThan(0)
     // Doors are emitted closed with zero-padded ids.
@@ -131,9 +114,7 @@ describe('analyzeImageRgba', () => {
     fillRect(rgba, width, 63, 63, 67, 157)
     fillRect(rgba, width, 153, 63, 157, 157)
 
-    const walls = analyzeImageRgba(width, height, rgba, 50).filter(
-      (occluder) => occluder.type === 'wall'
-    )
+    const walls = analyzeImageRgba(width, height, rgba, 50).filter((occluder) => occluder.type === 'wall')
 
     expect(walls.length).toBeGreaterThanOrEqual(4)
     expect(walls.some((wall) => Math.abs(wall.y1 - 62.5) <= 1)).toBe(true)
@@ -146,9 +127,7 @@ describe('analyzeImageRgba', () => {
     const rgba = blankRgba(width, height)
     fillRect(rgba, width, 92, 92, 128, 128)
 
-    const walls = analyzeImageRgba(width, height, rgba, 50).filter(
-      (occluder) => occluder.type === 'wall'
-    )
+    const walls = analyzeImageRgba(width, height, rgba, 50).filter((occluder) => occluder.type === 'wall')
 
     expect(walls.length).toBeGreaterThan(0)
   })
@@ -160,9 +139,7 @@ describe('analyzeImageRgba', () => {
     fillBand(rgba, width, 96, 104, 70, 150)
     fillBand(rgba, width, 70, 150, 96, 104)
 
-    const walls = analyzeImageRgba(width, height, rgba, 50).filter(
-      (occluder) => occluder.type === 'wall'
-    )
+    const walls = analyzeImageRgba(width, height, rgba, 50).filter((occluder) => occluder.type === 'wall')
 
     expect(walls.length).toBeGreaterThanOrEqual(2)
   })
@@ -227,9 +204,7 @@ describe('visibilityPolygon', () => {
     const wall: Occluder = {type: 'wall', id: 'wall-0001', x1: 120, y1: 60, x2: 120, y2: 140}
 
     const openArea = polygonArea(visibilityPolygon(100, 100, width, height, 1000, [], {}))
-    const blockedArea = polygonArea(
-      visibilityPolygon(100, 100, width, height, 1000, [wall], {})
-    )
+    const blockedArea = polygonArea(visibilityPolygon(100, 100, width, height, 1000, [wall], {}))
 
     expect(blockedArea).toBeLessThan(openArea)
   })

@@ -45,9 +45,7 @@ import {
 import {updateCanvasDisplaySize} from './board'
 import {notifyTableBoardChanged} from './publish'
 
-export const positionFromEvent = (
-  event: JSX.TargetedPointerEvent<HTMLCanvasElement>
-): Point => {
+export const positionFromEvent = (event: JSX.TargetedPointerEvent<HTMLCanvasElement>): Point => {
   const rect = event.currentTarget.getBoundingClientRect()
   return {
     x: ((event.clientX - rect.left) / rect.width) * boardSize.value.width,
@@ -134,17 +132,14 @@ const nearestOccluder = (
 }
 
 const nextTokenMember = (group: CounterGroupId): number => {
-  const used = new Set(
-    tokens.value.filter((token) => token.group === group).map((token) => token.member)
-  )
+  const used = new Set(tokens.value.filter((token) => token.group === group).map((token) => token.member))
   for (let member = 1; member <= 99; member += 1) {
     if (!used.has(member)) return member
   }
   return 1
 }
 
-export const nextTokenLabel = (group: CounterGroupId): string =>
-  `${group}${nextTokenMember(group)}`
+export const nextTokenLabel = (group: CounterGroupId): string => `${group}${nextTokenMember(group)}`
 
 const makeToken = (point: Point): Token => {
   const group = activeCounterGroup.value
@@ -281,9 +276,7 @@ export const removeOccluder = (id: string, recordHistory = true): void => {
 }
 
 const targetAcceptsMapShortcuts = (target: EventTarget | null): boolean =>
-  target instanceof HTMLInputElement ||
-  target instanceof HTMLTextAreaElement ||
-  target instanceof HTMLSelectElement
+  target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement
 
 export const handleMapKeyDown = (event: KeyboardEvent): void => {
   if (targetAcceptsMapShortcuts(event.target)) return
@@ -318,11 +311,7 @@ export const handleMapKeyDown = (event: KeyboardEvent): void => {
     return
   }
 
-  if (
-    (shortcutKey === 'o' || shortcutKey === 't') &&
-    selectedOccluderId.value &&
-    !selectedTokenId.value
-  ) {
+  if ((shortcutKey === 'o' || shortcutKey === 't') && selectedOccluderId.value && !selectedTokenId.value) {
     const selected = occluders.value.find((occluder) => occluder.id === selectedOccluderId.value)
     if (selected?.type === 'door') {
       event.preventDefault()
@@ -498,17 +487,14 @@ export const handlePointerMove = (event: JSX.TargetedPointerEvent<HTMLCanvasElem
   if (!dragStart.value) {
     if (tool.value === 'token' || tool.value === 'viewer') {
       hoveredTokenId.value = nearestToken(rawPoint)?.id ?? null
-      hoveredOccluderId.value =
-        tool.value === 'viewer' ? (nearestOccluder(rawPoint, () => true, 18)?.id ?? null) : null
+      hoveredOccluderId.value = tool.value === 'viewer' ? (nearestOccluder(rawPoint, () => true, 18)?.id ?? null) : null
       requestCanvasRender()
       return
     }
 
     const editableFilter = editableFilterForTool()
     hoveredTokenId.value = null
-    hoveredOccluderId.value = editableFilter
-      ? (nearestEditTarget(rawPoint, editableFilter)?.occluder.id ?? null)
-      : null
+    hoveredOccluderId.value = editableFilter ? (nearestEditTarget(rawPoint, editableFilter)?.occluder.id ?? null) : null
     requestCanvasRender()
     return
   }

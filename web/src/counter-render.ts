@@ -19,15 +19,12 @@ export type CounterDrawOptions = {
   zoom?: number
 }
 
-export const counterTokenSize = (gridScale: number): number =>
-  Math.min(64, Math.max(38, gridScale * 0.84))
+export const counterTokenSize = (gridScale: number): number => Math.min(64, Math.max(38, gridScale * 0.84))
 
 const screenPixels = (pixels: number, zoom: number): number => Math.max(0.5, pixels / zoom)
 
-const counterDefinitionFor = (
-  kind: CounterKind,
-  definitions: CounterDefinition[]
-): CounterDefinition => definitions.find((definition) => definition.kind === kind) ?? definitions[0]
+const counterDefinitionFor = (kind: CounterKind, definitions: CounterDefinition[]): CounterDefinition =>
+  definitions.find((definition) => definition.kind === kind) ?? definitions[0]
 
 const roundedRect = (
   ctx: CanvasRenderingContext2D,
@@ -62,13 +59,7 @@ const drawImageCover = (
   const scale = Math.max(width / image.naturalWidth, height / image.naturalHeight)
   const drawWidth = image.naturalWidth * scale
   const drawHeight = image.naturalHeight * scale
-  ctx.drawImage(
-    image,
-    x + (width - drawWidth) / 2,
-    y + (height - drawHeight) / 2,
-    drawWidth,
-    drawHeight
-  )
+  ctx.drawImage(image, x + (width - drawWidth) / 2, y + (height - drawHeight) / 2, drawWidth, drawHeight)
 }
 
 const drawCounterPortrait = (
@@ -195,14 +186,7 @@ export const drawCounterToken = (
     ctx.strokeStyle = 'rgba(74, 163, 255, 0.96)'
     ctx.lineWidth = screenPixels(2.25, zoom)
     const povInset = screenPixels(5, zoom)
-    roundedRect(
-      ctx,
-      -half - povInset,
-      -half - povInset,
-      size + povInset * 2,
-      size + povInset * 2,
-      size * 0.16
-    )
+    roundedRect(ctx, -half - povInset, -half - povInset, size + povInset * 2, size + povInset * 2, size * 0.16)
     ctx.stroke()
   }
 

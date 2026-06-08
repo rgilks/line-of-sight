@@ -304,8 +304,14 @@ const chooseDoors = (rng: Rng, roomCount: number, boundaries: Boundary[]): {edge
   // corridor, like the originals; shuffle within each class for variety.
   const withMeta = boundaries.map((bd) => ({bd, toCorridor: bd.a === CORRIDOR || bd.b === CORRIDOR}))
   const ordered = [
-    ...shuffle(rng, withMeta.filter((e) => e.toCorridor)),
-    ...shuffle(rng, withMeta.filter((e) => !e.toCorridor))
+    ...shuffle(
+      rng,
+      withMeta.filter((e) => e.toCorridor)
+    ),
+    ...shuffle(
+      rng,
+      withMeta.filter((e) => !e.toCorridor)
+    )
   ]
   const chosen: {edge: Edge}[] = []
   const extras: Boundary[] = []
@@ -423,30 +429,66 @@ const chamferCorners = (
 
     const corners: Corner[] = [
       {
-        out: [[rx, ry - 1], [rx - 1, ry]],
-        skip: [{x: rx, y: ry, horizontal: true}, {x: rx, y: ry, horizontal: false}],
-        protect: [{x: rx + 1, y: ry, horizontal: true}, {x: rx, y: ry + 1, horizontal: false}],
+        out: [
+          [rx, ry - 1],
+          [rx - 1, ry]
+        ],
+        skip: [
+          {x: rx, y: ry, horizontal: true},
+          {x: rx, y: ry, horizontal: false}
+        ],
+        protect: [
+          {x: rx + 1, y: ry, horizontal: true},
+          {x: rx, y: ry + 1, horizontal: false}
+        ],
         a: [rx + 1, ry],
         b: [rx, ry + 1]
       },
       {
-        out: [[X - 1, ry - 1], [X, ry]],
-        skip: [{x: X - 1, y: ry, horizontal: true}, {x: X, y: ry, horizontal: false}],
-        protect: [{x: X - 2, y: ry, horizontal: true}, {x: X, y: ry + 1, horizontal: false}],
+        out: [
+          [X - 1, ry - 1],
+          [X, ry]
+        ],
+        skip: [
+          {x: X - 1, y: ry, horizontal: true},
+          {x: X, y: ry, horizontal: false}
+        ],
+        protect: [
+          {x: X - 2, y: ry, horizontal: true},
+          {x: X, y: ry + 1, horizontal: false}
+        ],
         a: [X - 1, ry],
         b: [X, ry + 1]
       },
       {
-        out: [[rx, Y], [rx - 1, Y - 1]],
-        skip: [{x: rx, y: Y, horizontal: true}, {x: rx, y: Y - 1, horizontal: false}],
-        protect: [{x: rx + 1, y: Y, horizontal: true}, {x: rx, y: Y - 2, horizontal: false}],
+        out: [
+          [rx, Y],
+          [rx - 1, Y - 1]
+        ],
+        skip: [
+          {x: rx, y: Y, horizontal: true},
+          {x: rx, y: Y - 1, horizontal: false}
+        ],
+        protect: [
+          {x: rx + 1, y: Y, horizontal: true},
+          {x: rx, y: Y - 2, horizontal: false}
+        ],
         a: [rx + 1, Y],
         b: [rx, Y - 1]
       },
       {
-        out: [[X - 1, Y], [X, Y - 1]],
-        skip: [{x: X - 1, y: Y, horizontal: true}, {x: X, y: Y - 1, horizontal: false}],
-        protect: [{x: X - 2, y: Y, horizontal: true}, {x: X, y: Y - 2, horizontal: false}],
+        out: [
+          [X - 1, Y],
+          [X, Y - 1]
+        ],
+        skip: [
+          {x: X - 1, y: Y, horizontal: true},
+          {x: X, y: Y - 1, horizontal: false}
+        ],
+        protect: [
+          {x: X - 2, y: Y, horizontal: true},
+          {x: X, y: Y - 2, horizontal: false}
+        ],
         a: [X - 1, Y],
         b: [X, Y - 1]
       }
@@ -655,7 +697,14 @@ const furnishRoom = (rng: Rng, room: Room, g: number, density: number): Decorati
         if (!chance(rng, 0.4 + density * 0.5)) continue
         add('bed', (i * w) / beds + g * 0.08, g * 0.1, (w / beds) * 0.8, g * 0.78)
       }
-      for (let i = 0; i < Math.max(1, rows - 1); i += 1) add('cabinet', w - g * 0.5, g + (i * (h - g)) / Math.max(1, rows - 1), g * 0.42, (h - g) / Math.max(1, rows - 1) * 0.8)
+      for (let i = 0; i < Math.max(1, rows - 1); i += 1)
+        add(
+          'cabinet',
+          w - g * 0.5,
+          g + (i * (h - g)) / Math.max(1, rows - 1),
+          g * 0.42,
+          ((h - g) / Math.max(1, rows - 1)) * 0.8
+        )
       break
     }
     case 'engineering': {
@@ -701,9 +750,13 @@ const furnishRoom = (rng: Rng, room: Room, g: number, density: number): Decorati
       const n = Math.max(1, horizontal ? cols : rows)
       for (let i = 0; i < n; i += 1) {
         if (chance(rng, 0.4 + density * 0.5))
-          horizontal ? add('shelf', (i * w) / n + g * 0.06, 0, (w / n) * 0.78, g * 0.45) : add('shelf', 0, (i * h) / n + g * 0.06, g * 0.45, (h / n) * 0.78)
+          horizontal
+            ? add('shelf', (i * w) / n + g * 0.06, 0, (w / n) * 0.78, g * 0.45)
+            : add('shelf', 0, (i * h) / n + g * 0.06, g * 0.45, (h / n) * 0.78)
         if (chance(rng, 0.4 + density * 0.5))
-          horizontal ? add('shelf', (i * w) / n + g * 0.06, h - g * 0.45, (w / n) * 0.78, g * 0.45) : add('shelf', w - g * 0.45, (i * h) / n + g * 0.06, g * 0.45, (h / n) * 0.78)
+          horizontal
+            ? add('shelf', (i * w) / n + g * 0.06, h - g * 0.45, (w / n) * 0.78, g * 0.45)
+            : add('shelf', w - g * 0.45, (i * h) / n + g * 0.06, g * 0.45, (h / n) * 0.78)
       }
       break
     }

@@ -54,5 +54,4 @@ export const MONSTERS: MonsterBlock[] = [
   }
 ]
 
-export const monsterById = (id: string): MonsterBlock | undefined =>
-  MONSTERS.find((monster) => monster.id === id)
+export const monsterById = (id: string): MonsterBlock | undefined => MONSTERS.find((monster) => monster.id === id)

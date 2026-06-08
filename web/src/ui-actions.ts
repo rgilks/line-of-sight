@@ -3,18 +3,13 @@ import type {Occluder} from '../../core/los'
 import type {Token} from './types'
 import {
   boardSize,
-  boardViewport,
   doorStates,
   dropDepth,
   occluders,
   requestCanvasRender,
   selectedOccluderId,
   selectedTokenId,
-  setStatus,
-  showWalls,
-  tokens,
-  tool,
-  zoom
+  tokens
 } from './state'
 import {carveDoorGaps, sealDoorWallJunctions, loadMapFiles} from './board'
 import {notifyTableBoardChanged} from './publish'
@@ -45,8 +40,7 @@ export const handleDrop = (event: JSX.TargetedDragEvent<HTMLDivElement>): void =
   void loadMapFiles(event.dataTransfer.files)
 }
 
-export const getBoardStat = (): string =>
-  `${Math.round(boardSize.value.width)} x ${Math.round(boardSize.value.height)}`
+export const getBoardStat = (): string => `${Math.round(boardSize.value.width)} x ${Math.round(boardSize.value.height)}`
 
 export const getDoorStat = (): string => {
   const doors = doorOccluders()
@@ -92,9 +86,7 @@ export const convertSelectedOccluder = (targetType: 'wall' | 'door'): void => {
         }
 
   occluders.value = sealDoorWallJunctions(
-    carveDoorGaps(
-      occluders.value.map((occluder) => (occluder.id === selected.id ? converted : occluder))
-    )
+    carveDoorGaps(occluders.value.map((occluder) => (occluder.id === selected.id ? converted : occluder)))
   )
   const nextDoorStates = {...doorStates.value}
   if (converted.type === 'door') {

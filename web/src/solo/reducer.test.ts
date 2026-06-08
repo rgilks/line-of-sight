@@ -190,7 +190,11 @@ describe('solo reducer — combat actions', () => {
   })
 
   it('reloads from spare ammo up to the magazine (a minor action)', () => {
-    const low = {...pc('a', 2, 2, 0), loadedRounds: 2, inventory: [{kind: 'ammo' as const, weaponId: 'autopistol', count: 45}]}
+    const low = {
+      ...pc('a', 2, 2, 0),
+      loadedRounds: 2,
+      inventory: [{kind: 'ammo' as const, weaponId: 'autopistol', count: 45}]
+    }
     const next = reduce(makeState([low]), {t: 'Reload'})
     const after = next.entities[0]
     expect(after.loadedRounds).toBe(15)

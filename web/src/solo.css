@@ -10,8 +10,8 @@
   --border: rgba(57, 255, 20, 0.2);
   --border-strong: rgba(57, 255, 20, 0.45);
   --glow: rgba(57, 255, 20, 0.35);
-  --font-display: 'Orbitron', sans-serif;
-  --font-ui: 'JetBrains Mono', 'SF Mono', Menlo, ui-monospace, monospace;
+  --font-display: "Orbitron", sans-serif;
+  --font-ui: "JetBrains Mono", "SF Mono", Menlo, ui-monospace, monospace;
 }
 
 * {
@@ -173,7 +173,9 @@ body {
   border-radius: 8px;
   background: rgba(57, 255, 20, 0.03);
   cursor: pointer;
-  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+  transition:
+    border-color 0.12s ease,
+    box-shadow 0.12s ease;
 }
 
 .solo-track-summary {
@@ -717,7 +719,7 @@ body {
   align-items: center;
   gap: 10px;
   padding: 14px 22px;
-  font-family: var(--font-display, 'Orbitron'), var(--font-ui), monospace;
+  font-family: var(--font-display, "Orbitron"), var(--font-ui), monospace;
   font-weight: 700;
   font-size: 15px;
   letter-spacing: 0.06em;
@@ -726,10 +728,14 @@ body {
   background: linear-gradient(180deg, #6bff63, #2bd44a);
   border: 1px solid rgba(57, 255, 20, 0.65);
   border-radius: 12px;
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.55), 0 0 18px rgba(57, 255, 20, 0.35);
+  box-shadow:
+    0 8px 22px rgba(0, 0, 0, 0.55),
+    0 0 18px rgba(57, 255, 20, 0.35);
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
-  transition: filter 0.12s ease, transform 0.06s ease;
+  transition:
+    filter 0.12s ease,
+    transform 0.06s ease;
 }
 
 #solo-end-fab[hidden] {

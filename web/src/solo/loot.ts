@@ -43,7 +43,7 @@ const CLUES: string[] = [
   'Security memo: "Armoury sealed. Engineering holds the override codes."',
   'Half-finished message: "If you find this, get to the bridge before—"',
   'Ration wrappers and spent stims. Someone holed up here a long while.',
-  "Ship's log: \"Distress beacon away. Six days, no reply.\"",
+  'Ship\'s log: "Distress beacon away. Six days, no reply."',
   "A child's drawing of the stars, pinned above an empty bunk.",
   'Scratched into the panel: a tally of days. It stops at eleven.',
   'Med-scanner readout: "Subject vitals — none. Mass still in motion."',
@@ -187,7 +187,11 @@ export const planLockAndLoot = (
   // 1. Tentatively seal a fifth of the internal doors (never the hull airlocks).
   const internal = map.occluders.filter((o) => o.type === 'door' && o.id.startsWith('door-'))
   const wantLocked = internal.length === 0 ? 0 : Math.min(Math.max(2, Math.round(internal.length * 0.2)), 14)
-  const lockedIds = new Set(shuffle(rng, internal).slice(0, wantLocked).map((d) => d.id))
+  const lockedIds = new Set(
+    shuffle(rng, internal)
+      .slice(0, wantLocked)
+      .map((d) => d.id)
+  )
   const doorById = new Map(internal.map((d) => [d.id, d]))
 
   // 2. Connectivity guard: while the spawn can't freely reach most of the deck,
@@ -218,7 +222,10 @@ export const planLockAndLoot = (
   //    key doors share a small set of clearances (so one card opens several). Only
   //    use as many clearances as we have free slots to seed cards into; if there is
   //    nowhere to put a card, leave those doors as hack instead of unreachable.
-  const survivors = shuffle(rng, [...lockedIds].map((id) => doorById.get(id)).filter((d): d is Occluder => !!d))
+  const survivors = shuffle(
+    rng,
+    [...lockedIds].map((id) => doorById.get(id)).filter((d): d is Occluder => !!d)
+  )
   const locks: Record<string, DoorLock> = {}
   const keyDoors: string[] = []
   // Leave free slots for the cards PLUS a starter weapon + armour.

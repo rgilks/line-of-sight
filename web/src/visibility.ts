@@ -1,10 +1,4 @@
-import {
-  distanceToOccluder,
-  doorReachForGrid,
-  visibilityPolygon,
-  type DoorOccluder,
-  type Point
-} from '../../core/los'
+import {distanceToOccluder, doorReachForGrid, visibilityPolygon, type DoorOccluder, type Point} from '../../core/los'
 import type {Token} from './types'
 import {
   boardSize,
@@ -27,8 +21,7 @@ import {notifyTableBoardChanged} from './publish'
 export const doorOccluders = (): DoorOccluder[] =>
   occluders.value.filter((occluder): occluder is DoorOccluder => occluder.type === 'door')
 
-export const isDoorOpen = (door: DoorOccluder): boolean =>
-  doorStates.value[door.id]?.open ?? door.open
+export const isDoorOpen = (door: DoorOccluder): boolean => doorStates.value[door.id]?.open ?? door.open
 
 export const doorOperationReach = (): number => doorReachForGrid(gridScale())
 
@@ -60,9 +53,7 @@ export const drawPolygonPath = (target: CanvasRenderingContext2D, polygon: Point
 }
 
 export const getPovToken = (): Token | null => {
-  const explicit = povTokenId.value
-    ? (tokens.value.find((token) => token.id === povTokenId.value) ?? null)
-    : null
+  const explicit = povTokenId.value ? (tokens.value.find((token) => token.id === povTokenId.value) ?? null) : null
   return explicit ?? tokens.value[0] ?? null
 }
 
@@ -113,8 +104,7 @@ export const pointInPolygon = (point: Point, polygon: Point[]): boolean => {
     const crosses =
       currentPoint.y > point.y !== previousPoint.y > point.y &&
       point.x <
-        ((previousPoint.x - currentPoint.x) * (point.y - currentPoint.y)) /
-          (previousPoint.y - currentPoint.y) +
+        ((previousPoint.x - currentPoint.x) * (point.y - currentPoint.y)) / (previousPoint.y - currentPoint.y) +
           currentPoint.x
     if (crosses) inside = !inside
   }

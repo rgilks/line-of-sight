@@ -6,9 +6,9 @@
  * Usage: node scripts/benchmark-detection.mjs [gridScale]
  */
 import sharp from 'sharp'
-import { readdir, readFile } from 'node:fs/promises'
+import {readdir} from 'node:fs/promises'
 import path from 'node:path'
-import { analyzeImageRgba } from '../web/src/los-core.ts'
+import {analyzeImageRgba} from '../web/src/los-core.ts'
 
 const gridScale = Number(process.argv[2]) > 0 ? Number(process.argv[2]) : 50
 const geomorphRoot = path.join(process.cwd(), 'Geomorphs')
@@ -38,7 +38,7 @@ if (files.length === 0) {
 
 const rows = []
 for (const filePath of files) {
-  const { data, info } = await sharp(filePath).ensureAlpha().raw().toBuffer({ resolveWithObject: true })
+  const {data, info} = await sharp(filePath).ensureAlpha().raw().toBuffer({resolveWithObject: true})
   const occluders = analyzeImageRgba(info.width, info.height, data, gridScale)
   const walls = occluders.filter((occluder) => occluder.type === 'wall').length
   const doors = occluders.filter((occluder) => occluder.type === 'door').length

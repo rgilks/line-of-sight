@@ -14,13 +14,11 @@ export const makeRng = (seed: number): Rng => {
 }
 
 // Integer in [min, max] inclusive.
-export const randInt = (rng: Rng, min: number, max: number): number =>
-  min + Math.floor(rng() * (max - min + 1))
+export const randInt = (rng: Rng, min: number, max: number): number => min + Math.floor(rng() * (max - min + 1))
 
 export const chance = (rng: Rng, p: number): boolean => rng() < p
 
-export const pick = <T>(rng: Rng, items: readonly T[]): T =>
-  items[Math.floor(rng() * items.length)]
+export const pick = <T>(rng: Rng, items: readonly T[]): T => items[Math.floor(rng() * items.length)]
 
 export const shuffle = <T>(rng: Rng, items: readonly T[]): T[] => {
   const out = [...items]

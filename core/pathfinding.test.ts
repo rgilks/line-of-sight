@@ -20,7 +20,7 @@ describe('findPath', () => {
     })
     expect(path).not.toBeNull()
     // Must detour through row 2, so longer than the manhattan distance of 2.
-    expect((path?.length ?? 0)).toBeGreaterThan(3)
+    expect(path?.length ?? 0).toBeGreaterThan(3)
     expect(path?.every((c) => !blocked.has(`${c.cx},${c.cy}`))).toBe(true)
   })
 
@@ -28,7 +28,11 @@ describe('findPath', () => {
     // No cell is blocked, but the edge between (1,0) and (2,0) cannot be crossed.
     const path = findPath({cx: 0, cy: 0}, {cx: 3, cy: 0}, 4, 3, {
       canEnter: () => true,
-      canStep: (from, to) => !((from.cx === 1 && to.cx === 2 && from.cy === 0 && to.cy === 0) || (from.cx === 2 && to.cx === 1 && from.cy === 0 && to.cy === 0))
+      canStep: (from, to) =>
+        !(
+          (from.cx === 1 && to.cx === 2 && from.cy === 0 && to.cy === 0) ||
+          (from.cx === 2 && to.cx === 1 && from.cy === 0 && to.cy === 0)
+        )
     })
     expect(path).not.toBeNull()
     // It detours via row 1 rather than crossing the blocked edge on row 0.

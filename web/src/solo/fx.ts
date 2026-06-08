@@ -220,7 +220,12 @@ const spawnBullets = (o: {
   }
   const arrive = t0 + (o.rounds - 1) * stagger + travel
   if (o.hit) {
-    spawnBurst(o.to, o.bloodColor, {reach: o.gridScale * (o.rounds >= 5 ? 0.95 : 0.7), count: o.rounds >= 5 ? 16 : 12, dur: 380, t: arrive})
+    spawnBurst(o.to, o.bloodColor, {
+      reach: o.gridScale * (o.rounds >= 5 ? 0.95 : 0.7),
+      count: o.rounds >= 5 ? 16 : 12,
+      dur: 380,
+      t: arrive
+    })
   } else {
     spawnBurst(missPoint(o.from, o.to, o.gridScale), SPARK, {reach: o.gridScale * 0.4, count: 7, dur: 240, t: arrive})
   }
@@ -254,7 +259,13 @@ const spawnMeleeFx = (o: {from: Point; to: Point; gridScale: number; hit: boolea
   })
   const impact = t0 + D(110)
   if (o.hit) spawnBurst(o.to, o.bloodColor, {reach: o.gridScale * 0.7, count: 12, dur: 360, t: impact})
-  else spawnBurst(missPoint(o.from, o.to, o.gridScale), SPARK, {reach: o.gridScale * 0.35, count: 6, dur: 220, t: t0 + D(120)})
+  else
+    spawnBurst(missPoint(o.from, o.to, o.gridScale), SPARK, {
+      reach: o.gridScale * 0.35,
+      count: 6,
+      dur: 220,
+      t: t0 + D(120)
+    })
   return impact
 }
 
@@ -373,7 +384,8 @@ let master: GainNode | null = null
 const audio = (): {ac: AudioContext; out: GainNode} | null => {
   try {
     if (!actx) {
-      const AC = window.AudioContext ?? (window as unknown as {webkitAudioContext?: typeof AudioContext}).webkitAudioContext
+      const AC =
+        window.AudioContext ?? (window as unknown as {webkitAudioContext?: typeof AudioContext}).webkitAudioContext
       if (!AC) return null
       actx = new AC()
       master = actx.createGain()
@@ -478,7 +490,8 @@ const playWeaponSound = (profile: SoundProfile): void => {
   const {ac, out} = a
   const t = ac.currentTime
   if (profile === 'pistol') playGun(out, ac, t, {dur: 0.12, cut: 2600, thump: 140, vol: 0.5})
-  else if (profile === 'rifle') for (let i = 0; i < 3; i += 1) playGun(out, ac, t + i * 0.055, {dur: 0.09, cut: 3200, thump: 165, vol: 0.4})
+  else if (profile === 'rifle')
+    for (let i = 0; i < 3; i += 1) playGun(out, ac, t + i * 0.055, {dur: 0.09, cut: 3200, thump: 165, vol: 0.4})
   else if (profile === 'shotgun') playGun(out, ac, t, {dur: 0.26, cut: 1400, thump: 90, vol: 0.62})
   else if (profile === 'melee') playSwish(out, ac)
   else playAcid(out, ac)
@@ -579,7 +592,9 @@ export const playUi = (kind: UiSound): void => {
       blip(out, ac, t + 0.2, {freq: 230, type: 'sawtooth', dur: 0.22, vol: 0.16})
       break
     case 'win': // triumphant arpeggio
-      ;[523, 659, 784, 1046].forEach((f, i) => blip(out, ac, t + i * 0.12, {freq: f, type: 'square', dur: 0.16, vol: 0.14}))
+      ;[523, 659, 784, 1046].forEach((f, i) =>
+        blip(out, ac, t + i * 0.12, {freq: f, type: 'square', dur: 0.16, vol: 0.14})
+      )
       break
     case 'lose': // somber descent
       blip(out, ac, t, {freq: 440, to: 330, type: 'sine', dur: 0.3, vol: 0.16})
@@ -686,7 +701,16 @@ export const spawnAttackFx = (o: {
     const rounds = o.weapon.id === 'shotgun' ? 5 : o.weapon.id === 'autorifle' ? 3 : 1
     const spread = o.weapon.id === 'shotgun' ? 0.5 : o.weapon.id === 'autorifle' ? 0.12 : 0
     const stagger = o.weapon.id === 'autorifle' ? 55 : 0
-    arrive = spawnBullets({from: o.from, to: o.to, rounds, spread, stagger, gridScale: o.gridScale, hit: o.hit, bloodColor: blood})
+    arrive = spawnBullets({
+      from: o.from,
+      to: o.to,
+      rounds,
+      spread,
+      stagger,
+      gridScale: o.gridScale,
+      hit: o.hit,
+      bloodColor: blood
+    })
   }
   // The hit/miss + Effect callout lands with the projectile.
   spawnCombatText(o.to, {hit: o.hit, effect: o.effect, damage: o.damage, killed: o.killed}, arrive, o.gridScale)

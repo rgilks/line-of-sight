@@ -5,7 +5,7 @@
 // Room labels are kept aside as a GM-only overlay (see state.roomLabels).
 import {generateMap} from './synth/generate-map'
 import {renderMap} from './synth/render-map'
-import {type MapSpec, type RoomType, type Theme} from './synth/types'
+import type {MapSpec, RoomType, Theme} from './synth/types'
 import type {DoorOccluder} from '../../core/los'
 import type {Tile} from './types'
 import {
@@ -114,9 +114,7 @@ export const loadGeneratedMap = async (spec: MapSpec): Promise<void> => {
   // Install the generated truth directly — no detection needed.
   occluders.value = map.occluders
   doorStates.value = Object.fromEntries(
-    map.occluders
-      .filter((o): o is DoorOccluder => o.type === 'door')
-      .map((door) => [door.id, {open: door.open}])
+    map.occluders.filter((o): o is DoorOccluder => o.type === 'door').map((door) => [door.id, {open: door.open}])
   )
   roomLabels.value = map.rooms.map((room) => ({
     label: room.label,
@@ -129,9 +127,7 @@ export const loadGeneratedMap = async (spec: MapSpec): Promise<void> => {
   // off; the occluders still drive line of sight.
   showWalls.value = false
   markExplored()
-  setStatus(
-    `Generated ${spec.theme} deck — ${map.rooms.length} rooms. Edit walls, drop counters, or publish.`
-  )
+  setStatus(`Generated ${spec.theme} deck — ${map.rooms.length} rooms. Edit walls, drop counters, or publish.`)
   notifyTableBoardChanged()
   requestCanvasRender()
 }

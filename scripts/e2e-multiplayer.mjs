@@ -59,7 +59,10 @@ const waitPlayWho = async (page, pattern, step) => {
       {timeout: 30_000}
     )
   } catch {
-    const text = await page.locator('#who').textContent().catch(() => '(missing)')
+    const text = await page
+      .locator('#who')
+      .textContent()
+      .catch(() => '(missing)')
     fail(step, `Timed out waiting for #who /${pattern}/ — got "${text}"`)
   }
 }

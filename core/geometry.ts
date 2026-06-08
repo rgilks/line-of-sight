@@ -39,8 +39,7 @@ export type Segment = {
 export type DoorState = boolean | {open: boolean}
 export type DoorStateLookup = Record<string, DoorState | undefined>
 
-export const clamp = (value: number, min: number, max: number): number =>
-  Math.min(max, Math.max(min, value))
+export const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value))
 
 export const segmentsIntersect = (first: Segment, second: Segment): boolean => {
   const p1 = {x: first.x1, y: first.y1}

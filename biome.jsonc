@@ -1,0 +1,93 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.4.16/schema.json",
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
+  "files": {
+    "includes": [
+      "core/**",
+      "src/**",
+      "web/src/**",
+      "scripts/**",
+      "vite.config.ts",
+      "!dist",
+      "!node_modules",
+      "!web/public",
+      "!**/*.gltf",
+      "!docs/diagrams/**/*.png"
+    ]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 120,
+    "lineEnding": "lf"
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "single",
+      "jsxQuoteStyle": "double",
+      "semicolons": "asNeeded",
+      "trailingCommas": "none",
+      "arrowParentheses": "always",
+      "bracketSpacing": false
+    }
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      "a11y": {
+        // The editor toolbars are <div> containers with aria-label as a grouping
+        // hint; "fixing" these means restructuring JSX/ARIA roles, a behavioural
+        // change out of scope for adding a formatter.
+        "useAriaPropsSupportedByRole": "off",
+        // Wants <div role="group"> rewritten to <fieldset> — a DOM-structure
+        // change with styling implications, out of scope here.
+        "useSemanticElements": "off",
+        // The #boardViewport drag-and-drop target is a <div> with pointer/drop
+        // handlers by design (canvas host); adding a role is left to the author.
+        "noStaticElementInteractions": "off"
+      },
+      "complexity": {
+        // render-map.ts lists every item type as an explicit fall-through case
+        // before `default` on purpose (self-documenting exhaustiveness); keep it.
+        "noUselessSwitchCase": "off",
+        // The `a && a.b` guards in the canvas/overlay code are intentionally
+        // explicit; rewriting to `?.` is an unsafe fix we leave to the author.
+        "useOptionalChain": "off",
+        // `cond ? false : true` in solo.ts is a readable inverse; rewriting to
+        // `!cond` is a stylistic call left to the author, not auto-applied.
+        "noUselessTernary": "off"
+      },
+      "correctness": {
+        // tsc (strict) does not enable noUnusedLocals/Parameters here, so keep
+        // parity: these flag dead helpers/params in detect.ts and play.ts that
+        // are out of scope to delete while landing a formatter. Tracked for a
+        // separate dead-code cleanup rather than silently removed here.
+        "noUnusedVariables": "off",
+        "noUnusedFunctionParameters": "off"
+      },
+      "style": {
+        // Pure CSS source-ordering hint; reordering rules risks changing the
+        // cascade and the rendered result, so this is not auto-applied.
+        "noDescendingSpecificity": "off"
+      },
+      "suspicious": {
+        // Several `[...].forEach((x, i) => fn(...))` call sites (audio synth,
+        // DO event folding) harmlessly ignore the arrow's implicit return; the
+        // auto-fix would touch working code, so allow it.
+        "useIterableCallbackReturn": "off",
+        // generate-map.ts uses `(r -= w) < 0` and `${(id += 1)}` as deliberate,
+        // working idioms in the procedural generator; rewriting risks behaviour.
+        "noAssignInExpressions": "off"
+      }
+    }
+  },
+  "assist": {
+    "enabled": false
+  }
+}

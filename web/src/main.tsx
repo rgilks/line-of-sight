@@ -21,7 +21,6 @@ import {
   requestCanvasRender,
   roomLabels,
   runtimeStatus,
-  setStatus,
   setView,
   showRoomLabels,
   showWalls,
@@ -33,14 +32,7 @@ import type {RoomType, Theme} from './synth/types'
 import {GEN_ROOM_TYPES, GEN_THEMES, loadGeneratedMap, randomizedSpec} from './generate-board'
 import type {Tool} from './types'
 import {analyzeTiles, arrangeTiles, loadMapFiles, reorderTile, syncCanvasSize} from './board'
-import {
-  getPovToken,
-  isDoorOpen,
-  isDoorReachable,
-  markExplored,
-  setDoorOpen,
-  setPovToken
-} from './visibility'
+import {getPovToken, isDoorOpen, isDoorReachable, markExplored, setDoorOpen, setPovToken} from './visibility'
 import {renderBoard} from './rendering'
 import {
   handleMapKeyDown,
@@ -157,18 +149,14 @@ const App = (): JSX.Element => {
   const selectedOccluder = getSelectedOccluder()
   const selectedToken = getSelectedToken()
   const povToken = getPovToken()
-  const selectedDoorReachable =
-    selectedOccluder?.type === 'door' ? isDoorReachable(selectedOccluder) : false
+  const selectedDoorReachable = selectedOccluder?.type === 'door' ? isDoorReachable(selectedOccluder) : false
   const nextCounterLabel = nextTokenLabel(activeCounterGroup.value)
   const spec = genSpec.value
   const hasRoomLabels = roomLabels.value.length > 0
 
   return (
     <main className="app-shell">
-      <aside
-        className={`control-drawer${drawerOpen.value ? ' open' : ' closed'}`}
-        aria-label="Line of Sight controls"
-      >
+      <aside className={`control-drawer${drawerOpen.value ? ' open' : ' closed'}`} aria-label="Line of Sight controls">
         <div className="drawer-panel">
           <header className="drawer-header">
             <a className="brand drawer-brand" href="https://tre.systems/" aria-label="Cepheus · Line of Sight">
@@ -190,13 +178,7 @@ const App = (): JSX.Element => {
                 drawerOpen.value = !drawerOpen.value
               }}
             >
-              <Icon>
-                {drawerOpen.value ? (
-                  <path d="m15 18-6-6 6-6" />
-                ) : (
-                  <path d="m9 18 6-6-6-6" />
-                )}
-              </Icon>
+              <Icon>{drawerOpen.value ? <path d="m15 18-6-6 6-6" /> : <path d="m9 18 6-6-6-6" />}</Icon>
             </button>
           </header>
 
@@ -419,14 +401,10 @@ const App = (): JSX.Element => {
                 <>
                   {activeTileCount > 1 ? (
                     <p className="empty-hint tile-layout-hint">
-                      List order is left-to-right, then down. Use Per row for width; ↑↓ to swap
-                      positions.
+                      List order is left-to-right, then down. Use Per row for width; ↑↓ to swap positions.
                     </p>
                   ) : null}
-                  <div
-                    id="tileList"
-                    className={`tile-list compact${activeTileCount > 1 ? ' multi' : ''}`}
-                  >
+                  <div id="tileList" className={`tile-list compact${activeTileCount > 1 ? ' multi' : ''}`}>
                     {tiles.value.map((tile, index) => (
                       <div className="tile-item" key={tile.id}>
                         <img src={tile.url} alt="" />
@@ -473,8 +451,8 @@ const App = (): JSX.Element => {
             <section className="drawer-section">
               <h2>Tools</h2>
               <p className="empty-hint map-edit-hint">
-                POV: click counters; click walls/doors to select. Wall/Door: drag to add. Erase: click a
-                line. Del removes selection.
+                POV: click counters; click walls/doors to select. Wall/Door: drag to add. Erase: click a line. Del
+                removes selection.
               </p>
               <div className="tool-grid" role="group" aria-label="Map editing tools">
                 <ToolButton
@@ -575,11 +553,7 @@ const App = (): JSX.Element => {
                           setDoorOpen(selectedOccluder.id, !isDoorOpen(selectedOccluder))
                         }}
                       >
-                        {selectedDoorReachable
-                          ? isDoorOpen(selectedOccluder)
-                            ? 'Close'
-                            : 'Open'
-                          : 'Out of reach'}
+                        {selectedDoorReachable ? (isDoorOpen(selectedOccluder) ? 'Close' : 'Open') : 'Out of reach'}
                       </button>
                     ) : null}
                     <button
@@ -706,9 +680,7 @@ const App = (): JSX.Element => {
                 <div className="counter-group-picker" role="group" aria-label="Counter letter group">
                   {counterGroupLetters.map((group) => (
                     <button
-                      className={`counter-letter-button${
-                        activeCounterGroup.value === group ? ' active' : ''
-                      }`}
+                      className={`counter-letter-button${activeCounterGroup.value === group ? ' active' : ''}`}
                       key={group}
                       type="button"
                       aria-label={`Group ${group}`}
@@ -729,9 +701,7 @@ const App = (): JSX.Element => {
               <div className="counter-grid" role="group" aria-label="Counter types">
                 {counterDefinitions.map((definition) => (
                   <button
-                    className={`counter-option${
-                      activeCounterKind.value === definition.kind ? ' active' : ''
-                    }`}
+                    className={`counter-option${activeCounterKind.value === definition.kind ? ' active' : ''}`}
                     key={definition.kind}
                     type="button"
                     aria-pressed={activeCounterKind.value === definition.kind}
@@ -741,12 +711,7 @@ const App = (): JSX.Element => {
                     }}
                   >
                     <span className="counter-swatch" aria-hidden="true">
-                      <img
-                        className="counter-portrait-thumb"
-                        src={definition.portrait}
-                        alt=""
-                        loading="lazy"
-                      />
+                      <img className="counter-portrait-thumb" src={definition.portrait} alt="" loading="lazy" />
                     </span>
                     <span>{definition.name}</span>
                   </button>

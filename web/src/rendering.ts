@@ -19,7 +19,6 @@ import {
   renderTick,
   roomLabels,
   screenPixels,
-  selectedOccluderId,
   showRoomLabels,
   sightRadius,
   tokenDrag,
@@ -28,12 +27,7 @@ import {
 import {syncCanvasSize} from './board'
 import {getPovToken, getVisiblePolygon, isDoorReachable} from './visibility'
 import {drawTokens} from './rendering-tokens'
-import {
-  drawDebugWalls,
-  drawDoorMarkers,
-  drawEditOverlay,
-  drawReachableDoorMarkers
-} from './rendering-occluders'
+import {drawDebugWalls, drawDoorMarkers, drawEditOverlay, drawReachableDoorMarkers} from './rendering-occluders'
 
 export const renderBoard = (): void => {
   renderTick.value
@@ -101,8 +95,7 @@ const syncCanvasCursor = (): void => {
     if (tool.value === 'erase') {
       canvas.style.cursor = 'not-allowed'
     } else if (tool.value === 'viewer') {
-      canvas.style.cursor =
-        hovered?.type === 'door' && !isDoorReachable(hovered) ? 'not-allowed' : 'pointer'
+      canvas.style.cursor = hovered?.type === 'door' && !isDoorReachable(hovered) ? 'not-allowed' : 'pointer'
     } else {
       canvas.style.cursor = 'grab'
     }
@@ -123,8 +116,7 @@ const drawMapTiles = (): void => {
 const drawGrid = (): void => {
   const scale = gridScale()
   ctx.save()
-  ctx.strokeStyle =
-    placements.value.length === 0 ? 'rgba(255, 255, 255, 0.14)' : 'rgba(255, 255, 255, 0.055)'
+  ctx.strokeStyle = placements.value.length === 0 ? 'rgba(255, 255, 255, 0.14)' : 'rgba(255, 255, 255, 0.055)'
   ctx.lineWidth = screenPixels(1)
   for (let x = 0; x <= boardSize.value.width; x += scale) {
     ctx.beginPath()

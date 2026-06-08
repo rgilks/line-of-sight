@@ -13,12 +13,7 @@ import {
   type Segment
 } from './geometry'
 
-export const hasLineOfSight = (
-  from: Point,
-  to: Point,
-  occluders: Occluder[],
-  doorStates: DoorStateLookup
-): boolean => {
+export const hasLineOfSight = (from: Point, to: Point, occluders: Occluder[], doorStates: DoorStateLookup): boolean => {
   const sight = {x1: from.x, y1: from.y, x2: to.x, y2: to.y}
   return !blockingSegments(occluders, doorStates).some((segment) => segmentsIntersect(sight, segment))
 }

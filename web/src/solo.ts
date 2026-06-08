@@ -61,7 +61,17 @@ import {
 } from './solo/model'
 import {buildWalkGrid, cellCenter, cellOf, isFloor, type Cell, type WalkGrid} from './solo/grid'
 import {reduce} from './solo/reducer'
-import {clearEffects, drawEffects, effectsActive, playUi, primeAudio, setFxTimeScale, spawnAttackFx, spawnDenied, spawnHint} from './solo/fx'
+import {
+  clearEffects,
+  drawEffects,
+  effectsActive,
+  playUi,
+  primeAudio,
+  setFxTimeScale,
+  spawnAttackFx,
+  spawnDenied,
+  spawnHint
+} from './solo/fx'
 import type {AttackFx} from './solo/model'
 import {createTweenLoop} from './viewport'
 import {installErrorReporting} from './error-reporting'
@@ -592,10 +602,13 @@ const canAttackTarget = (target: Entity): boolean => {
   if (busy || !state || state.phase.t !== 'playerTurn') return false
   const actor = activeEntity(state)
   if (!actor || actor.faction !== 'pc' || !isActive(actor) || state.actionUsed) return false
-  if (state.moveRemainingPx + 0.5 < SIGNIFICANT_ACTION_COST * moveBudgetPx(state.grid.gridScale, actor.moveMeters)) return false
+  if (state.moveRemainingPx + 0.5 < SIGNIFICANT_ACTION_COST * moveBudgetPx(state.grid.gridScale, actor.moveMeters))
+    return false
   if (target.faction !== 'monster' || isDead(target) || !canSeePoint(state, actor, target.x, target.y)) return false
   const weapon = weaponById(actor.weaponId)
-  if (weapon.rangeDm[rangeBandFor(Math.hypot(actor.x - target.x, actor.y - target.y), state.grid.gridScale)] === undefined) {
+  if (
+    weapon.rangeDm[rangeBandFor(Math.hypot(actor.x - target.x, actor.y - target.y), state.grid.gridScale)] === undefined
+  ) {
     return false
   }
   return weapon.magazine === undefined || actor.loadedRounds > 0
@@ -651,10 +664,7 @@ const fitBoardToViewport = (): void => {
   const availWidth = boardViewport.clientWidth - pad
   const availHeight = boardViewport.clientHeight - pad
   if (availWidth <= 0 || availHeight <= 0) return
-  zoom = Math.min(
-    MAX_ZOOM,
-    Math.max(MIN_ZOOM, Math.min(availWidth / state.map.width, availHeight / state.map.height))
-  )
+  zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.min(availWidth / state.map.width, availHeight / state.map.height)))
   updateCanvasDisplaySize()
   boardViewport.scrollLeft = 0
   boardViewport.scrollTop = 0
@@ -774,11 +784,13 @@ const focusOnActive = (animate = !busy): void => {
   const ey = ep.y * z
   const ax = at.x * z
   const ay = at.y * z
-  if (ex < left + m) left = ex - m // shift to bring the enemy on-screen…
+  if (ex < left + m)
+    left = ex - m // shift to bring the enemy on-screen…
   else if (ex > left + availW - m) left = ex - availW + m
   if (ey < top + m) top = ey - m
   else if (ey > top + availH - m) top = ey - availH + m
-  if (ax < left + cm) left = ax - cm // …but not so far the character drops off it
+  if (ax < left + cm)
+    left = ax - cm // …but not so far the character drops off it
   else if (ax > left + availW - cm) left = ax - availW + cm
   if (ay < top + cm) top = ay - cm
   else if (ay > top + availH - cm) top = ay - availH + cm
@@ -850,7 +862,8 @@ const onBoardDragEnd = (event: PointerEvent): void => {
 // (covers the macOS three-finger drag, which arrives as a left-button drag).
 const onBoardPointerDown = (event: PointerEvent): void => {
   if (event.pointerType === 'touch' || !boardViewport) return // touch handled separately
-  const panFromStart = event.button === 1 || event.button === 2 || (event.button === 0 && (event.metaKey || event.ctrlKey))
+  const panFromStart =
+    event.button === 1 || event.button === 2 || (event.button === 0 && (event.metaKey || event.ctrlKey))
   const tap = event.button === 0 && !event.metaKey && !event.ctrlKey
   if (!panFromStart && !tap) return
   event.preventDefault()
@@ -881,7 +894,12 @@ const onTouchStart = (event: TouchEvent): void => {
   const touches = touchList(event)
   touchMoved = false
   if (touches.length === 1) {
-    touchPan = {x: touches[0].x, y: touches[0].y, scrollLeft: boardViewport.scrollLeft, scrollTop: boardViewport.scrollTop}
+    touchPan = {
+      x: touches[0].x,
+      y: touches[0].y,
+      scrollLeft: boardViewport.scrollLeft,
+      scrollTop: boardViewport.scrollTop
+    }
     pinch = null
   } else if (touches.length >= 2) {
     const rect = canvas.getBoundingClientRect()
@@ -1217,7 +1235,8 @@ const drawDoorStates = (s: SoloState): void => {
       if (seen) drawLockGlyph(mx, my, s.grid.gridScale, lock)
       continue
     }
-    const reachable = actor != null && actor.faction === 'pc' && distanceToOccluder({x: actor.x, y: actor.y}, door) <= reach
+    const reachable =
+      actor != null && actor.faction === 'pc' && distanceToOccluder({x: actor.x, y: actor.y}, door) <= reach
     if (!reachable) continue
     const open = s.doorStates[door.id]?.open ?? false
     ctx.save()
@@ -1245,7 +1264,15 @@ const computeReachable = (): void => {
   const gs = state.grid.gridScale
   const budget = state.moveRemainingPx
   if (budget < gs * 0.4) return
-  const poly = visibilityPolygon(actor.x, actor.y, state.map.width, state.map.height, state.sightRadius, state.map.occluders, state.doorStates)
+  const poly = visibilityPolygon(
+    actor.x,
+    actor.y,
+    state.map.width,
+    state.map.height,
+    state.sightRadius,
+    state.map.occluders,
+    state.doorStates
+  )
   if (poly.length < 3) return
   const blocked = new Set<string>()
   for (const e of state.entities) {
@@ -1419,8 +1446,7 @@ const vitalityRatio = (e: Entity): number => {
   return max > 0 ? Math.max(0, Math.min(1, cur / max)) : 0
 }
 
-const healthColor = (ratio: number): string =>
-  ratio > 0.5 ? '#3ddc6b' : ratio > 0.25 ? '#ffc24b' : '#ff5a4e'
+const healthColor = (ratio: number): string => (ratio > 0.5 ? '#3ddc6b' : ratio > 0.25 ? '#ffc24b' : '#ff5a4e')
 
 // A slim health bar under a token, coloured by remaining vitality.
 const drawHealthBar = (at: Point, entity: Entity, gridScale: number): void => {
@@ -1505,7 +1531,13 @@ const draw = (): void => {
 
   const actor = activeEntity(s)
   const selected = selectedId ? entityById(s, selectedId) : undefined
-  if (actor && actor.faction === 'pc' && selected && selected.faction === 'monster' && visibleToSquad(s, selected.x, selected.y)) {
+  if (
+    actor &&
+    actor.faction === 'pc' &&
+    selected &&
+    selected.faction === 'monster' &&
+    visibleToSquad(s, selected.x, selected.y)
+  ) {
     drawTargetingLine(positionOf(actor), positionOf(selected), canSeePoint(s, actor, selected.x, selected.y))
   }
 
@@ -1567,7 +1599,11 @@ const keycardChipsHtml = (e: Entity): string => {
     .join('')}</div>`
 }
 const conditionBadge = (e: Entity): string =>
-  isDead(e) ? '<span class="solo-badge is-kia">KIA</span>' : isDown(e) ? '<span class="solo-badge is-down">DOWN</span>' : ''
+  isDead(e)
+    ? '<span class="solo-badge is-kia">KIA</span>'
+    : isDown(e)
+      ? '<span class="solo-badge is-down">DOWN</span>'
+      : ''
 
 // Turn order starting at the active combatant; squad always listed, visible foes only.
 const trackCombatants = (s: SoloState): Entity[] => {
@@ -1601,16 +1637,14 @@ type TrackCombat = {
 const SOLO_ICON = {
   attack:
     '<svg class="solo-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="12" r="2.2" fill="currentColor"/><path d="M12 3v4M12 17v4M3 12h4M17 12h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>',
-  aim:
-    '<svg class="solo-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 2v3.5M12 18.5V22M2 12h3.5M18.5 12H22" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="12" cy="12" r="1.3" fill="currentColor"/></svg>',
+  aim: '<svg class="solo-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 2v3.5M12 18.5V22M2 12h3.5M18.5 12H22" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="12" cy="12" r="1.3" fill="currentColor"/></svg>',
   reload:
     '<svg class="solo-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4a8 8 0 1 1-5.3 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M7 6.5 4.5 9 7 11.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   medkit:
     '<svg class="solo-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="7" width="14" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 10v6M9 13h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
   pickup:
     '<svg class="solo-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 9V6a4 4 0 1 1 8 0v3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><rect x="6" y="9" width="12" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 12v4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
-  push:
-    '<svg class="solo-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="8" height="8" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M15 14h5M18 11l3 3-3 3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  push: '<svg class="solo-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="8" height="8" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M15 14h5M18 11l3 3-3 3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   search:
     '<svg class="solo-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M15 15l5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   stand:
@@ -1619,8 +1653,7 @@ const SOLO_ICON = {
     '<svg class="solo-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="14" cy="7" r="2.2" fill="currentColor"/><path d="M8 18h8M10.5 18l1.5-5 3 2 2-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   prone:
     '<svg class="solo-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="7" cy="12" r="2.2" fill="currentColor"/><path d="M10 12h10M10 12l2-2M10 12l2 2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-  end:
-    '<svg class="solo-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h8l-2 12H10L8 6z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M9 6l1-2h4l1 2" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>'
+  end: '<svg class="solo-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h8l-2 12H10L8 6z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M9 6l1-2h4l1 2" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>'
 } as const
 
 const iconBtn = (id: string | null, icon: string, label: string, enabled: boolean, extraClass = ''): string => {
@@ -1716,7 +1749,9 @@ const trackRowHtml = (s: SoloState, entity: Entity, rank: number, combat: TrackC
 }
 
 const trackHtml = (s: SoloState, combat: TrackCombat | null): string =>
-  trackCombatants(s).map((entity, index) => trackRowHtml(s, entity, index + 1, combat)).join('')
+  trackCombatants(s)
+    .map((entity, index) => trackRowHtml(s, entity, index + 1, combat))
+    .join('')
 
 const logHtml = (lines: string[]): string =>
   lines.length === 0
@@ -1735,12 +1770,14 @@ const renderPanel = (): void => {
   // allowed per round (actionUsed).
   const minorPx = actor ? moveBudgetPx(s.grid.gridScale, actor.moveMeters) : 0
   const canMinor = !!actor && isActive(actor) && s.moveRemainingPx + 0.5 >= minorPx
-  const canSignificant = !!actor && isActive(actor) && !s.actionUsed && s.moveRemainingPx + 0.5 >= SIGNIFICANT_ACTION_COST * minorPx
+  const canSignificant =
+    !!actor && isActive(actor) && !s.actionUsed && s.moveRemainingPx + 0.5 >= SIGNIFICANT_ACTION_COST * minorPx
 
   // Attack availability against a selected enemy. The active character can only
   // fire on a foe IT can see — not one only an ally has line of sight to.
   const selectedEnemy = selected && selected.faction === 'monster' ? selected : undefined
-  const enemy = actor && selectedEnemy && canSeePoint(s, actor, selectedEnemy.x, selectedEnemy.y) ? selectedEnemy : undefined
+  const enemy =
+    actor && selectedEnemy && canSeePoint(s, actor, selectedEnemy.x, selectedEnemy.y) ? selectedEnemy : undefined
   let attackLabel = 'Attack'
   let canAttack = false
   let targetNote = ''
@@ -1774,7 +1811,9 @@ const renderPanel = (): void => {
     patient.stats.end < patient.statsMax.end &&
     (patient.id === actor.id || withinReach(actor, patient, s.grid.gridScale))
 
-  const loot = actor ? s.ground.find((g) => Math.hypot(actor.x - g.x, actor.y - g.y) <= 1.6 * s.grid.gridScale) : undefined
+  const loot = actor
+    ? s.ground.find((g) => Math.hypot(actor.x - g.x, actor.y - g.y) <= 1.6 * s.grid.gridScale)
+    : undefined
   const canPickup = canMinor && !!loot
 
   const searchTarget = actor
@@ -2013,7 +2052,8 @@ if (import.meta.env.DEV) {
         const actor = activeEntity(state)
         if (actor?.faction === 'monster') {
           const plan = decideMonster(state, actor.id)
-          for (const cell of plan.moves) state = reduce(state, {t: 'Move', to: cellCenter(state.grid, cell.cx, cell.cy)})
+          for (const cell of plan.moves)
+            state = reduce(state, {t: 'Move', to: cellCenter(state.grid, cell.cx, cell.cy)})
           if (plan.attackTargetId) state = reduce(state, {t: 'Attack', targetId: plan.attackTargetId})
         }
         state = reduce(state, {t: 'EndTurn'})

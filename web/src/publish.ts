@@ -67,10 +67,7 @@ export const notifyTableBoardChanged = (): void => {
   }, LIVE_SYNC_DELAY_MS)
 }
 
-export const publishToTable = async (
-  rawTableId: string,
-  options?: {live?: boolean}
-): Promise<void> => {
+export const publishToTable = async (rawTableId: string, options?: {live?: boolean}): Promise<void> => {
   const tableId = rawTableId.trim()
   if (!tableId) {
     if (!options?.live) setStatus('Enter a table name to publish to.')

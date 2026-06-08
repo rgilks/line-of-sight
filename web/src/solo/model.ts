@@ -120,8 +120,7 @@ export const isDead = (entity: Entity): boolean =>
 
 // Unconscious when STR or DEX is reduced to 0 (but not yet dead). END reaching 0
 // alone does NOT down a character — only STR/DEX do (Cepheus SRD).
-export const isDown = (entity: Entity): boolean =>
-  !isDead(entity) && (entity.stats.str <= 0 || entity.stats.dex <= 0)
+export const isDown = (entity: Entity): boolean => !isDead(entity) && (entity.stats.str <= 0 || entity.stats.dex <= 0)
 
 /** A living entity is on the board and able to act (not dead, not downed). */
 export const isActive = (entity: Entity): boolean => !isDead(entity) && !isDown(entity)

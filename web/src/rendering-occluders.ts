@@ -1,13 +1,6 @@
 import type {DoorOccluder} from '../../core/los'
 import {drawReachableDoorAffordance} from './door-affordance'
-import {
-  ctx,
-  hoveredOccluderId,
-  occluders,
-  screenPixels,
-  selectedOccluderId,
-  showWalls
-} from './state'
+import {ctx, hoveredOccluderId, occluders, screenPixels, selectedOccluderId, showWalls} from './state'
 import {getPovToken, isDoorOpen, isDoorReachable} from './visibility'
 
 export const drawDoorMarkers = (): void => {
@@ -110,14 +103,7 @@ const drawDoorStateMarker = (door: DoorOccluder, open: boolean): void => {
   const py = ux
   const cap = Math.min(screenPixels(7), Math.max(screenPixels(4), length * 0.18))
 
-  const strokeSegment = (
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    width: number,
-    color: string
-  ): void => {
+  const strokeSegment = (x1: number, y1: number, x2: number, y2: number, width: number, color: string): void => {
     ctx.strokeStyle = color
     ctx.lineWidth = width
     ctx.beginPath()
