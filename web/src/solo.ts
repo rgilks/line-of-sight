@@ -64,7 +64,11 @@ import {reduce} from './solo/reducer'
 import {clearEffects, drawEffects, effectsActive, playUi, primeAudio, setFxTimeScale, spawnAttackFx, spawnDenied, spawnHint} from './solo/fx'
 import type {AttackFx} from './solo/model'
 import {createTweenLoop} from './viewport'
+import {installErrorReporting} from './error-reporting'
 import './solo.css'
+
+// Surface uncaught errors / rejections in the console (see error-reporting.ts).
+installErrorReporting('solo')
 
 const SIGHT_RADIUS = 700
 const WAVES_TOTAL = 3

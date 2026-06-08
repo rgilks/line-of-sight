@@ -39,7 +39,11 @@ import {createTweenLoop} from './viewport'
 // three.js on first roll, so it stays out of this page's initial bundle and only
 // loads the first time a player rolls initiative.
 import {hideDice, rollDice, showDice} from './dice-overlay'
+import {installErrorReporting} from './error-reporting'
 import './play.css'
+
+// Surface uncaught errors / rejections in the console (see error-reporting.ts).
+installErrorReporting('table')
 
 preloadCounterPortraits()
 

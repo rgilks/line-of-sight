@@ -67,6 +67,10 @@ import {
 } from './ui-actions'
 import {exportSidecar} from './export'
 import {SessionPanel} from './session-panel'
+import {installErrorReporting} from './error-reporting'
+
+// Surface uncaught errors / rejections in the console (see error-reporting.ts).
+installErrorReporting('edit')
 
 const counterDefinitionFor = (kind: (typeof counterDefinitions)[number]['kind']) =>
   counterDefinitions.find((definition) => definition.kind === kind) ?? counterDefinitions[0]
