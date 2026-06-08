@@ -10,6 +10,7 @@
 // thin transport/persistence shell; all rules live in the pure session core.
 import type {DurableObjectState} from './cf'
 import {createSession, replay, sessionStep, type SoloCommand, type SoloSession} from '../web/src/solo/session'
+import {projectController} from '../web/src/solo/projection'
 import type {Action, SoloState} from '../web/src/solo/model'
 
 const encoder = new TextEncoder()
@@ -17,7 +18,9 @@ const CMD_PREFIX = 'cmd:'
 // Zero-padded so storage.list() (lexicographic) yields commands in apply order.
 const CMD_KEY = (n: number): string => `${CMD_PREFIX}${String(n).padStart(12, '0')}`
 
-type Connection = {writer: WritableStreamDefaultWriter<Uint8Array>; view: string}
+// A phone controlling a character carries its actor id (it gets the per-character
+// LOS-gated controller projection); the board display has none (omniscient view).
+type Connection = {writer: WritableStreamDefaultWriter<Uint8Array>; actor: string | null}
 
 // Actions a phone controller may issue. System/director actions (AddWave) are
 // rejected at the transport before they reach the engine.
@@ -78,11 +81,14 @@ export class SoloRoom {
 
   private openStream(request: Request, url: URL): Response {
     const session = this.ensureSession(url.searchParams.get('seed'))
-    const view = url.searchParams.get('view') ?? 'board'
+    // A phone controlling a character passes ?actor=<id>; the board display
+    // (TV/monitor) omits it and gets the omniscient view.
+    const actor = url.searchParams.get('actor')
     const id = crypto.randomUUID().slice(0, 8)
     const {readable, writable} = new TransformStream<Uint8Array, Uint8Array>()
-    this.connections.set(id, {writer: writable.getWriter(), view})
-    void this.send(id, {type: 'snapshot', view, state: forSnapshot(session.state)})
+    const connection: Connection = {writer: writable.getWriter(), actor}
+    this.connections.set(id, connection)
+    void this.send(id, this.snapshotFor(connection, session.state))
     request.signal.addEventListener('abort', () => {
       const connection = this.connections.get(id)
       this.connections.delete(id)
@@ -114,11 +120,28 @@ export class SoloRoom {
     return Response.json({accepted: true})
   }
 
+  // The snapshot for a viewer: a phone controller gets its per-character,
+  // LOS-gated projection (it renders no map); the board display gets the full
+  // state including the map (sent once).
+  private snapshotFor(connection: Connection, state: SoloState): unknown {
+    return connection.actor
+      ? {type: 'snapshot', view: 'controller', controller: projectController(state, connection.actor)}
+      : {type: 'snapshot', view: 'board', state: forSnapshot(state)}
+  }
+
+  // The update after a command: controllers get their re-projected view; the
+  // board gets the changed fields (no map) plus the AI actions for animation.
+  private updateFor(connection: Connection, state: SoloState, aiActions: Action[]): unknown {
+    return connection.actor
+      ? {type: 'update', view: 'controller', controller: projectController(state, connection.actor)}
+      : {type: 'update', view: 'board', state: forUpdate(state), aiActions}
+  }
+
   private broadcast(aiActions: Action[]): void {
     if (!this.session) return
-    const state = forUpdate(this.session.state)
-    for (const id of this.connections.keys()) {
-      void this.send(id, {type: 'update', state, aiActions})
+    const state = this.session.state
+    for (const [id, connection] of this.connections) {
+      void this.send(id, this.updateFor(connection, state, aiActions))
     }
   }
 
