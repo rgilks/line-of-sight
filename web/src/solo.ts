@@ -42,7 +42,7 @@ import {
 import {cellCenter, cellOf, isFloor} from './solo/grid'
 import {foldSolo, reduce, type SoloEvent} from './solo/reducer'
 import {LocalRoom} from './room/local-room'
-import type {Room} from './room/room'
+import type {Room, SubmitResult} from './room/room'
 import {
   clearEffects,
   drawEffects,
@@ -206,6 +206,11 @@ const installState = (next: SoloState): void => {
 // per-move monster glide and weapon effects. Player attacks own their dice + fx
 // sequence in onAttack, so this fires the auto-fx only for monster attackers.
 const playEvents = async (batch: SoloEvent[]): Promise<void> => {
+  // The first TurnAdvanced in a batch is the player's own end-of-turn handoff —
+  // ease the camera to the next character (busy is true here, so focusOnActive's
+  // default would snap). Subsequent advances are the monsters' turns: snap those
+  // to keep the horde fast, matching the old runMonsters feel.
+  let firstAdvance = true
   for (const event of batch) {
     if (!state) return
     const before = new Map(state.entities.map((entity) => [entity.id, {x: entity.x, y: entity.y}]))
@@ -219,9 +224,15 @@ const playEvents = async (batch: SoloEvent[]): Promise<void> => {
       }
     }
     if (!wasLost && state.phase.t === 'lost') playUi('lose')
-    if (event.t === 'TurnAdvanced' || event.t === 'WaveAdded') focusOnActive()
-    if (event.t === 'WaveAdded') playUi('wave')
-    if (event.t === 'Won') playUi('win')
+    if (event.t === 'TurnAdvanced') {
+      focusOnActive(firstAdvance)
+      firstAdvance = false
+    } else if (event.t === 'WaveAdded') {
+      focusOnActive(false)
+      playUi('wave')
+    } else if (event.t === 'Won') {
+      playUi('win')
+    }
     renderPanel()
     requestDraw()
     // Pace by event type, matching the old runMonsters/onAttack feel: glide each
@@ -238,11 +249,12 @@ const playEvents = async (batch: SoloEvent[]): Promise<void> => {
 
 // Issue a player command for the active character through the Room. byActor is the
 // active PC (the local player owns every piece), so the engine's authority gate
-// always passes; the optional rng carries solo's on-screen 3D-dice faces.
-const submitCommand = (action: Parameters<typeof reduce>[1], rng?: () => number): Promise<void> => {
-  if (!room || !state) return Promise.resolve()
+// always passes; the optional rng carries solo's on-screen 3D-dice faces. Returns
+// the submit result so callers can show denial feedback on a rejected command.
+const submitCommand = (action: Parameters<typeof reduce>[1], rng?: () => number): Promise<SubmitResult> => {
+  if (!room || !state) return Promise.resolve({events: [], rejected: null})
   const active = activeEntity(state)
-  if (!active) return Promise.resolve()
+  if (!active) return Promise.resolve({events: [], rejected: null})
   return room.submit({byActor: active.id, action}, rng)
 }
 
@@ -806,21 +818,21 @@ const entityHitAt = (point: Point): Entity | null => {
 
 // Walk the active PC toward a tapped open-floor point (or show why it's blocked).
 const TAP_END_MS = 220 // a second open-floor tap within this window ends the turn
-const doMove = (point: Point): void => {
+const doMove = async (point: Point): Promise<void> => {
   if (!state || busy || state.phase.t !== 'playerTurn') return
   const actor = activeEntity(state)
   if (!actor || actor.faction !== 'pc') return
   const from = {x: actor.x, y: actor.y}
-  const logLen = state.log.length
-  playerAct({t: 'Move', to: point})
+  const result = await submitCommand({t: 'Move', to: point})
+  if (!state) return
   const moved = entityById(state, actor.id)
   if (moved && (moved.x !== from.x || moved.y !== from.y)) {
     playUi('move')
-  } else if (state.log.length > logLen) {
+  } else if (result.rejected) {
     // The move was refused — show why, right where they clicked.
     const cell = cellOf(state.grid, point.x, point.y)
     const at = cellCenter(state.grid, cell.cx, cell.cy)
-    spawnDenied(at, state.log[state.log.length - 1], state.map.gridScale)
+    spawnDenied(at, result.rejected, state.map.gridScale)
     playUi('denied')
     requestDraw()
   }
@@ -829,7 +841,7 @@ const doMove = (point: Point): void => {
 // Act at a screen point: toggle an adjacent door, select a tapped entity (target /
 // patient), search a container, else move the active PC there. A double-tap on
 // open floor ends the turn (hands off to the next combatant).
-function actAt(clientX: number, clientY: number): void {
+async function actAt(clientX: number, clientY: number): Promise<void> {
   if (!state || busy) return
   const actor = activeEntity(state)
   if (!actor || actor.faction !== 'pc') return
@@ -841,13 +853,12 @@ function actAt(clientX: number, clientY: number): void {
   const doorId = doorHitAt(point)
   if (doorId) {
     const before = state.doorStates[doorId]?.open ?? false
-    const logLen = state.log.length
-    playerAct({t: 'ToggleDoor', doorId})
+    const result = await submitCommand({t: 'ToggleDoor', doorId})
     const after = state?.doorStates[doorId]?.open ?? false
-    if (state && after === before && state.log.length > logLen) {
+    if (state && after === before && result.rejected) {
       // Refused (sealed without a card/hack, or out of actions) — show why on the door.
       const mid = doorMidpoint(doorId)
-      if (mid) spawnDenied(mid, state.log[state.log.length - 1], state.map.gridScale)
+      if (mid) spawnDenied(mid, result.rejected, state.map.gridScale)
       playUi('denied')
       requestDraw()
     } else {

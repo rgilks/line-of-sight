@@ -27,10 +27,10 @@ const AI_GUARD = 400
 const advance = (
   state: SoloState,
   decideFn: () => ReturnType<typeof decide>
-): {state: SoloState; events: SoloEvent[]} => {
+): {state: SoloState; events: SoloEvent[]; rejected: string | null} => {
   const result = decideFn()
-  if ('rejected' in result) return {state, events: []}
-  return {state: result.events.reduce(foldSolo, state), events: result.events}
+  if ('rejected' in result) return {state, events: [], rejected: result.rejected}
+  return {state: result.events.reduce(foldSolo, state), events: result.events, rejected: null}
 }
 
 // A d-pad step → a one-cell Move, after checking the issuer is active.
@@ -92,14 +92,14 @@ export const step = (
   state: SoloState,
   command: SoloCommand,
   rng: () => number
-): {state: SoloState; events: SoloEvent[]} => {
+): {state: SoloState; events: SoloEvent[]; rejected: string | null} => {
   const player =
     'step' in command
       ? stepCommand(state, command.step, command.byActor, rng)
       : advance(state, () => decide(state, command.action, rng, command.byActor))
-  if (player.events.length === 0) return {state, events: []}
+  if (player.events.length === 0) return {state, events: [], rejected: player.rejected}
   const ai = runAi(player.state, rng)
-  return {state: ai.state, events: [...player.events, ...ai.events]}
+  return {state: ai.state, events: [...player.events, ...ai.events], rejected: null}
 }
 
 // Start a fresh authoritative game for `seed`.

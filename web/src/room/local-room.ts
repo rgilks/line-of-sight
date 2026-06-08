@@ -7,7 +7,7 @@
 import {activeEntity, type SoloState} from '../solo/model'
 import {createSession, replay, runAi, step, type SoloCommand, type SoloSession} from '../solo/session'
 import {clearGame, loadGame, saveGame} from '../solo/idb'
-import type {Room, RoomListener} from './room'
+import type {Room, RoomListener, SubmitResult} from './room'
 
 const randomSeed = (): number => Math.floor(Math.random() * 100000)
 
@@ -58,12 +58,13 @@ export class LocalRoom implements Room {
   // Apply a command (player action or d-pad step), running the monster AI to
   // completion via the engine, then persist and broadcast the produced events. The
   // optional rng overrides the session rng for this command (solo's 3D-dice faces).
-  async submit(command: SoloCommand, rng?: () => number): Promise<void> {
-    const {state, events} = step(this.session.state, command, rng ?? this.session.rng)
-    if (events.length === 0) return // rejected: not your turn / illegal
+  async submit(command: SoloCommand, rng?: () => number): Promise<SubmitResult> {
+    const {state, events, rejected} = step(this.session.state, command, rng ?? this.session.rng)
+    if (events.length === 0) return {events, rejected} // not your turn / illegal
     this.session = {...this.session, state, events: [...this.session.events, ...events]}
     this.scheduleSave()
     for (const listener of this.listeners) await listener(events, state)
+    return {events, rejected: null}
   }
 
   // After resuming a game that was closed mid-horde-turn, the active entity is a

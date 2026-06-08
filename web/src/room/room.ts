@@ -17,6 +17,11 @@ import type {SoloCommand} from '../solo/session'
 // state can lag the authoritative state during a monster glide).
 export type RoomListener = (events: SoloEvent[], state: SoloState) => void | Promise<void>
 
+// The outcome of a submitted command: the events it produced (empty if rejected)
+// and, on rejection, the reason — so the view can show denial feedback (the
+// floating "blocked" label + sound) right where the player tapped.
+export type SubmitResult = {events: SoloEvent[]; rejected: string | null}
+
 export interface Room {
   // The seed-derived genesis identifier — used for resume and (later) promotion.
   readonly seed: number
@@ -26,8 +31,9 @@ export interface Room {
   // Issue a command. The optional rng overrides the engine's rng for THIS command
   // only: solo passes its on-screen 3D-dice faces so the dice the player sees are
   // exactly the dice that resolve. Produced events are persisted (if the room is
-  // durable) and delivered to every listener. A rejected command yields no events.
-  submit(command: SoloCommand, rng?: () => number): Promise<void>
+  // durable) and delivered to every listener; the result reports rejection so the
+  // view can show denial feedback.
+  submit(command: SoloCommand, rng?: () => number): Promise<SubmitResult>
   // Subscribe to event batches. Returns an unsubscribe function.
   subscribe(listener: RoomListener): () => void
   // Release timers/listeners (and, later, network connections).
