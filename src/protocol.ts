@@ -61,6 +61,18 @@ export type DomainEvent = {seq: number} & (
     }
   | {type: 'TurnAdvanced'; round: number; turnIndex: number}
   | {type: 'CombatEnded'}
+  | {
+      // A chat say. Not a fold over board/token/combat state, but logged like the
+      // rest so the command path is one decide → fold pipeline. `at`/`label`/`fromGm`
+      // are resolved at decide time; `sentAt` is the wall clock then (see ChatSay).
+      type: 'Said'
+      fromId: PlayerId
+      label: string
+      text: string
+      at: {x: number; y: number}
+      fromGm: boolean
+      sentAt: number
+    }
 )
 
 // Server -> client read model. `tokens` and `says` are ALREADY visibility-gated
