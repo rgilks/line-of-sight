@@ -92,7 +92,8 @@ steps (awaiting the movement tween) then attacking, with input locked.
 ## Cepheus family alignment
 
 `web/src/solo/ccg.ts` maps a character from the
-[Cepheus Character Generator](https://github.com/) into the game's model — its
+[Cepheus Character Generator](https://github.com/rgilks/cepheus-character-generator)
+into the game's model — its
 characteristics become `str/dex/end` (same names) and its `"Gun Combat-2"` skill
 strings parse into a skill map; weapons/armour mirror its `Dmg`/`AR`/`Category`.
 A generated character can drop into an encounter with minimal glue.

@@ -18,7 +18,7 @@ anything with clusters or many edges is a `.dot` here.
 1. **System overview** for the whole SPA / core / Worker shape and where the
    sidecar comes from.
 2. **Analysis pipeline** when changing wall/door detection in
-   [`los-core.ts`](../../core/los.ts).
+   [`core/los.ts`](../../core/los.ts).
 3. **Visibility and fog** when changing the POV, the visibility polygon, or the
    canvas render order in [`main.tsx`](../../web/src/main.tsx).
 

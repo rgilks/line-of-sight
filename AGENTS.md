@@ -64,7 +64,7 @@ candidate → review → export).
 
 ```bash
 npm run typecheck      # tsc --noEmit
-npm run test           # vitest run (unit tests for core/los.ts)
+npm run test           # vitest run (core geometry + rules + pathfinding, solo engine, synth)
 npm run build          # vite build -> dist/client
 npm run check          # typecheck + test + build + check:diagrams
 npm run diagrams       # render docs/diagrams/*.dot to PNG
@@ -75,8 +75,8 @@ npm run deploy         # build, then wrangler deploy
 Use the narrowest check that proves the change:
 
 - CSS or HTML only: `npm run build:web` is usually enough.
-- Core geometry/analysis (`core/los.ts`): `npm run test` (add/adjust
-  cases in `core/los.test.ts`), then `npm run check`.
+- Pure logic (`core/` geometry/rules/dice/pathfinding, or the `web/src/solo/`
+  engine): `npm run test` (add/adjust the colocated `*.test.ts`), then `npm run check`.
 - TypeScript UI changes: `npm run check`.
 - Worker or deployment config changes: `npm run check`, then `npm run deploy`.
 - Diagram (`.dot`) changes: `npm run diagrams` to re-render, then commit the PNGs.

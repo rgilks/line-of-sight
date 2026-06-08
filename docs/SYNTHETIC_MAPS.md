@@ -30,7 +30,7 @@ The data model needs no new representation:
 
 - A generated map **is** a sidecar: `{assetRef, width, height, gridScale,
   occluders}`. The generator emits `Occluder[]` (walls + doors) directly.
-- It lives beside `los-core.ts` as a **pure, deterministic, seeded** module —
+- It lives beside `core/los.ts` as a **pure, deterministic, seeded** module —
   no DOM/Cloudflare, same constraints as the core. Same seed ⇒ same map.
 - It renders to canvas and exports straight into the multiplayer
   **publish-to-table** flow that already exists.
@@ -80,10 +80,10 @@ adventure idea.
 
 ## Implementation
 
-Pure, seeded modules under `web/src/synth/`, mirroring `los-core`:
+Pure, seeded modules under `web/src/synth/`, mirroring `core/los`:
 
 - `types.ts` — `MapSpec`, `Room`, `Rect`, `Decoration`, `GeneratedMap`, room
-  types and themes, `defaultSpec(seed)` (a 28×28 deck at 36px/cell).
+  types and themes, `defaultSpec(seed)` (a 56×56 deck at 36px/cell).
 - `rng.ts` — `makeRng` (mulberry32) + `randInt`/`chance`/`pick`/`shuffle`.
 - `generate-map.ts` — hull + margin → corridor cross → quadrant BSP + typing →
   spanning-tree doors (room↔corridor first) → wall extraction from cell-tag
@@ -156,9 +156,9 @@ truth — and the generator must produce valid maps with it switched off:
 ## Relationship to the detection work
 
 Complementary, not either/or. **Detection** lets a GM bring their own existing
-map; **generation** produces ours on demand with no IP, exact LOS, and native
-styling. They share the same sidecar/occluder model, so neither blocks the other.
-The `spike/wall-detection-cv` branch keeps the bring-your-own path alive.
+map (the editor's import path, `/edit`); **generation** produces ours on demand
+with no IP, exact LOS, and native styling. They share the same sidecar/occluder
+model, so neither blocks the other and both ship in the main build.
 
 ## Verdict
 

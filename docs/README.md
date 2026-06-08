@@ -9,9 +9,10 @@ formats in more depth.
   visibility geometry, the UI, and the sidecar JSON format.
 - [PATTERNS.md](PATTERNS.md) — the load-bearing design patterns. Read before
   non-trivial changes.
-- [MULTIPLAYER.md](MULTIPLAYER.md) — design + roadmap for multiplayer with
-  server-authoritative per-player fog of war (Durable Objects, CQRS-lite, SSE,
-  Discord auth). Forward-looking; not built yet.
+- [MULTIPLAYER.md](MULTIPLAYER.md) — the multiplayer table with
+  server-authoritative per-player fog of war (one Durable Object per table,
+  CQRS-lite, SSE, private R2 map storage). The core host/player/GM loop is built
+  and live; the roadmap tracks what's left (Discord auth, persistence, lobby).
 - [SOLO.md](SOLO.md) — the single-player game at `/solo` ("Survive the Horde"):
   Cepheus turn-based combat against boarding waves, a pure reducer + monster AI,
   and barricades. Reuses the shared `core/`.
@@ -22,8 +23,8 @@ formats in more depth.
   Forward-looking; the primitive to move toward.
 - [SYNTHETIC_MAPS.md](SYNTHETIC_MAPS.md) — the deck generator that builds our own
   tactical maps from the structural layer outward (walls/doors plus furnishings)
-  with exact line of sight, instead of detecting structure from raster art. Built
-  into the main tool, which opens on a generated deck; on `spike/synthetic-maps`.
+  with exact line of sight, instead of detecting structure from raster art. It
+  feeds the table host, the solo game, and the editor's "generate" path.
 - [diagrams/](diagrams/README.md) — Graphviz/DOT sources + rendered PNGs.
 
 ## Project layout

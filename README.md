@@ -1,46 +1,63 @@
 # Line of Sight
 
-Line of Sight is a browser-first lab for extracting and reviewing visibility
-metadata from geomorphic tactical maps. It is intended to support:
+A browser-first **Cepheus tactical-map toolkit** by Total Reality Engineering,
+deployed on Cloudflare Workers at [los.tre.systems](https://los.tre.systems). One
+Vite build serves three apps that share a deterministic, framework-free core for
+geometry, line of sight, Cepheus rules, dice, and pathfinding.
 
-- arranging local geomorph images into a board grid;
-- detecting candidate wall segments from raster map art;
-- detecting candidate door openings from short gaps between aligned wall runs;
-- correcting walls and doors by hand;
-- toggling closed doors open to recalculate visibility;
-- tracking areas that are visible now and areas that have been seen before;
-- exporting reviewed LOS sidecar JSON for another virtual tabletop.
+## The apps
 
-The app keeps published map and counter assets out of git. Local development may
-copy `Geomorphs/` and `Counters/` into the project root, but those folders are
-ignored and are not deployed.
+- **Multiplayer table** (`/` host, `/play` player/GM) — a GM hosts a generated
+  starship deck; each player joins with their own **server-authoritative point of
+  view** and fog of war (one Durable Object per table), so you only see other
+  tokens your counter can actually see. See [`docs/MULTIPLAYER.md`](docs/MULTIPLAYER.md).
+- **Map editor** (`/edit`) — author a board: generate a synthetic deck, or import
+  map art and **detect candidate walls and doors** from the raster, correct them
+  by hand, review visibility by placing tokens and toggling doors, and export a
+  **line-of-sight sidecar** for any virtual tabletop. See
+  [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+- **Survive the Horde** (`/solo`) — a single-player, turn-based Cepheus game:
+  four characters hold a generated deck against boarding alien waves, with a pure
+  reducer + monster AI, scavenging, and barricades. See [`docs/SOLO.md`](docs/SOLO.md).
 
-## Stack
+## How it fits together
 
-- TypeScript geometry, image-analysis, and browser UI.
-- WebGPU-ready frontend with a runtime capability check.
-- Cloudflare Workers static assets for deployment.
+- **`core/`** — deterministic TypeScript with no DOM or Cloudflare: `los.ts`
+  (visibility geometry + wall/door detection), `rules.ts` (Cepheus movement /
+  initiative / the domain model), `dice.ts`, `pathfinding.ts`. Unit-tested in
+  isolation and shared by every app and the Worker.
+- **`web/`** — the browser UI (Vite): the table client, the editor, the solo
+  game, and the seeded **synthetic deck generator** (`web/src/synth/`) that builds
+  decks with exact line of sight from the structural layer outward.
+- **`src/`** — the Cloudflare Worker: serves the static build, routes the table
+  API to the `GameTable` Durable Object, and stores GM-uploaded maps privately in
+  R2.
+
+Full map of the codebase and docs: [`docs/README.md`](docs/README.md). Agents
+start with [`AGENTS.md`](AGENTS.md).
 
 ## Development
 
 ```bash
 npm install
-npm run build
-npm run dev
+npm run dev      # Vite dev server
+npm run check    # typecheck + tests + build + diagram check
 ```
 
-The local asset folders are optional. The deployed public app expects users to
-select their own map images in the browser.
+The local asset folders are optional — the deployed app expects users to bring
+their own map images (the editor) or play on generated decks (table and solo).
 
 ## Deployment
 
 ```bash
-npm run deploy
+npm run deploy   # build, then wrangler deploy
 ```
 
 The Worker is configured for `los.tre.systems`.
 
 ## License
 
-MIT. This license applies to the source code in this repository, not to any
-locally copied map or counter artwork.
+MIT, for the source code in this repository. Licensed product art is **not**
+included: `Geomorphs/` and `Counters/` may be copied in for local development but
+are git-ignored and never committed or deployed (see the Local Asset Policy in
+[`AGENTS.md`](AGENTS.md)).

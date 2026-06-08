@@ -8,7 +8,7 @@ shape, and the gotchas that keep it working.
 flowchart LR
   Core["Deterministic core<br/>(pure)"] --> UI["Browser UI<br/>(signals + canvas)"]
   UI --> Worker["Cloudflare Worker<br/>(static shell)"]
-  Core -. "tested in isolation" .-> Tests["los-core.test.ts"]
+  Core -. "tested in isolation" .-> Tests["core/los.test.ts"]
 ```
 
 The deterministic core is the foundation: because it is pure, the UI leans on it
@@ -41,7 +41,7 @@ visibility.
 **Gotchas:**
 
 - Do not import `preact`, `document`, `window`, or Cloudflare types into
-  `los-core.ts`. If it needs pixels, take a `Uint8ClampedArray`; if it needs a
+  `core/los.ts`. If it needs pixels, take a `Uint8ClampedArray`; if it needs a
   board, take numbers.
 - The UI rasterises tiles to an offscreen canvas and passes the raw RGBA buffer
   into `analyzeImageRgba` — that is the only place pixels cross into the core.

@@ -1,15 +1,20 @@
 # Line of Sight Architecture
 
-Line of Sight is a browser-first tool for extracting and reviewing visibility
-metadata from geomorphic tactical maps. It is built from three layers with a
+Line of Sight is a Cepheus tactical-map toolkit — a map **editor** (`/edit`), a
+multiplayer **table** (`/`, `/play`), and a single-player **game** (`/solo`) — on
+one shared, deterministic core. Every app is built from three layers with a
 strict, one-directional dependency rule.
 
 ![System overview](diagrams/system-overview.png)
 
-This document maps *what exists and where*. [`PATTERNS.md`](PATTERNS.md) explains
-*why each piece has its shape*; diagram sources live in
-[`diagrams/`](diagrams/README.md). All coordinates throughout are board pixels
-with the origin at the top-left.
+This document covers the **editor and the detection/visibility pipeline** — the
+oldest and most geometry-heavy surface. The multiplayer table is in
+[`MULTIPLAYER.md`](MULTIPLAYER.md) and the solo game in [`SOLO.md`](SOLO.md); both
+reuse the same `core/` and sidecar model described here.
+
+It maps *what exists and where*. [`PATTERNS.md`](PATTERNS.md) explains *why each
+piece has its shape*; diagram sources live in [`diagrams/`](diagrams/README.md).
+All coordinates throughout are board pixels with the origin at the top-left.
 
 ## Layers
 
@@ -20,7 +25,9 @@ Given a raw RGBA buffer it produces candidate walls and doors; given occluders
 and a viewpoint it answers line-of-sight queries and builds a visibility polygon.
 Being side-effect free and deterministic, it is unit-tested in isolation
 (`core/los.test.ts`). Detailed in
-[The deterministic core](#the-deterministic-core).
+[The deterministic core](#the-deterministic-core). The same `core/` folder also
+holds `rules.ts` (Cepheus movement/initiative + domain model), `dice.ts`, and
+`pathfinding.ts`, which the table and the solo game share.
 
 ### Browser UI — `web/src/main.tsx`
 

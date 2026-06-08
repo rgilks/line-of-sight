@@ -5,8 +5,12 @@ authoring tool into a multiplayer tabletop where each player has their own
 server-authoritative point of view. This is a living document: we iterate on it
 as we build, and the [Roadmap](#roadmap--progress) at the bottom tracks status.
 
-Status: **design** — nothing here is built yet. It's a prototype; we favour the
-smallest thing that proves each idea over completeness.
+Status: the **core loop is built and live** — a GM hosts a generated deck, players
+join with a server-authoritative per-POV view and fog, moves are validated, doors
+re-gate sight, and GM maps are stored privately in R2. The [Roadmap](#roadmap--progress)
+tracks what's left (notably Discord auth, event-log persistence, and a lobby).
+It's a prototype; we favour the smallest thing that proves each idea over
+completeness.
 
 ## Goal
 
@@ -149,7 +153,7 @@ flowchart LR
   subgraph CF["Cloudflare"]
     W["Worker<br/>routing + Discord auth"]
     DO["Table Durable Object<br/>event log + command handler<br/>+ per-viewer projection"]
-    Core["los-core (pure)<br/>hasLineOfSight / visibilityPolygon"]
+    Core["core/los (pure)<br/>hasLineOfSight / visibilityPolygon"]
   end
   UI -- "POST command" --> W --> DO
   DO -- "per-player view stream (SSE)" --> UI
@@ -337,11 +341,10 @@ never in git or the deployed bundle, so the two don't conflict.
 
 ## Reusing the deterministic core
 
-`los-core.ts` is pure (no DOM/Cloudflare) and already unit-tested, so the DO can
-import it directly for `hasLineOfSight` / `visibilityPolygon`. One structural
-task: it currently lives under `web/src/` (the browser bundle). Move it to a
-location both the browser build and the Worker/DO build import cleanly (e.g. a
-shared module), keeping the layered-separation rule intact. No logic changes.
+`core/los.ts` is pure (no DOM/Cloudflare) and unit-tested, and lives in the shared
+`core/` that both the browser build and the Worker/DO build import cleanly — so the
+Durable Object uses `hasLineOfSight` / `visibilityPolygon` directly, with the
+layered-separation rule intact.
 
 ## Decisions log
 
@@ -373,25 +376,25 @@ shared module), keeping the layered-separation rule intact. No logic changes.
 Status keys: `[ ]` not started · `[~]` in progress · `[x]` done.
 
 ### Phase 0 — Foundations
-- [ ] Make `los-core` importable by both the browser and the Worker/DO build.
-- [ ] Define shared `Command` / `DomainEvent` / `Sidecar` types.
-- [ ] Stub `Table` Durable Object + Worker routing to it by table id.
+- [x] Make `core/los` importable by both the browser and the Worker/DO build.
+- [x] Define shared `Command` / `DomainEvent` / `Sidecar` types.
+- [x] Stub `Table` Durable Object + Worker routing to it by table id.
 
 ### Phase 1 — The core loop (prove the hard thing)
-- [ ] `POST /api/tables/:id/commands` → DO applies `MoveToken`.
-- [ ] `GET /api/tables/:id/stream` SSE with per-player snapshot + deltas.
-- [ ] Per-player token gating via `hasLineOfSight`.
-- [ ] No auth: server assigns an ephemeral player id on connect; each player
+- [x] `POST /api/tables/:id/commands` → DO applies `MoveToken`.
+- [x] `GET /api/tables/:id/stream` SSE with per-player snapshot + deltas.
+- [x] Per-player token gating via `hasLineOfSight`.
+- [x] No auth: server assigns an ephemeral player id on connect; each player
       owns one token.
-- [ ] Demo: two browsers, two POVs, each sees the other's token only when in
+- [x] Demo: two browsers, two POVs, each sees the other's token only when in
       view.
 
 ### Phase 2 — Real-ish play
-- [ ] `ToggleDoor` affecting visibility; doors re-gate token sight.
-- [ ] Token claim/ownership; GM role sees all tokens.
+- [x] `ToggleDoor` affecting visibility; doors re-gate token sight.
+- [x] Token claim/ownership; GM role sees all tokens.
 - [x] Private R2 map storage: `POST/GET /api/tables/:id/map[/:ref]`
       (image-only, ≤25 MB, served through the Worker — not public).
-- [ ] GM publishes a board (`assetRef` + occluders) so the DO broadcasts it and
+- [x] GM publishes a board (`assetRef` + occluders) so the DO broadcasts it and
       clients fetch the uploaded map.
 - [ ] Event-log persistence in DO storage + `Last-Event-ID` reconnect catch-up.
 
