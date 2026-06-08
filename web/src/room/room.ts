@@ -28,6 +28,9 @@ export interface Room {
   // The authoritative current state — read between turns, when no animation is in
   // flight (input is locked while a batch animates, so this is safe to decide on).
   getState(): SoloState
+  // This client's seat id in multiplayer, or undefined when there are no seats
+  // (offline solo — the local player commands whichever piece is active).
+  mySeat(): string | undefined
   // Issue a command. The optional rng overrides the engine's rng for THIS command
   // only: solo passes its on-screen 3D-dice faces so the dice the player sees are
   // exactly the dice that resolve. Produced events are persisted (if the room is

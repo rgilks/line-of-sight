@@ -5,6 +5,7 @@
 // delivers produced events to subscribers for animation. Resume folds the saved
 // log over the seed-derived genesis — identical to the server's replay().
 import {activeEntity, type SoloState} from '../solo/model'
+import type {SoloEvent} from '../solo/reducer'
 import {createSession, replay, runAi, step, type SoloCommand, type SoloSession} from '../solo/session'
 import {clearGame, loadGame, saveGame} from '../solo/idb'
 import type {Room, RoomListener, SubmitResult} from './room'
@@ -48,6 +49,16 @@ export class LocalRoom implements Room {
 
   getState(): SoloState {
     return this.session.state
+  }
+
+  // Offline solo has no seats — the local player owns every piece.
+  mySeat(): string | undefined {
+    return undefined
+  }
+
+  // The (seed + event log) to hand to the server when promoting this game online.
+  exportLog(): {seed: number; events: SoloEvent[]} {
+    return {seed: this.seed, events: [...this.session.events]}
   }
 
   subscribe(listener: RoomListener): () => void {

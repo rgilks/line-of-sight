@@ -42,6 +42,7 @@ import {
 import {cellCenter, cellOf, isFloor} from './solo/grid'
 import {foldSolo, reduce, type SoloEvent} from './solo/reducer'
 import {LocalRoom} from './room/local-room'
+import {RemoteRoom} from './room/remote-room'
 import type {Room, SubmitResult} from './room/room'
 import {
   clearEffects,
@@ -183,6 +184,18 @@ const sizeFogLayers = (w: number, h: number): void => {
 const GAME_ID = 'current'
 let room: Room | null = null
 
+// Multiplayer helpers. Offline solo has no seat (mySeat undefined) and the local
+// player commands whichever piece is active — so every multiplayer guard below is a
+// provable no-op offline and the solo path is unchanged.
+const mySeat = (): string | undefined => room?.mySeat()
+// Is it my turn to act — the active entity a living PC that I own (or any PC offline)?
+const myTurn = (): boolean => {
+  const active = state ? activeEntity(state) : undefined
+  if (!active || active.faction !== 'pc') return false
+  const seat = mySeat()
+  return seat === undefined || active.owner === seat
+}
+
 // Install an authoritative state into the view: reset selection/animation, size
 // the canvas + fog, and frame the squad.
 const installState = (next: SoloState): void => {
@@ -206,43 +219,63 @@ const installState = (next: SoloState): void => {
 // per-move monster glide and weapon effects. Player attacks own their dice + fx
 // sequence in onAttack, so this fires the auto-fx only for monster attackers.
 const playEvents = async (batch: SoloEvent[]): Promise<void> => {
-  // The first TurnAdvanced in a batch is the player's own end-of-turn handoff —
-  // ease the camera to the next character (busy is true here, so focusOnActive's
-  // default would snap). Subsequent advances are the monsters' turns: snap those
-  // to keep the horde fast, matching the old runMonsters feel.
-  let firstAdvance = true
-  for (const event of batch) {
-    if (!state) return
-    const before = new Map(state.entities.map((entity) => [entity.id, {x: entity.x, y: entity.y}]))
-    const wasLost = state.phase.t === 'lost'
-    const prevFx = state.lastAttack
-    state = foldSolo(state, event)
-    for (const entity of state.entities) {
-      const old = before.get(entity.id)
-      if (old && (old.x !== entity.x || old.y !== entity.y)) {
-        startEase(entity.id, renderPos.get(entity.id) ?? old, {x: entity.x, y: entity.y})
-      }
-    }
-    if (!wasLost && state.phase.t === 'lost') playUi('lose')
-    if (event.t === 'TurnAdvanced') {
-      focusOnActive(firstAdvance)
-      firstAdvance = false
-    } else if (event.t === 'WaveAdded') {
-      focusOnActive(false)
-      playUi('wave')
-    } else if (event.t === 'Won') {
-      playUi('win')
-    }
+  // Online, batches arrive asynchronously over the wire (not from an awaited
+  // submit), so the pump itself locks input while it animates and unlocks only when
+  // control returns to me. Offline (no seat) busy is managed by the call sites, as
+  // before — so this is a no-op for solo.
+  const remote = mySeat() !== undefined
+  if (remote) {
+    busy = true
     renderPanel()
-    requestDraw()
-    // Pace by event type, matching the old runMonsters/onAttack feel: glide each
-    // monster move, and play a monster attack's effect with its impact delay.
-    if (event.t === 'Moved') {
-      if (entityById(state, event.actorId)?.faction === 'monster') await waitTween(event.actorId)
-    } else if (event.t === 'Attacked') {
-      if (entityById(state, event.attackerId)?.faction === 'monster') {
-        await delay(fireAttackFx(prevFx) ? 560 : 220)
+  }
+  try {
+    // The first TurnAdvanced in a batch is the player's own end-of-turn handoff —
+    // ease the camera to the next character (busy is true here, so focusOnActive's
+    // default would snap). Subsequent advances are the monsters' turns: snap those
+    // to keep the horde fast, matching the old runMonsters feel.
+    let firstAdvance = true
+    for (const event of batch) {
+      if (!state) return
+      const before = new Map(state.entities.map((entity) => [entity.id, {x: entity.x, y: entity.y}]))
+      const wasLost = state.phase.t === 'lost'
+      const prevFx = state.lastAttack
+      state = foldSolo(state, event)
+      for (const entity of state.entities) {
+        const old = before.get(entity.id)
+        if (old && (old.x !== entity.x || old.y !== entity.y)) {
+          startEase(entity.id, renderPos.get(entity.id) ?? old, {x: entity.x, y: entity.y})
+        }
       }
+      if (!wasLost && state.phase.t === 'lost') playUi('lose')
+      if (event.t === 'TurnAdvanced') {
+        focusOnActive(firstAdvance)
+        firstAdvance = false
+      } else if (event.t === 'WaveAdded') {
+        focusOnActive(false)
+        playUi('wave')
+      } else if (event.t === 'Won') {
+        playUi('win')
+      }
+      renderPanel()
+      requestDraw()
+      // Pace by event type, matching the old runMonsters/onAttack feel: glide each
+      // monster move, and play a monster attack's effect with its impact delay.
+      if (event.t === 'Moved') {
+        if (entityById(state, event.actorId)?.faction === 'monster') await waitTween(event.actorId)
+      } else if (event.t === 'Attacked') {
+        if (entityById(state, event.attackerId)?.faction === 'monster') {
+          await delay(fireAttackFx(prevFx) ? 560 : 220)
+        } else if (remote) {
+          // Online, a PC attack's own fx plays here (onAttack skipped it server-side).
+          await delay(fireAttackFx(prevFx) ? 720 : 0)
+        }
+      }
+    }
+  } finally {
+    if (remote) {
+      busy = !myTurn() // unlock only when it's my piece's turn again
+      renderPanel()
+      requestDraw()
     }
   }
 }
@@ -255,6 +288,13 @@ const submitCommand = (action: Parameters<typeof reduce>[1], rng?: () => number)
   if (!room || !state) return Promise.resolve({events: [], rejected: null})
   const active = activeEntity(state)
   if (!active) return Promise.resolve({events: [], rejected: null})
+  // Online, lock input optimistically until the server's events arrive (the pump
+  // unlocks). The Room stamps byPlayer (the seat) itself, so the view stays
+  // seat-agnostic. Offline this is a no-op.
+  if (mySeat() !== undefined) {
+    busy = true
+    renderPanel()
+  }
   return room.submit({byActor: active.id, action}, rng)
 }
 
@@ -290,11 +330,72 @@ const bootGame = async (requestedSeed?: number): Promise<void> => {
   await useRoom(await LocalRoom.open(GAME_ID, requestedSeed))
 }
 
+// Join a live multiplayer room over a RemoteRoom (claims a seat, pieces
+// redistribute). On failure (room gone / offline) fall back to a solo game.
+const joinRoom = async (roomId: string, seed?: number): Promise<void> => {
+  try {
+    await useRoom(await RemoteRoom.open(roomId, seed))
+    void showInvite(roomId)
+  } catch {
+    await bootGame(seed)
+  }
+}
+
+// "Play with friends": promote the offline game online — hand the local
+// (seed + event log) to a fresh server room, reconnect as a player (claiming the
+// first seat, so we still own every piece), and show the invite link/QR.
+const promote = async (): Promise<void> => {
+  if (busy || !(room instanceof LocalRoom)) return
+  const roomId = crypto.randomUUID().slice(0, 8)
+  const {seed, events} = room.exportLog()
+  try {
+    const res = await fetch(`/api/solo/${roomId}/import`, {
+      method: 'POST',
+      headers: {'content-type': 'application/json'},
+      body: JSON.stringify({seed, events})
+    })
+    if (!res.ok && res.status !== 409) return // import failed; stay offline
+  } catch {
+    return
+  }
+  history.replaceState(null, '', `?table=${encodeURIComponent(roomId)}`)
+  await useRoom(await RemoteRoom.open(roomId))
+  void showInvite(roomId)
+}
+
+// A floating join panel (link + QR) shown once a game is live online.
+let invitePanel: HTMLElement | null = null
+const showInvite = async (roomId: string): Promise<void> => {
+  if (invitePanel) return
+  const joinUrl = `${location.origin}/solo?table=${encodeURIComponent(roomId)}`
+  const panel = document.createElement('aside')
+  panel.className = 'solo-invite'
+  panel.style.cssText =
+    'position:absolute;top:12px;right:12px;z-index:6;display:flex;flex-direction:column;align-items:center;gap:6px;' +
+    'padding:12px;border-radius:10px;background:rgba(8,11,10,0.86);border:1px solid #1c3a2e;color:#cfe;font:12px var(--font-ui,monospace);max-width:200px;text-align:center'
+  panel.innerHTML =
+    '<span style="letter-spacing:1px;color:#7ad19a">SCAN TO JOIN</span>' +
+    '<div class="solo-invite-qr" aria-hidden="true"></div>' +
+    `<code style="word-break:break-all;color:#9fb">${joinUrl}</code>`
+  document.querySelector('.solo-shell')?.appendChild(panel)
+  invitePanel = panel
+  try {
+    const {default: qrcode} = await import('qrcode-generator')
+    const qr = qrcode(0, 'M')
+    qr.addData(joinUrl)
+    qr.make()
+    const slot = panel.querySelector('.solo-invite-qr')
+    if (slot) slot.innerHTML = qr.createSvgTag({cellSize: 4, margin: 1, scalable: true})
+  } catch {
+    /* the printed URL is the fallback */
+  }
+}
+
 // A player action during their own turn (movement, an action, a door, a push).
 // The Room folds + animates the produced events through the subscribed pump; the
 // fold runs synchronously, so movement stays responsive (no await here).
 const playerAct = (action: Parameters<typeof reduce>[1]): void => {
-  if (busy || !state || state.phase.t !== 'playerTurn') return
+  if (busy || !state || state.phase.t !== 'playerTurn' || !myTurn()) return
   void submitCommand(action)
 }
 
@@ -324,10 +425,16 @@ const fireAttackFx = (prev: AttackFx | undefined): boolean => {
 // An attack: roll the 3D dice, resolve the to-hit with the settled faces, then —
 // once the dice clear — fire the weapon (sound + tracer/strike + impact burst).
 const onAttack = async (targetId: string): Promise<void> => {
-  if (busy || !state || state.phase.t !== 'playerTurn') return
+  if (busy || !state || state.phase.t !== 'playerTurn' || !myTurn()) return
   const actor = activeEntity(state)
   const target = entityById(state, targetId)
   if (!actor || !target || !canAttackTarget(target)) return // also gates range / LOS / ammo / action budget
+  // Online the server rolls the dice (authority); skip the local 3D dice and just
+  // submit — the pump animates the weapon fx when the server's events arrive.
+  if (mySeat() !== undefined) {
+    void submitCommand({t: 'Attack', targetId})
+    return
+  }
   const gridScale = state.grid.gridScale
   busy = true
   renderPanel()
@@ -396,9 +503,15 @@ const canAttackTarget = (target: Entity): boolean => {
 // completion inside the same command; the pump animates the resulting events while
 // input is locked, then returns control to the player.
 const endTurn = async (): Promise<void> => {
-  if (busy || !state || state.phase.t !== 'playerTurn') return
+  if (busy || !state || state.phase.t !== 'playerTurn' || !myTurn()) return
   cancelPendingMove()
   playUi('endTurn')
+  // Online: submitCommand locks input; the pump unlocks when control returns.
+  if (mySeat() !== undefined) {
+    void submitCommand({t: 'EndTurn'})
+    return
+  }
+  // Offline: lock, await the synchronous AI animation, then unlock.
   busy = true
   renderPanel()
   try {
@@ -819,7 +932,7 @@ const entityHitAt = (point: Point): Entity | null => {
 // Walk the active PC toward a tapped open-floor point (or show why it's blocked).
 const TAP_END_MS = 220 // a second open-floor tap within this window ends the turn
 const doMove = async (point: Point): Promise<void> => {
-  if (!state || busy || state.phase.t !== 'playerTurn') return
+  if (!state || busy || state.phase.t !== 'playerTurn' || !myTurn()) return
   const actor = activeEntity(state)
   if (!actor || actor.faction !== 'pc') return
   const from = {x: actor.x, y: actor.y}
@@ -1683,6 +1796,7 @@ const renderPanel = (): void => {
 
     <footer class="solo-hud-foot">
       <button id="solo-new" class="solo-foot-btn" type="button">New deck</button>
+      ${mySeat() === undefined ? '<button id="solo-invite" class="solo-foot-btn" type="button">Play with friends</button>' : ''}
       <label class="solo-foot-check"><input type="checkbox" id="solo-grid" ${showGrid ? 'checked' : ''}/> Grid</label>
       <p class="solo-foot-hint">Move + one action, or run ${MINOR_ACTIONS_PER_ROUND * 6} m. Double-click a foe (or <b>F</b>) to fire; double-click yourself (or <b>Space</b>) to end the turn.</p>
       <p class="solo-foot-hint">Search lockers &amp; terminals for ammo, medkits, and access cards. A sealed door wants its matching keycard or a hack (Electronics).</p>
@@ -1748,6 +1862,7 @@ const renderPanel = (): void => {
     renderPanel()
   })
   panel.querySelector<HTMLButtonElement>('#solo-new')?.addEventListener('click', () => void newGame())
+  panel.querySelector<HTMLButtonElement>('#solo-invite')?.addEventListener('click', () => void promote())
   panel.querySelector<HTMLInputElement>('#solo-grid')?.addEventListener('change', (event) => {
     showGrid = (event.target as HTMLInputElement).checked
     requestDraw()
@@ -1795,9 +1910,14 @@ const mount = (): void => {
   app.querySelector('.solo-shell')?.appendChild(endFab)
   window.addEventListener('keydown', onKey)
 
-  const seedParam = new URLSearchParams(location.search).get('seed')
+  const params = new URLSearchParams(location.search)
+  const seedParam = params.get('seed')
   const requestedSeed = seedParam !== null && Number.isFinite(Number(seedParam)) ? Number(seedParam) : undefined
-  void bootGame(requestedSeed)
+  const table = params.get('table')
+  // ?table=<room> joins a live multiplayer game over a RemoteRoom; otherwise play
+  // offline over a LocalRoom (resume or fresh). A failed join falls back to solo.
+  if (table) void joinRoom(table, requestedSeed)
+  else void bootGame(requestedSeed)
 }
 
 mount()
