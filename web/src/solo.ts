@@ -1,3 +1,4 @@
+import './sentry'
 import {renderMap} from './synth/render-map'
 import {counterTokenSize, drawCounterToken} from './counter-render'
 import {counterDefinitions, counterPortraits, preloadCounterPortraits} from './state'

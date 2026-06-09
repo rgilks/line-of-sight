@@ -1,10 +1,12 @@
+import * as Sentry from '@sentry/cloudflare'
 import type {DurableObjectNamespace, R2Bucket} from './cf'
+import {sentryOptions, type SentryEnv} from './sentry'
 
 type AssetFetcher = {
   fetch: (request: Request) => Promise<Response>
 }
 
-export interface Env {
+export interface Env extends SentryEnv {
   ASSETS: AssetFetcher
   TABLES: DurableObjectNamespace
   SOLO_ROOMS: DurableObjectNamespace
@@ -21,7 +23,7 @@ const mapGetRoute = /^\/api\/tables\/([^/]+)\/map\/([^/]+)$/
 
 const MAX_MAP_BYTES = 25_000_000
 
-export default {
+const handler = {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url)
 
@@ -107,6 +109,8 @@ const serveMap = async (env: Env, tableId: string, assetRef: string): Promise<Re
   headers.set('cache-control', 'private, max-age=3600')
   return new Response(object.body, {headers})
 }
+
+export default Sentry.withSentry(sentryOptions, handler)
 
 export {GameTable} from './game-table'
 export {SoloRoom} from './solo-room'

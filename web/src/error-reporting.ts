@@ -8,6 +8,7 @@
 // This is the single seam for telemetry: to ship errors off-device later, POST
 // the same `{context, message, stack}` payload to a beacon endpoint from inside
 // `report()` — nothing else needs to change.
+import {setSentryContext} from './sentry'
 
 // Installed at most once for the page, regardless of how many times this runs.
 let installed = false
@@ -22,6 +23,7 @@ const report = (context: string, message: string, detail: unknown): void => {
 export const installErrorReporting = (context: string): void => {
   if (installed) return
   installed = true
+  setSentryContext(context)
 
   window.addEventListener('error', (event) => {
     report(context, event.message, event.error)

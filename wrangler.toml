@@ -1,6 +1,7 @@
 name = "line-of-sight"
 main = "src/worker.ts"
 compatibility_date = "2026-05-28"
+compatibility_flags = ["nodejs_als"]
 workers_dev = true
 preview_urls = false
 
@@ -15,6 +16,10 @@ invocation_logs = true
 directory = "./dist/client"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
+
+[vars]
+SENTRY_ENVIRONMENT = "production"
+SENTRY_PROJECT = "line-of-sight"
 
 [[durable_objects.bindings]]
 name = "TABLES"
@@ -43,4 +48,3 @@ bucket_name = "line-of-sight-maps"
 [[routes]]
 pattern = "los.tre.systems"
 custom_domain = true
-

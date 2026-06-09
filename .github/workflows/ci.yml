@@ -33,6 +33,15 @@ jobs:
 
       - name: Build
         run: npm run build
+        env:
+          SENTRY_AUTH_TOKEN: ${{ github.ref == 'refs/heads/main' && secrets.SENTRY_AUTH_TOKEN || '' }}
+          SENTRY_ENVIRONMENT: production
+          SENTRY_ORG: ${{ vars.SENTRY_ORG || 'total-reality-engineering' }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT || 'line-of-sight' }}
+          SENTRY_RELEASE: ${{ github.sha }}
+          VITE_SENTRY_DSN: ${{ github.ref == 'refs/heads/main' && vars.VITE_SENTRY_DSN || '' }}
+          VITE_SENTRY_ENVIRONMENT: production
+          VITE_SENTRY_RELEASE: ${{ github.sha }}
 
       - name: Diagram check
         run: npm run check:diagrams
