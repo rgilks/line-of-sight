@@ -6,6 +6,7 @@
 // areas are opaque black. Read-only — no input; the phones drive the game.
 //
 // URL: /solo-board?table=<roomId>[&seed=<n>]
+import './sentry'
 import {installErrorReporting} from './error-reporting'
 import {renderMap} from './synth/render-map'
 import {drawCounterToken} from './counter-render'

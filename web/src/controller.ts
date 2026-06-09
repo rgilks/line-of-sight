@@ -7,6 +7,7 @@
 // in a later phase; this drives targeting, items, doors, stance, and turns.
 //
 // URL: /controller?table=<roomId>&actor=<characterId>[&seed=<n>]
+import './sentry'
 import {installErrorReporting} from './error-reporting'
 import {registerServiceWorker} from './register-sw'
 import type {ControllerView, FoeRow} from './solo/projection'

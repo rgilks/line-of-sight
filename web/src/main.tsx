@@ -1,3 +1,4 @@
+import './sentry'
 import {effect} from '@preact/signals'
 import {render as renderPreact, type ComponentChildren, type JSX} from 'preact'
 import {useEffect, useRef} from 'preact/hooks'

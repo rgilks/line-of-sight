@@ -1,4 +1,5 @@
-import {defineConfig, type Plugin} from 'vite'
+import {defineConfig, type Plugin, type PluginOption} from 'vite'
+import {sentryVitePlugin} from '@sentry/vite-plugin'
 
 // Resolve an entry HTML relative to this config (project root), without needing
 // node types in the typecheck — only URL + import.meta.url, both standard ESM.
@@ -36,15 +37,38 @@ const precacheManifest = (): Plugin => ({
 declare const process: {env: Record<string, string | undefined>}
 const apiTarget = (): string => process.env.LOS_API_TARGET ?? 'https://los.tre.systems'
 
+const sentryPlugins = (): PluginOption[] => {
+  if (!process.env.SENTRY_AUTH_TOKEN) {
+    return []
+  }
+
+  return [
+    sentryVitePlugin({
+      org: process.env.SENTRY_ORG ?? 'total-reality-engineering',
+      project: process.env.SENTRY_PROJECT ?? 'line-of-sight',
+      authToken: process.env.SENTRY_AUTH_TOKEN,
+      release: {
+        name: process.env.SENTRY_RELEASE ?? process.env.GITHUB_SHA
+      },
+      sourcemaps: {
+        assets: './dist/client/**',
+        filesToDeleteAfterUpload: ['./dist/client/**/*.map']
+      },
+      telemetry: false
+    }) as PluginOption
+  ]
+}
+
 export default defineConfig({
   root: 'web',
-  plugins: [precacheManifest()],
+  plugins: [precacheManifest(), ...sentryPlugins()],
   test: {
     include: ['src/**/*.test.ts', '../src/**/*.test.ts', '../core/**/*.test.ts']
   },
   build: {
     outDir: '../dist/client',
     emptyOutDir: true,
+    sourcemap: Boolean(process.env.SENTRY_AUTH_TOKEN),
     rollupOptions: {
       // Multi-page. The front door (index, route `/`) is the live GM host/table
       // client; play (route `/play`) is the player/GM-spectator client — both run

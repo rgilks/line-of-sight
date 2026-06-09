@@ -8,6 +8,7 @@
 //
 //   ?table=<name>  join a specific table (default "demo")
 //   ?gm=1          spectator/GM view — sees ALL counters, manages doors, no fog
+import './sentry'
 import {effect, signal} from '@preact/signals'
 import {counterTokenSize, drawCounterToken} from './counter-render'
 import {drawReachableDoorAffordance} from './door-affordance'
