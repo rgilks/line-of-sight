@@ -3,6 +3,9 @@ import type {CloudflareOptions, ErrorEvent, EventHint} from '@sentry/cloudflare'
 type RuntimeCloudflareOptions = CloudflareOptions & Record<string, unknown>
 
 export type SentryEnv = {
+  CF_VERSION_METADATA?: {
+    id?: string
+  }
   SENTRY_DSN?: string
   SENTRY_ENVIRONMENT?: string
   SENTRY_RELEASE?: string
@@ -71,7 +74,7 @@ export const sentryOptions = (env: SentryEnv): RuntimeCloudflareOptions | undefi
   return {
     dsn: env.SENTRY_DSN,
     environment: env.SENTRY_ENVIRONMENT ?? 'production',
-    release: env.SENTRY_RELEASE,
+    release: env.SENTRY_RELEASE ?? env.CF_VERSION_METADATA?.id,
     sendDefaultPii: false,
     tracesSampleRate: env.SENTRY_ENVIRONMENT === 'production' ? 0.01 : 0,
     enableRpcTracePropagation: true,
