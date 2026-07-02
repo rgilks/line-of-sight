@@ -46,8 +46,8 @@ digraph VisibilityAndFog {
   ];
 
   // Reactive trigger (blue client surface)
-  T [label=<<B>State change</B><BR/><FONT POINT-SIZE="15">move POV, edit occluder, toggle door</FONT>>, fillcolor="#edf7ff:#ffffff", color="#2f80ed"];
-  RC [label=<<B>requestCanvasRender</B><BR/><FONT POINT-SIZE="15">bump renderTick signal</FONT>>, fillcolor="#edf7ff:#ffffff", color="#2f80ed"];
+  T [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD><B>State change</B></TD></TR><TR><TD CELLPADDING="4"><FONT POINT-SIZE="15">move POV, edit occluder, toggle door</FONT></TD></TR></TABLE>>, fillcolor="#edf7ff:#ffffff", color="#2f80ed"];
+  RC [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD><B>requestCanvasRender</B></TD></TR><TR><TD CELLPADDING="4"><FONT POINT-SIZE="15">bump renderTick signal</FONT></TD></TR></TABLE>>, fillcolor="#edf7ff:#ffffff", color="#2f80ed"];
 
   // Decision
   POV [
@@ -63,7 +63,7 @@ digraph VisibilityAndFog {
 
   // Pure core (purple)
   VP [
-    label=<<B>visibilityPolygon</B><BR/><FONT POINT-SIZE="15">128 base rays + 3 per segment endpoint</FONT><BR/><FONT POINT-SIZE="13">nearest hit, dedupe</FONT>>,
+    label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD><B>visibilityPolygon</B></TD></TR><TR><TD CELLPADDING="4"><FONT POINT-SIZE="15">128 base rays + 3 per segment endpoint</FONT><BR/><FONT POINT-SIZE="13">nearest hit, dedupe</FONT></TD></TR></TABLE>>,
     fillcolor="#f5f3ff:#ffffff",
     color="#7c3aed",
     width=3.4
@@ -87,8 +87,8 @@ digraph VisibilityAndFog {
       margin=20
     ];
 
-    EX [label=<<B>exploredCanvas</B><BR/><FONT POINT-SIZE="15">cumulative seen area</FONT>>, fillcolor="#e6fffb:#ffffff", color="#0f766e"];
-    FOG [label=<<B>fogCanvas</B><BR/><FONT POINT-SIZE="15">scratch compositing</FONT>>, fillcolor="#e6fffb:#ffffff", color="#0f766e"];
+    EX [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD><B>exploredCanvas</B></TD></TR><TR><TD CELLPADDING="4"><FONT POINT-SIZE="15">cumulative seen area</FONT></TD></TR></TABLE>>, fillcolor="#e6fffb:#ffffff", color="#0f766e"];
+    FOG [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD><B>fogCanvas</B></TD></TR><TR><TD CELLPADDING="4"><FONT POINT-SIZE="15">scratch compositing</FONT></TD></TR></TABLE>>, fillcolor="#e6fffb:#ffffff", color="#0f766e"];
   }
 
   // Draw order (green: imperative render code)
@@ -110,7 +110,7 @@ digraph VisibilityAndFog {
     ];
 
     R1 [label=<<B>map + grid + doors</B>>, fillcolor="#eaf8ef:#ffffff", color="#22865a"];
-    R2 [label=<<B>drawFog</B><BR/><FONT POINT-SIZE="15">dim outside visible; hide unexplored</FONT>>, fillcolor="#eaf8ef:#ffffff", color="#22865a"];
+    R2 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD><B>drawFog</B></TD></TR><TR><TD CELLPADDING="4"><FONT POINT-SIZE="15">dim outside visible; hide unexplored</FONT></TD></TR></TABLE>>, fillcolor="#eaf8ef:#ffffff", color="#22865a"];
     R3 [label=<<B>range + tokens + overlays</B>>, fillcolor="#eaf8ef:#ffffff", color="#22865a"];
 
     R1 -> R2 -> R3;
@@ -124,11 +124,11 @@ digraph VisibilityAndFog {
   ];
 
   T -> RC -> POV;
-  POV -> VP [label="Yes"];
-  POV -> R1 [label="No: no fog", lhead=cluster_render];
-  VP -> EX [label="markExplored fills polygon", lhead=cluster_canvases];
-  VP -> R2 [label="current visible polygon", lhead=cluster_render];
-  EX -> R2 [label="seen mask", ltail=cluster_canvases, lhead=cluster_render];
-  FOG -> R2 [label="composite", ltail=cluster_canvases, lhead=cluster_render, style=dashed, color="#6b7280", fontcolor="#6b7280"];
+  POV -> VP [label=<<TABLE BORDER="1" CELLBORDER="0" STYLE="ROUNDED" COLOR="#d7dee8" BGCOLOR="#ffffff" CELLSPACING="0" CELLPADDING="4"><TR><TD><FONT POINT-SIZE="13" COLOR="#3d4a5c">Yes</FONT></TD></TR></TABLE>>];
+  POV -> R1 [label=<<TABLE BORDER="1" CELLBORDER="0" STYLE="ROUNDED" COLOR="#d7dee8" BGCOLOR="#ffffff" CELLSPACING="0" CELLPADDING="4"><TR><TD><FONT POINT-SIZE="13" COLOR="#3d4a5c">No: no fog</FONT></TD></TR></TABLE>>, lhead=cluster_render];
+  VP -> EX [label=<<TABLE BORDER="1" CELLBORDER="0" STYLE="ROUNDED" COLOR="#d7dee8" BGCOLOR="#ffffff" CELLSPACING="0" CELLPADDING="4"><TR><TD><FONT POINT-SIZE="13" COLOR="#3d4a5c">markExplored fills polygon</FONT></TD></TR></TABLE>>, lhead=cluster_canvases];
+  VP -> R2 [label=<<TABLE BORDER="1" CELLBORDER="0" STYLE="ROUNDED" COLOR="#d7dee8" BGCOLOR="#ffffff" CELLSPACING="0" CELLPADDING="4"><TR><TD><FONT POINT-SIZE="13" COLOR="#3d4a5c">current visible polygon</FONT></TD></TR></TABLE>>, lhead=cluster_render];
+  EX -> R2 [label=<<TABLE BORDER="1" CELLBORDER="0" STYLE="ROUNDED" COLOR="#d7dee8" BGCOLOR="#ffffff" CELLSPACING="0" CELLPADDING="4"><TR><TD><FONT POINT-SIZE="13" COLOR="#3d4a5c">seen mask</FONT></TD></TR></TABLE>>, ltail=cluster_canvases, lhead=cluster_render];
+  FOG -> R2 [label=<<TABLE BORDER="1" CELLBORDER="0" STYLE="ROUNDED" COLOR="#dfe3e9" BGCOLOR="#ffffff" CELLSPACING="0" CELLPADDING="4"><TR><TD><FONT POINT-SIZE="13" COLOR="#6b7280">composite</FONT></TD></TR></TABLE>>, ltail=cluster_canvases, lhead=cluster_render, style=dashed, color="#6b7280", fontcolor="#6b7280"];
   R3 -> OUT [ltail=cluster_render];
 }

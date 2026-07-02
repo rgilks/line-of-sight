@@ -46,15 +46,15 @@ digraph AnalysisPipeline {
   ];
 
   // Input (blue)
-  IN [label=<<B>RGBA buffer + gridScale</B><BR/><FONT POINT-SIZE="15">one composed map tile</FONT>>, fillcolor="#edf7ff:#ffffff", color="#2f80ed"];
+  IN [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD><B>RGBA buffer + gridScale</B></TD></TR><TR><TD CELLPADDING="4"><FONT POINT-SIZE="15">one composed map tile</FONT></TD></TR></TABLE>>, fillcolor="#edf7ff:#ffffff", color="#2f80ed"];
 
   // Pure core steps (purple)
-  M [label=<<B>buildDarkMask</B><BR/><FONT POINT-SIZE="15">opaque AND low luminance to 1</FONT>>];
-  S [label=<<B>Directional scans</B><BR/><FONT POINT-SIZE="15">8 orientations: H, V, diagonals, slopes</FONT>>];
-  CO [label=<<B>collapseCandidates</B><BR/><FONT POINT-SIZE="15">drop quantised duplicates</FONT>>];
+  M [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD><B>buildDarkMask</B></TD></TR><TR><TD CELLPADDING="4"><FONT POINT-SIZE="15">opaque AND low luminance to 1</FONT></TD></TR></TABLE>>];
+  S [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD><B>Directional scans</B></TD></TR><TR><TD CELLPADDING="4"><FONT POINT-SIZE="15">8 orientations: H, V, diagonals, slopes</FONT></TD></TR></TABLE>>];
+  CO [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD><B>collapseCandidates</B></TD></TR><TR><TD CELLPADDING="4"><FONT POINT-SIZE="15">drop quantised duplicates</FONT></TD></TR></TABLE>>];
 
   D1 [
-    label=<<B>Structural?</B><BR/><FONT POINT-SIZE="14">near grid line, long enough, band thick enough</FONT>>,
+    label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD><B>Structural?</B></TD></TR><TR><TD CELLPADDING="4"><FONT POINT-SIZE="14">near grid line, long enough, band thick enough</FONT></TD></TR></TABLE>>,
     shape=diamond,
     style=filled,
     width=3.2,
@@ -64,8 +64,8 @@ digraph AnalysisPipeline {
     penwidth=2.4
   ];
 
-  PROMOTE [label=<<B>promoteConnectedThinAxisCandidates</B><BR/><FONT POINT-SIZE="15">recover ~2px walls joined to perpendiculars</FONT>>, width=3.4];
-  RECT [label=<<B>extractRectangularObstacleCandidates</B><BR/><FONT POINT-SIZE="15">large isolated outline boxes become blockers</FONT>>, width=3.4];
+  PROMOTE [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD><B>promoteConnectedThinAxisCandidates</B></TD></TR><TR><TD CELLPADDING="4"><FONT POINT-SIZE="15">recover ~2px walls joined to perpendiculars</FONT></TD></TR></TABLE>>, width=3.4];
+  RECT [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD><B>extractRectangularObstacleCandidates</B></TD></TR><TR><TD CELLPADDING="4"><FONT POINT-SIZE="15">large isolated outline boxes become blockers</FONT></TD></TR></TABLE>>, width=3.4];
 
   subgraph cluster_doors {
     graph [
@@ -84,28 +84,28 @@ digraph AnalysisPipeline {
       margin=20
     ];
 
-    DR1 [label=<<B>Axis-gap doors</B><BR/><FONT POINT-SIZE="15">gap between collinear walls</FONT>>, fillcolor="#fff4d1:#fffaf0", color="#d39a00"];
-    DR2 [label=<<B>Sliding doors</B><BR/><FONT POINT-SIZE="15">thin track + caps + wall support</FONT>>, fillcolor="#fff4d1:#fffaf0", color="#d39a00"];
+    DR1 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD><B>Axis-gap doors</B></TD></TR><TR><TD CELLPADDING="4"><FONT POINT-SIZE="15">gap between collinear walls</FONT></TD></TR></TABLE>>, fillcolor="#fff4d1:#fffaf0", color="#d39a00"];
+    DR2 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD><B>Sliding doors</B></TD></TR><TR><TD CELLPADDING="4"><FONT POINT-SIZE="15">thin track + caps + wall support</FONT></TD></TR></TABLE>>, fillcolor="#fff4d1:#fffaf0", color="#d39a00"];
   }
 
-  REFINE [label=<<B>refineWallCandidates</B><BR/><FONT POINT-SIZE="15">merge collinear, drop covered</FONT>>];
+  REFINE [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD><B>refineWallCandidates</B></TD></TR><TR><TD CELLPADDING="4"><FONT POINT-SIZE="15">merge collinear, drop covered</FONT></TD></TR></TABLE>>];
 
   // Terminal success (bold green)
   OUT [
-    label=<<B>Occluder[]</B><BR/><FONT POINT-SIZE="15">walls (cap 500) + doors (cap 200)</FONT><BR/><FONT POINT-SIZE="13">stable ids: wall-NNNN, door-NNNN</FONT>>,
+    label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD><B>Occluder[]</B></TD></TR><TR><TD CELLPADDING="4"><FONT POINT-SIZE="15">walls (cap 500) + doors (cap 200)</FONT><BR/><FONT POINT-SIZE="13">stable ids: wall-NNNN, door-NNNN</FONT></TD></TR></TABLE>>,
     fillcolor="#d8f5de:#effcf2",
     color="#15803d",
     penwidth=3.2
   ];
 
   IN -> M -> S -> CO -> D1;
-  D1 -> PROMOTE [label="axis: thin but connected"];
-  D1 -> REFINE [label="Yes: structural walls"];
-  M -> RECT [label="closed dark-outline components"];
+  D1 -> PROMOTE [label=<<TABLE BORDER="1" CELLBORDER="0" STYLE="ROUNDED" COLOR="#d7dee8" BGCOLOR="#ffffff" CELLSPACING="0" CELLPADDING="4"><TR><TD><FONT POINT-SIZE="13" COLOR="#3d4a5c">axis: thin but connected</FONT></TD></TR></TABLE>>];
+  D1 -> REFINE [label=<<TABLE BORDER="1" CELLBORDER="0" STYLE="ROUNDED" COLOR="#d7dee8" BGCOLOR="#ffffff" CELLSPACING="0" CELLPADDING="4"><TR><TD><FONT POINT-SIZE="13" COLOR="#3d4a5c">Yes: structural walls</FONT></TD></TR></TABLE>>];
+  M -> RECT [label=<<TABLE BORDER="1" CELLBORDER="0" STYLE="ROUNDED" COLOR="#d7dee8" BGCOLOR="#ffffff" CELLSPACING="0" CELLPADDING="4"><TR><TD><FONT POINT-SIZE="13" COLOR="#3d4a5c">closed dark-outline components</FONT></TD></TR></TABLE>>];
   PROMOTE -> REFINE;
   RECT -> REFINE;
-  D1 -> DR1 [label="feed structural walls", lhead=cluster_doors];
+  D1 -> DR1 [label=<<TABLE BORDER="1" CELLBORDER="0" STYLE="ROUNDED" COLOR="#d7dee8" BGCOLOR="#ffffff" CELLSPACING="0" CELLPADDING="4"><TR><TD><FONT POINT-SIZE="13" COLOR="#3d4a5c">feed structural walls</FONT></TD></TR></TABLE>>, lhead=cluster_doors];
   PROMOTE -> DR1 [lhead=cluster_doors, style=dashed, color="#6b7280", fontcolor="#6b7280"];
-  REFINE -> OUT [label="walls"];
-  DR2 -> OUT [label="doors", ltail=cluster_doors];
+  REFINE -> OUT [label=<<TABLE BORDER="1" CELLBORDER="0" STYLE="ROUNDED" COLOR="#d7dee8" BGCOLOR="#ffffff" CELLSPACING="0" CELLPADDING="4"><TR><TD><FONT POINT-SIZE="13" COLOR="#3d4a5c">walls</FONT></TD></TR></TABLE>>];
+  DR2 -> OUT [label=<<TABLE BORDER="1" CELLBORDER="0" STYLE="ROUNDED" COLOR="#d7dee8" BGCOLOR="#ffffff" CELLSPACING="0" CELLPADDING="4"><TR><TD><FONT POINT-SIZE="13" COLOR="#3d4a5c">doors</FONT></TD></TR></TABLE>>, ltail=cluster_doors];
 }

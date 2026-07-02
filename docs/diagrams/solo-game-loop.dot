@@ -47,7 +47,7 @@ digraph SoloGameLoop {
   ];
 
   // ---- Turn inputs (blue) ----
-  IN [label=<<B>Player turn</B><BR/><FONT POINT-SIZE="15">move · attack · search · door · end turn</FONT>>, fillcolor="#edf7ff:#ffffff", color="#2f80ed", width=3.4];
+  IN [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD><B>Player turn</B></TD></TR><TR><TD CELLPADDING="4"><FONT POINT-SIZE="15">move · attack · search · door · end turn</FONT></TD></TR></TABLE>>, fillcolor="#edf7ff:#ffffff", color="#2f80ed", width=3.4];
 
   // ---- Pure engine (purple) ----
   subgraph cluster_engine {
@@ -67,34 +67,34 @@ digraph SoloGameLoop {
       margin=20
     ];
 
-    RED [label=<<B>reducer</B><BR/><FONT POINT-SIZE="15">(state, action[, rng]) &#8594; state</FONT>>, fillcolor="#f5f3ff:#ffffff", color="#7c3aed", width=3.4, penwidth=3.0];
-    CB [label=<<B>combat</B><BR/><FONT POINT-SIZE="15">2D6 SRD attack &#8594; damage</FONT>>, fillcolor="#f5f3ff:#ffffff", color="#7c3aed"];
-    AI [label=<<B>ai.decideMonster</B><BR/><FONT POINT-SIZE="15">A* toward + attack nearest PC</FONT>>, fillcolor="#f5f3ff:#ffffff", color="#7c3aed"];
+    RED [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD><B>reducer</B></TD></TR><TR><TD CELLPADDING="4"><FONT POINT-SIZE="15">(state, action[, rng]) &#8594; state</FONT></TD></TR></TABLE>>, fillcolor="#f5f3ff:#ffffff", color="#7c3aed", width=3.4, penwidth=3.0];
+    CB [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD><B>combat</B></TD></TR><TR><TD CELLPADDING="4"><FONT POINT-SIZE="15">2D6 SRD attack &#8594; damage</FONT></TD></TR></TABLE>>, fillcolor="#f5f3ff:#ffffff", color="#7c3aed"];
+    AI [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD><B>ai.decideMonster</B></TD></TR><TR><TD CELLPADDING="4"><FONT POINT-SIZE="15">A* toward + attack nearest PC</FONT></TD></TR></TABLE>>, fillcolor="#f5f3ff:#ffffff", color="#7c3aed"];
   }
 
   // ---- Driver (green: the only stateful/animated part) ----
-  DR [label=<<B>solo.ts driver</B><BR/><FONT POINT-SIZE="15">tween · FX · camera · render</FONT>>, fillcolor="#eaf8ef:#ffffff", color="#22865a", width=3.4];
+  DR [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD><B>solo.ts driver</B></TD></TR><TR><TD CELLPADDING="4"><FONT POINT-SIZE="15">tween · FX · camera · render</FONT></TD></TR></TABLE>>, fillcolor="#eaf8ef:#ffffff", color="#22865a", width=3.4];
 
   // ---- Decisions ----
   WIPE [label=<<B>Squad wiped?</B>>, shape=diamond, style=filled, width=2.7, height=1.02, fillcolor="#ffffff", color="#1f2f46", penwidth=2.4];
   WAVE [label=<<B>Wave cleared?</B>>, shape=diamond, style=filled, width=2.7, height=1.02, fillcolor="#ffffff", color="#1f2f46", penwidth=2.4];
 
   // ---- Outcomes ----
-  WIN [label=<<B>WON</B><BR/><FONT POINT-SIZE="15">survived every wave</FONT>>, fillcolor="#d8f5de:#effcf2", color="#15803d", penwidth=3.2];
-  LOSE [label=<<B>LOST</B><BR/><FONT POINT-SIZE="15">all PCs dead or down</FONT>>, fillcolor="#ffe4e6:#fff1f2", color="#be123c", penwidth=3.2];
+  WIN [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD><B>WON</B></TD></TR><TR><TD CELLPADDING="4"><FONT POINT-SIZE="15">survived every wave</FONT></TD></TR></TABLE>>, fillcolor="#d8f5de:#effcf2", color="#15803d", penwidth=3.2];
+  LOSE [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD><B>LOST</B></TD></TR><TR><TD CELLPADDING="4"><FONT POINT-SIZE="15">all PCs dead or down</FONT></TD></TR></TABLE>>, fillcolor="#ffe4e6:#fff1f2", color="#be123c", penwidth=3.2];
 
   // ---- Edges ----
-  IN -> RED [label="dispatch action"];
-  AI -> RED [label="monster action", color="#7c3aed", fontcolor="#6d4d8d"];
-  RED -> CB [label="attack throws", style=dashed, color="#6b7280", fontcolor="#6b7280"];
-  RED -> DR [label="reduce &#8594; animate"];
+  IN -> RED [label=<<TABLE BORDER="1" CELLBORDER="0" STYLE="ROUNDED" COLOR="#d7dee8" BGCOLOR="#ffffff" CELLSPACING="0" CELLPADDING="4"><TR><TD><FONT POINT-SIZE="13" COLOR="#3d4a5c">dispatch action</FONT></TD></TR></TABLE>>];
+  AI -> RED [label=<<TABLE BORDER="1" CELLBORDER="0" STYLE="ROUNDED" COLOR="#d7dee8" BGCOLOR="#ffffff" CELLSPACING="0" CELLPADDING="4"><TR><TD><FONT POINT-SIZE="13" COLOR="#3d4a5c">monster action</FONT></TD></TR></TABLE>>, color="#7c3aed", fontcolor="#6d4d8d"];
+  RED -> CB [label=<<TABLE BORDER="1" CELLBORDER="0" STYLE="ROUNDED" COLOR="#dfe3e9" BGCOLOR="#ffffff" CELLSPACING="0" CELLPADDING="4"><TR><TD><FONT POINT-SIZE="13" COLOR="#6b7280">attack throws</FONT></TD></TR></TABLE>>, style=dashed, color="#6b7280", fontcolor="#6b7280"];
+  RED -> DR [label=<<TABLE BORDER="1" CELLBORDER="0" STYLE="ROUNDED" COLOR="#d7dee8" BGCOLOR="#ffffff" CELLSPACING="0" CELLPADDING="4"><TR><TD><FONT POINT-SIZE="13" COLOR="#3d4a5c">reduce &#8594; animate</FONT></TD></TR></TABLE>>];
 
-  DR -> IN [label="more actions (same turn)", constraint=false, color="#2f80ed", fontcolor="#2f80ed"];
-  DR -> AI [label="End turn &#8594; monsters"];
+  DR -> IN [label=<<TABLE BORDER="1" CELLBORDER="0" STYLE="ROUNDED" COLOR="#d7dee8" BGCOLOR="#ffffff" CELLSPACING="0" CELLPADDING="4"><TR><TD><FONT POINT-SIZE="13" COLOR="#3d4a5c">more actions (same turn)</FONT></TD></TR></TABLE>>, constraint=false, color="#2f80ed", fontcolor="#2f80ed"];
+  DR -> AI [label=<<TABLE BORDER="1" CELLBORDER="0" STYLE="ROUNDED" COLOR="#d7dee8" BGCOLOR="#ffffff" CELLSPACING="0" CELLPADDING="4"><TR><TD><FONT POINT-SIZE="13" COLOR="#3d4a5c">End turn &#8594; monsters</FONT></TD></TR></TABLE>>];
   DR -> WIPE;
 
-  WIPE -> LOSE [label="yes"];
-  WIPE -> WAVE [label="no"];
-  WAVE -> WIN [label="yes, final wave"];
-  WAVE -> IN [label="next round / next wave", constraint=false];
+  WIPE -> LOSE [label=<<TABLE BORDER="1" CELLBORDER="0" STYLE="ROUNDED" COLOR="#d7dee8" BGCOLOR="#ffffff" CELLSPACING="0" CELLPADDING="4"><TR><TD><FONT POINT-SIZE="13" COLOR="#3d4a5c">yes</FONT></TD></TR></TABLE>>];
+  WIPE -> WAVE [label=<<TABLE BORDER="1" CELLBORDER="0" STYLE="ROUNDED" COLOR="#d7dee8" BGCOLOR="#ffffff" CELLSPACING="0" CELLPADDING="4"><TR><TD><FONT POINT-SIZE="13" COLOR="#3d4a5c">no</FONT></TD></TR></TABLE>>];
+  WAVE -> WIN [label=<<TABLE BORDER="1" CELLBORDER="0" STYLE="ROUNDED" COLOR="#d7dee8" BGCOLOR="#ffffff" CELLSPACING="0" CELLPADDING="4"><TR><TD><FONT POINT-SIZE="13" COLOR="#3d4a5c">yes, final wave</FONT></TD></TR></TABLE>>];
+  WAVE -> IN [label=<<TABLE BORDER="1" CELLBORDER="0" STYLE="ROUNDED" COLOR="#d7dee8" BGCOLOR="#ffffff" CELLSPACING="0" CELLPADDING="4"><TR><TD><FONT POINT-SIZE="13" COLOR="#3d4a5c">next round / next wave</FONT></TD></TR></TABLE>>, constraint=false];
 }

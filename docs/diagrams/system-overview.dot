@@ -63,10 +63,10 @@ digraph SystemOverview {
       margin=20
     ];
 
-    ED [label=<<B>Map editor</B><BR/><FONT POINT-SIZE="15">/edit · author, detect, export</FONT>>, fillcolor="#edf7ff:#ffffff", color="#2f80ed"];
-    TB [label=<<B>Multiplayer table</B><BR/><FONT POINT-SIZE="15">/ host · /play · per-POV fog</FONT>>, fillcolor="#edf7ff:#ffffff", color="#2f80ed"];
-    SO [label=<<B>Survive the Horde</B><BR/><FONT POINT-SIZE="15">/solo · single-player game</FONT>>, fillcolor="#edf7ff:#ffffff", color="#2f80ed"];
-    SY [label=<<B>Synthetic generator</B><BR/><FONT POINT-SIZE="15">web/src/synth · seeded decks</FONT>>, fillcolor="#fff4d1:#fffaf0", color="#d39a00"];
+    ED [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD><B>Map editor</B></TD></TR><TR><TD CELLPADDING="4"><FONT POINT-SIZE="15">/edit · author, detect, export</FONT></TD></TR></TABLE>>, fillcolor="#edf7ff:#ffffff", color="#2f80ed"];
+    TB [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD><B>Multiplayer table</B></TD></TR><TR><TD CELLPADDING="4"><FONT POINT-SIZE="15">/ host · /play · per-POV fog</FONT></TD></TR></TABLE>>, fillcolor="#edf7ff:#ffffff", color="#2f80ed"];
+    SO [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD><B>Survive the Horde</B></TD></TR><TR><TD CELLPADDING="4"><FONT POINT-SIZE="15">/solo · single-player game</FONT></TD></TR></TABLE>>, fillcolor="#edf7ff:#ffffff", color="#2f80ed"];
+    SY [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD><B>Synthetic generator</B></TD></TR><TR><TD CELLPADDING="4"><FONT POINT-SIZE="15">web/src/synth · seeded decks</FONT></TD></TR></TABLE>>, fillcolor="#fff4d1:#fffaf0", color="#d39a00"];
   }
 
   // ---- Shared deterministic core (purple) ----
@@ -87,9 +87,9 @@ digraph SystemOverview {
       margin=20
     ];
 
-    LOS [label=<<B>los</B><BR/><FONT POINT-SIZE="15">line of sight + wall/door detection</FONT>>, fillcolor="#f5f3ff:#ffffff", color="#7c3aed"];
-    RU [label=<<B>rules</B><BR/><FONT POINT-SIZE="15">Cepheus movement, initiative, model</FONT>>, fillcolor="#f5f3ff:#ffffff", color="#7c3aed"];
-    PF [label=<<B>pathfinding · dice</B><BR/><FONT POINT-SIZE="15">A* · seedable rolls</FONT>>, fillcolor="#f5f3ff:#ffffff", color="#7c3aed"];
+    LOS [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD><B>los</B></TD></TR><TR><TD CELLPADDING="4"><FONT POINT-SIZE="15">line of sight + wall/door detection</FONT></TD></TR></TABLE>>, fillcolor="#f5f3ff:#ffffff", color="#7c3aed"];
+    RU [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD><B>rules</B></TD></TR><TR><TD CELLPADDING="4"><FONT POINT-SIZE="15">Cepheus movement, initiative, model</FONT></TD></TR></TABLE>>, fillcolor="#f5f3ff:#ffffff", color="#7c3aed"];
+    PF [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD><B>pathfinding · dice</B></TD></TR><TR><TD CELLPADDING="4"><FONT POINT-SIZE="15">A* · seedable rolls</FONT></TD></TR></TABLE>>, fillcolor="#f5f3ff:#ffffff", color="#7c3aed"];
   }
 
   // ---- Cloudflare Worker + table authority (green / teal) ----
@@ -110,25 +110,25 @@ digraph SystemOverview {
       margin=20
     ];
 
-    WA [label=<<B>Static assets</B><BR/><FONT POINT-SIZE="15">dist/client (SPA fallback)</FONT>>, fillcolor="#eaf8ef:#ffffff", color="#22865a"];
-    DO [label=<<B>GameTable Durable Object</B><BR/><FONT POINT-SIZE="15">one per table · server-authoritative</FONT>>, fillcolor="#eaf8ef:#ffffff", color="#22865a"];
-    R2 [label=<<B>Private R2</B><BR/><FONT POINT-SIZE="15">GM map storage</FONT>>, fillcolor="#e6fffb:#ffffff", color="#0f766e"];
+    WA [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD><B>Static assets</B></TD></TR><TR><TD CELLPADDING="4"><FONT POINT-SIZE="15">dist/client (SPA fallback)</FONT></TD></TR></TABLE>>, fillcolor="#eaf8ef:#ffffff", color="#22865a"];
+    DO [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD><B>GameTable Durable Object</B></TD></TR><TR><TD CELLPADDING="4"><FONT POINT-SIZE="15">one per table · server-authoritative</FONT></TD></TR></TABLE>>, fillcolor="#eaf8ef:#ffffff", color="#22865a"];
+    R2 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD><B>Private R2</B></TD></TR><TR><TD CELLPADDING="4"><FONT POINT-SIZE="15">GM map storage</FONT></TD></TR></TABLE>>, fillcolor="#e6fffb:#ffffff", color="#0f766e"];
   }
 
   // ---- Editor output (terminal green) ----
-  SC [label=<<B>LOS sidecar JSON</B><BR/><FONT POINT-SIZE="15">clipboard or download</FONT>>, fillcolor="#d8f5de:#effcf2", color="#15803d", penwidth=3.2];
+  SC [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD><B>LOS sidecar JSON</B></TD></TR><TR><TD CELLPADDING="4"><FONT POINT-SIZE="15">clipboard or download</FONT></TD></TR></TABLE>>, fillcolor="#d8f5de:#effcf2", color="#15803d", penwidth=3.2];
 
   // ---- Edges ----
-  WA -> ED [label="serves the SPA", lhead=cluster_browser];
-  SY -> TB [label="generate deck"];
-  SY -> SO [label="generate deck"];
+  WA -> ED [label=<<TABLE BORDER="1" CELLBORDER="0" STYLE="ROUNDED" COLOR="#d7dee8" BGCOLOR="#ffffff" CELLSPACING="0" CELLPADDING="4"><TR><TD><FONT POINT-SIZE="13" COLOR="#3d4a5c">serves the SPA</FONT></TD></TR></TABLE>>, lhead=cluster_browser];
+  SY -> TB [label=<<TABLE BORDER="1" CELLBORDER="0" STYLE="ROUNDED" COLOR="#d7dee8" BGCOLOR="#ffffff" CELLSPACING="0" CELLPADDING="4"><TR><TD><FONT POINT-SIZE="13" COLOR="#3d4a5c">generate deck</FONT></TD></TR></TABLE>>];
+  SY -> SO [label=<<TABLE BORDER="1" CELLBORDER="0" STYLE="ROUNDED" COLOR="#d7dee8" BGCOLOR="#ffffff" CELLSPACING="0" CELLPADDING="4"><TR><TD><FONT POINT-SIZE="13" COLOR="#3d4a5c">generate deck</FONT></TD></TR></TABLE>>];
   SY -> ED [style=dashed, color="#6b7280", fontcolor="#6b7280"];
 
-  ED -> LOS [label="analyze + visibility", lhead=cluster_core];
-  ED -> SC [label="reviewed occluders"];
-  SO -> PF [label="rules · dice · A* · LOS", lhead=cluster_core];
+  ED -> LOS [label=<<TABLE BORDER="1" CELLBORDER="0" STYLE="ROUNDED" COLOR="#d7dee8" BGCOLOR="#ffffff" CELLSPACING="0" CELLPADDING="4"><TR><TD><FONT POINT-SIZE="13" COLOR="#3d4a5c">analyze + visibility</FONT></TD></TR></TABLE>>, lhead=cluster_core];
+  ED -> SC [label=<<TABLE BORDER="1" CELLBORDER="0" STYLE="ROUNDED" COLOR="#d7dee8" BGCOLOR="#ffffff" CELLSPACING="0" CELLPADDING="4"><TR><TD><FONT POINT-SIZE="13" COLOR="#3d4a5c">reviewed occluders</FONT></TD></TR></TABLE>>];
+  SO -> PF [label=<<TABLE BORDER="1" CELLBORDER="0" STYLE="ROUNDED" COLOR="#d7dee8" BGCOLOR="#ffffff" CELLSPACING="0" CELLPADDING="4"><TR><TD><FONT POINT-SIZE="13" COLOR="#3d4a5c">rules · dice · A* · LOS</FONT></TD></TR></TABLE>>, lhead=cluster_core];
 
-  TB -> DO [label="commands + per-POV stream"];
-  DO -> LOS [label="gate tokens by line of sight"];
-  TB -> R2 [label="GM map (private)", style=dashed, color="#6b7280", fontcolor="#6b7280"];
+  TB -> DO [label=<<TABLE BORDER="1" CELLBORDER="0" STYLE="ROUNDED" COLOR="#d7dee8" BGCOLOR="#ffffff" CELLSPACING="0" CELLPADDING="4"><TR><TD><FONT POINT-SIZE="13" COLOR="#3d4a5c">commands + per-POV stream</FONT></TD></TR></TABLE>>];
+  DO -> LOS [label=<<TABLE BORDER="1" CELLBORDER="0" STYLE="ROUNDED" COLOR="#d7dee8" BGCOLOR="#ffffff" CELLSPACING="0" CELLPADDING="4"><TR><TD><FONT POINT-SIZE="13" COLOR="#3d4a5c">gate tokens by line of sight</FONT></TD></TR></TABLE>>];
+  TB -> R2 [label=<<TABLE BORDER="1" CELLBORDER="0" STYLE="ROUNDED" COLOR="#dfe3e9" BGCOLOR="#ffffff" CELLSPACING="0" CELLPADDING="4"><TR><TD><FONT POINT-SIZE="13" COLOR="#6b7280">GM map (private)</FONT></TD></TR></TABLE>>, style=dashed, color="#6b7280", fontcolor="#6b7280"];
 }

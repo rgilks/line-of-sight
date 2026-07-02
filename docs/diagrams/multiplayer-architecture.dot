@@ -87,25 +87,25 @@ digraph MultiplayerArchitecture {
       margin=20
     ];
 
-    DO [label=<<B>GameTable Durable Object</B><BR/><FONT POINT-SIZE="15">command log + per-player projection</FONT><BR/><FONT POINT-SIZE="13">single-threaded = free ordering</FONT>>, fillcolor="#eaf8ef:#ffffff", color="#22865a", width=3.6];
-    R2 [label=<<B>Private R2</B><BR/><FONT POINT-SIZE="15">GM map bytes, unguessable key</FONT>>, fillcolor="#e6fffb:#ffffff", color="#0f766e"];
+    DO [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD><B>GameTable Durable Object</B></TD></TR><TR><TD CELLPADDING="4"><FONT POINT-SIZE="15">command log + per-player projection</FONT><BR/><FONT POINT-SIZE="13">single-threaded = free ordering</FONT></TD></TR></TABLE>>, fillcolor="#eaf8ef:#ffffff", color="#22865a", width=3.6];
+    R2 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD><B>Private R2</B></TD></TR><TR><TD CELLPADDING="4"><FONT POINT-SIZE="15">GM map bytes, unguessable key</FONT></TD></TR></TABLE>>, fillcolor="#e6fffb:#ffffff", color="#0f766e"];
     {rank=same; DO; R2}
   }
 
   // ---- Shared core (purple) ----
-  LOS [label=<<B>core/los</B><BR/><FONT POINT-SIZE="15">hasLineOfSight / visibilityPolygon</FONT>>, fillcolor="#f5f3ff:#ffffff", color="#7c3aed", width=3.4];
+  LOS [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD><B>core/los</B></TD></TR><TR><TD CELLPADDING="4"><FONT POINT-SIZE="15">hasLineOfSight / visibilityPolygon</FONT></TD></TR></TABLE>>, fillcolor="#f5f3ff:#ffffff", color="#7c3aed", width=3.4];
 
   // ---- Edges (only the two vertical ones drive rank; the rest are free) ----
-  HOST -> DO [label="publish board (occluders)"];
-  DO -> LOS [label="gate every token by the viewer's POV"];
+  HOST -> DO [label=<<TABLE BORDER="1" CELLBORDER="0" STYLE="ROUNDED" COLOR="#d7dee8" BGCOLOR="#ffffff" CELLSPACING="0" CELLPADDING="4"><TR><TD><FONT POINT-SIZE="13" COLOR="#3d4a5c">publish board (occluders)</FONT></TD></TR></TABLE>>];
+  DO -> LOS [label=<<TABLE BORDER="1" CELLBORDER="0" STYLE="ROUNDED" COLOR="#d7dee8" BGCOLOR="#ffffff" CELLSPACING="0" CELLPADDING="4"><TR><TD><FONT POINT-SIZE="13" COLOR="#3d4a5c">gate every token by the viewer's POV</FONT></TD></TR></TABLE>>];
 
-  HOST -> R2 [label="upload map (image)", style=dashed, color="#6b7280", fontcolor="#6b7280", constraint=false];
-  P1 -> DO [label="POST MoveToken", constraint=false];
-  P2 -> DO [label="POST MoveToken", constraint=false];
+  HOST -> R2 [label=<<TABLE BORDER="1" CELLBORDER="0" STYLE="ROUNDED" COLOR="#dfe3e9" BGCOLOR="#ffffff" CELLSPACING="0" CELLPADDING="4"><TR><TD><FONT POINT-SIZE="13" COLOR="#6b7280">upload map (image)</FONT></TD></TR></TABLE>>, style=dashed, color="#6b7280", fontcolor="#6b7280", constraint=false];
+  P1 -> DO [label=<<TABLE BORDER="1" CELLBORDER="0" STYLE="ROUNDED" COLOR="#d7dee8" BGCOLOR="#ffffff" CELLSPACING="0" CELLPADDING="4"><TR><TD><FONT POINT-SIZE="13" COLOR="#3d4a5c">POST MoveToken</FONT></TD></TR></TABLE>>, constraint=false];
+  P2 -> DO [label=<<TABLE BORDER="1" CELLBORDER="0" STYLE="ROUNDED" COLOR="#d7dee8" BGCOLOR="#ffffff" CELLSPACING="0" CELLPADDING="4"><TR><TD><FONT POINT-SIZE="13" COLOR="#3d4a5c">POST MoveToken</FONT></TD></TR></TABLE>>, constraint=false];
 
-  DO -> HOST [label="SSE: whole board", color="#22865a", fontcolor="#1e6b43", constraint=false];
-  DO -> P1 [label="SSE: only what A can see", color="#22865a", fontcolor="#1e6b43", constraint=false];
-  DO -> P2 [label="SSE: only what B can see", color="#22865a", fontcolor="#1e6b43", constraint=false];
+  DO -> HOST [label=<<TABLE BORDER="1" CELLBORDER="0" STYLE="ROUNDED" COLOR="#d7dee8" BGCOLOR="#ffffff" CELLSPACING="0" CELLPADDING="4"><TR><TD><FONT POINT-SIZE="13" COLOR="#3d4a5c">SSE: whole board</FONT></TD></TR></TABLE>>, color="#22865a", fontcolor="#1e6b43", constraint=false];
+  DO -> P1 [label=<<TABLE BORDER="1" CELLBORDER="0" STYLE="ROUNDED" COLOR="#d7dee8" BGCOLOR="#ffffff" CELLSPACING="0" CELLPADDING="4"><TR><TD><FONT POINT-SIZE="13" COLOR="#3d4a5c">SSE: only what A can see</FONT></TD></TR></TABLE>>, color="#22865a", fontcolor="#1e6b43", constraint=false];
+  DO -> P2 [label=<<TABLE BORDER="1" CELLBORDER="0" STYLE="ROUNDED" COLOR="#d7dee8" BGCOLOR="#ffffff" CELLSPACING="0" CELLPADDING="4"><TR><TD><FONT POINT-SIZE="13" COLOR="#3d4a5c">SSE: only what B can see</FONT></TD></TR></TABLE>>, color="#22865a", fontcolor="#1e6b43", constraint=false];
 
-  R2 -> P1 [label="stream map bytes (private)", style=dashed, color="#6b7280", fontcolor="#6b7280", constraint=false];
+  R2 -> P1 [label=<<TABLE BORDER="1" CELLBORDER="0" STYLE="ROUNDED" COLOR="#dfe3e9" BGCOLOR="#ffffff" CELLSPACING="0" CELLPADDING="4"><TR><TD><FONT POINT-SIZE="13" COLOR="#6b7280">stream map bytes (private)</FONT></TD></TR></TABLE>>, style=dashed, color="#6b7280", fontcolor="#6b7280", constraint=false];
 }
