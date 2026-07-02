@@ -37,13 +37,30 @@ const SAY_TTL_MS = 8000
 const SAY_MAX = 40
 
 const encoder = new TextEncoder()
+const STREAM_HEARTBEAT_MS = 25000
+const STREAM_HEARTBEAT = encoder.encode(': keepalive\n\n')
+const OWNER_KEY_HASH = 'auth:owner-key-hash'
+const GM_KEY_HEADER = 'x-los-gm-key'
+const AUTH_TOKEN_BYTES = 24
+const COMMAND_RATE = {limit: 80, windowMs: 10_000}
+const BOARD_PUBLISH_RATE = {limit: 12, windowMs: 60_000}
+const MAP_UPLOAD_RATE = {limit: 8, windowMs: 60_000}
+const MAP_READ_RATE = {limit: 180, windowMs: 60_000}
 
 // A DomainEvent minus its seq — what `decide` emits, before the shell assigns
 // the monotonic seq. Distributive over the union so it preserves each variant's
 // per-type fields (a plain Omit would collapse them).
 export type EventInput = DomainEvent extends infer E ? (E extends DomainEvent ? Omit<E, 'seq'> : never) : never
 
-type Connection = {writer: WritableStreamDefaultWriter<Uint8Array>; gm: boolean}
+type Connection = {
+  writer: WritableStreamDefaultWriter<Uint8Array>
+  gm: boolean
+  authToken: string
+  heartbeat: ReturnType<typeof setInterval>
+}
+
+type RateLimit = {limit: number; windowMs: number}
+type RateBucket = {count: number; resetAt: number}
 
 // ── Functional core ───────────────────────────────────────────────────────────
 //
@@ -279,6 +296,26 @@ export const decide = (state: TableState, actor: Actor, command: Command, ctx: D
   return {events: []}
 }
 
+const combatAfterPlayerLeft = (combat: CombatState | null, playerId: PlayerId): CombatState | null => {
+  if (!combat) return null
+  const removedIndex = combat.combatants.findIndex((combatant) => combatant.playerId === playerId)
+  if (removedIndex < 0) return combat
+
+  let combatants = combat.combatants.filter((combatant) => combatant.playerId !== playerId)
+  if (combatants.length === 0) return null
+
+  let turnIndex = combat.turnIndex
+  if (turnIndex != null) {
+    if (removedIndex < turnIndex) turnIndex -= 1
+    else if (removedIndex === turnIndex && turnIndex >= combatants.length) turnIndex = 0
+  }
+  if (turnIndex == null && combatants.every((combatant) => combatant.initiative != null)) {
+    combatants = orderCombatantsByInitiative(combatants)
+    turnIndex = 0
+  }
+  return {...combat, combatants, turnIndex}
+}
+
 // Apply one event to the canonical state, returning the next state. Pure and
 // total: an event decided against this state always folds. Mutates the passed
 // state in place (the shell owns a single canonical value) but never the inputs
@@ -297,6 +334,7 @@ export const fold = (state: TableState, event: DomainEvent): TableState => {
       return state
     case 'PlayerLeft':
       state.tokens.delete(event.playerId)
+      state.combat = combatAfterPlayerLeft(state.combat, event.playerId)
       return state
     case 'PlayerRenamed': {
       const token = state.tokens.get(event.playerId)
@@ -455,6 +493,8 @@ export class GameTable {
   private readonly connections = new Map<PlayerId, Connection>()
   private readonly log: DomainEvent[] = []
   private seq = 0
+  private ownerKeyHash: string | null = null
+  private readonly rateBuckets = new Map<string, RateBucket>()
   // Per-table salt so the spawn-point shuffle is stable within a table but
   // differs between tables. Derived once from the (random) DO id name.
   private readonly spawnSalt = Math.floor(Math.random() * 1e9)
@@ -471,6 +511,7 @@ export class GameTable {
     // completion and holds every incoming request until it resolves, so by the
     // time `fetch` runs the in-memory log, state, seq, and boardSeq are restored.
     void state.blockConcurrencyWhile(async () => {
+      this.ownerKeyHash = (await this.storage.get<string>(OWNER_KEY_HASH)) ?? null
       const stored = await this.storage.list<DomainEvent>({prefix: EVT_PREFIX})
       // list() yields keys in lexicographic order; the zero-padded EVT_KEY makes
       // that seq order, so the values replay in the order they were committed.
@@ -489,6 +530,7 @@ export class GameTable {
     if (url.pathname.endsWith('/stream')) return this.openStream(request)
     if (url.pathname.endsWith('/commands')) return this.handleCommand(request)
     if (url.pathname.endsWith('/board')) return this.publishBoard(request)
+    if (url.pathname.endsWith('/auth')) return this.handleAuth(request)
     return new Response('Not found', {status: 404})
   }
 
@@ -515,6 +557,83 @@ export class GameTable {
   // these from a connection.
   private actor(playerId: PlayerId): Actor {
     return {playerId, gm: this.connections.get(playerId)?.gm === true}
+  }
+
+  private rateLimit(subject: string, limit: RateLimit): Response | null {
+    const now = Date.now()
+    const bucket = this.rateBuckets.get(subject)
+    if (!bucket || bucket.resetAt <= now) {
+      this.rateBuckets.set(subject, {count: 1, resetAt: now + limit.windowMs})
+      return null
+    }
+    bucket.count += 1
+    if (bucket.count <= limit.limit) return null
+    const retryAfter = Math.max(1, Math.ceil((bucket.resetAt - now) / 1000))
+    return Response.json({error: 'Rate limit exceeded'}, {status: 429, headers: {'retry-after': String(retryAfter)}})
+  }
+
+  private ownerKeyFromRequest(request: Request): string {
+    const url = new URL(request.url)
+    return request.headers.get(GM_KEY_HEADER) ?? url.searchParams.get('gmKey') ?? ''
+  }
+
+  private async requireOwner(request: Request, claim: boolean): Promise<Response | null> {
+    const key = this.ownerKeyFromRequest(request)
+    if (!isCredential(key)) return Response.json({error: 'GM key required'}, {status: 403})
+
+    const keyHash = await hashSecret(key)
+    const storedHash = this.ownerKeyHash ?? (await this.storage.get<string>(OWNER_KEY_HASH)) ?? null
+    if (!storedHash) {
+      if (!claim) return Response.json({error: 'Unknown table owner'}, {status: 403})
+      this.ownerKeyHash = keyHash
+      await this.storage.put(OWNER_KEY_HASH, keyHash)
+      return null
+    }
+
+    this.ownerKeyHash = storedHash
+    if (!constantTimeEqual(storedHash, keyHash)) {
+      return Response.json({error: 'Invalid GM key'}, {status: 403})
+    }
+    return null
+  }
+
+  private authenticateConnection(playerId: PlayerId, authToken: string): boolean {
+    const connection = this.connections.get(playerId)
+    return !!connection && isCredential(authToken) && constantTimeEqual(connection.authToken, authToken)
+  }
+
+  private async handleAuth(request: Request): Promise<Response> {
+    const url = new URL(request.url)
+    const purpose = url.searchParams.get('purpose')
+
+    if (purpose === 'map-upload') {
+      const ownerError = await this.requireOwner(request, true)
+      if (ownerError) return ownerError
+      const rateError = this.rateLimit(`map-upload:${this.ownerKeyHash ?? 'owner'}`, MAP_UPLOAD_RATE)
+      if (rateError) return rateError
+      return Response.json({ok: true})
+    }
+
+    if (purpose === 'map-read') {
+      if (this.ownerKeyFromRequest(request)) {
+        const ownerError = await this.requireOwner(request, false)
+        if (ownerError) return ownerError
+        const rateError = this.rateLimit(`map-read:gm:${this.ownerKeyHash ?? 'owner'}`, MAP_READ_RATE)
+        if (rateError) return rateError
+        return Response.json({ok: true})
+      }
+
+      const playerId = url.searchParams.get('playerId') ?? ''
+      const authToken = url.searchParams.get('authToken') ?? ''
+      if (!this.authenticateConnection(playerId, authToken)) {
+        return Response.json({error: 'Map access requires a live table session'}, {status: 403})
+      }
+      const rateError = this.rateLimit(`map-read:${playerId}`, MAP_READ_RATE)
+      if (rateError) return rateError
+      return Response.json({ok: true})
+    }
+
+    return Response.json({error: 'Unknown auth purpose'}, {status: 400})
   }
 
   private spawn(): {x: number; y: number} {
@@ -551,12 +670,18 @@ export class GameTable {
     return pool[Math.floor(Math.random() * pool.length)]
   }
 
-  private openStream(request: Request): Response {
+  private async openStream(request: Request): Promise<Response> {
     const gm = new URL(request.url).searchParams.get('gm') === '1'
+    if (gm) {
+      const ownerError = await this.requireOwner(request, true)
+      if (ownerError) return ownerError
+    }
     const playerId = crypto.randomUUID().slice(0, 8)
+    const authToken = randomSecret()
 
     const {readable, writable} = new TransformStream<Uint8Array, Uint8Array>()
-    this.connections.set(playerId, {writer: writable.getWriter(), gm})
+    const heartbeat = setInterval(() => void this.write(playerId, STREAM_HEARTBEAT), STREAM_HEARTBEAT_MS)
+    this.connections.set(playerId, {writer: writable.getWriter(), gm, authToken, heartbeat})
 
     // A GM is a spectator: no token, sees everything, manages doors.
     if (!gm) {
@@ -567,7 +692,7 @@ export class GameTable {
     }
 
     const view = projectFor(this.state, this.actor(playerId), Date.now())
-    const snapshot: ViewMessage = {type: 'snapshot', you: playerId, ...view}
+    const snapshot: ViewMessage = {type: 'snapshot', you: playerId, authToken, ...view}
     void this.send(playerId, snapshot)
     this.projectAll()
 
@@ -593,6 +718,11 @@ export class GameTable {
     if (!this.connections.has(envelope.playerId)) {
       return Response.json({error: 'Unknown player'}, {status: 404})
     }
+    if (!this.authenticateConnection(envelope.playerId, envelope.authToken)) {
+      return Response.json({error: 'Invalid session token'}, {status: 403})
+    }
+    const rateError = this.rateLimit(`command:${envelope.playerId}`, COMMAND_RATE)
+    if (rateError) return rateError
 
     const parseError = validateCommand(envelope.command)
     if (parseError) return Response.json({error: parseError}, {status: 400})
@@ -608,9 +738,20 @@ export class GameTable {
   }
 
   // GM authoring: replace the board (new map assetRef + occluders) and push it
-  // to everyone connected. No token/connection required — this is the publish
-  // step from the single-player authoring tool.
+  // to everyone connected. Requires the per-table owner key; the editor and host
+  // mint and retain that key locally.
   private async publishBoard(request: Request): Promise<Response> {
+    const ownerError = await this.requireOwner(request, true)
+    if (ownerError) {
+      await discardRequestBody(request)
+      return ownerError
+    }
+    const rateError = this.rateLimit(`board:${this.ownerKeyHash ?? 'owner'}`, BOARD_PUBLISH_RATE)
+    if (rateError) {
+      await discardRequestBody(request)
+      return rateError
+    }
+
     let board: Board
     try {
       board = (await request.json()) as Board
@@ -647,10 +788,14 @@ export class GameTable {
   }
 
   private async send(playerId: PlayerId, message: ViewMessage): Promise<void> {
+    await this.write(playerId, encoder.encode(`data: ${JSON.stringify(message)}\n\n`))
+  }
+
+  private async write(playerId: PlayerId, payload: Uint8Array): Promise<void> {
     const connection = this.connections.get(playerId)
     if (!connection) return
     try {
-      await connection.writer.write(encoder.encode(`data: ${JSON.stringify(message)}\n\n`))
+      await connection.writer.write(payload)
     } catch {
       await this.dropPlayer(playerId)
     }
@@ -659,9 +804,9 @@ export class GameTable {
   private async dropPlayer(playerId: PlayerId): Promise<void> {
     const connection = this.connections.get(playerId)
     this.connections.delete(playerId)
+    if (connection) clearInterval(connection.heartbeat)
     if (this.state.tokens.has(playerId)) {
       this.commit({type: 'PlayerLeft', playerId})
-      this.removeCombatant(playerId)
     }
     if (connection) {
       try {
@@ -671,30 +816,6 @@ export class GameTable {
       }
     }
     this.projectAll()
-  }
-
-  private removeCombatant(playerId: PlayerId): void {
-    const combat = this.state.combat
-    if (!combat) return
-    const removedIndex = combat.combatants.findIndex((combatant) => combatant.playerId === playerId)
-    if (removedIndex < 0) return
-
-    let combatants = combat.combatants.filter((combatant) => combatant.playerId !== playerId)
-    if (combatants.length === 0) {
-      this.commit({type: 'CombatEnded'})
-      return
-    }
-
-    let turnIndex = combat.turnIndex
-    if (turnIndex != null) {
-      if (removedIndex < turnIndex) turnIndex -= 1
-      else if (removedIndex === turnIndex && turnIndex >= combatants.length) turnIndex = 0
-    }
-    if (turnIndex == null && combatants.every((combatant) => combatant.initiative != null)) {
-      combatants = orderCombatantsByInitiative(combatants)
-      turnIndex = 0
-    }
-    this.state.combat = {...combat, combatants, turnIndex}
   }
 }
 
@@ -735,4 +856,30 @@ const rollD6 = (): number => {
     value = bytes[0]
   }
   return (value % 6) + 1
+}
+
+const randomSecret = (): string => {
+  const bytes = new Uint8Array(AUTH_TOKEN_BYTES)
+  crypto.getRandomValues(bytes)
+  return [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+const isCredential = (value: string): boolean => /^[A-Za-z0-9_-]{32,128}$/.test(value)
+
+const hashSecret = async (value: string): Promise<string> => {
+  const digest = await crypto.subtle.digest('SHA-256', encoder.encode(value))
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+const constantTimeEqual = (a: string, b: string): boolean => {
+  const aBytes = encoder.encode(a)
+  const bBytes = encoder.encode(b)
+  if (aBytes.length !== bBytes.length) return false
+  let diff = 0
+  for (let i = 0; i < aBytes.length; i += 1) diff |= aBytes[i] ^ bBytes[i]
+  return diff === 0
+}
+
+const discardRequestBody = async (request: Request): Promise<void> => {
+  await request.arrayBuffer().catch(() => {})
 }

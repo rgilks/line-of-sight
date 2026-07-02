@@ -5,6 +5,35 @@ import {sentryVitePlugin} from '@sentry/vite-plugin'
 // node types in the typecheck — only URL + import.meta.url, both standard ESM.
 const entry = (name: string): string => new URL(`./web/${name}`, import.meta.url).pathname
 
+const staticShellUrls = [
+  '/',
+  '/solo',
+  '/controller',
+  '/manifest.webmanifest',
+  '/favicon.svg',
+  '/favicon.ico',
+  '/icons/apple-touch-icon.png',
+  '/icons/icon-180.png',
+  '/icons/icon-192.png',
+  '/icons/icon-512.png',
+  '/icons/maskable-192.png',
+  '/icons/maskable-512.png',
+  '/gltf/dice.gltf',
+  '/gltf/dice.bin',
+  '/token-portraits/officer.webp',
+  '/token-portraits/marine.webp',
+  '/token-portraits/scout.webp',
+  '/token-portraits/engineer.webp',
+  '/token-portraits/medic.webp',
+  '/token-portraits/scientist.webp',
+  '/token-portraits/trader.webp',
+  '/token-portraits/security.webp',
+  '/token-portraits/reptilian.webp',
+  '/token-portraits/amphibian.webp',
+  '/token-portraits/insectoid.webp',
+  '/token-portraits/psion.webp'
+]
+
 // Emit `precache.json` (read by web/public/sw.js on install) listing the offline
 // shell for the PWA entries — the /solo and /controller navigations, the static
 // /gltf/dice.* model, and the full static+dynamic import closure of those two
@@ -28,7 +57,7 @@ const precacheManifest = (): Plugin => ({
         visit(file.fileName)
       }
     }
-    const urls = ['/solo', '/controller', '/gltf/dice.gltf', '/gltf/dice.bin', ...[...closure].map((f) => `/${f}`)]
+    const urls = [...staticShellUrls, ...[...closure].map((f) => `/${f}`)]
     this.emitFile({type: 'asset', fileName: 'precache.json', source: JSON.stringify(urls)})
   }
 })
@@ -46,6 +75,7 @@ const sentryPlugins = (): PluginOption[] => {
     sentryVitePlugin({
       org: process.env.SENTRY_ORG ?? 'total-reality-engineering',
       project: process.env.SENTRY_PROJECT ?? 'line-of-sight',
+      url: process.env.SENTRY_URL ?? 'https://de.sentry.io',
       authToken: process.env.SENTRY_AUTH_TOKEN,
       release: {
         name: process.env.SENTRY_RELEASE ?? process.env.GITHUB_SHA

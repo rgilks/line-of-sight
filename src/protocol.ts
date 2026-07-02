@@ -39,7 +39,7 @@ export type ChatSay = {
   sentAt: number
 }
 
-export type CommandEnvelope = {playerId: PlayerId; command: Command}
+export type CommandEnvelope = {playerId: PlayerId; authToken: string; command: Command}
 
 // Server-internal facts; state is a fold over these. seq is monotonic per table.
 export type DomainEvent = {seq: number} & (
@@ -86,6 +86,7 @@ export type ViewMessage =
   | {
       type: 'snapshot'
       you: PlayerId
+      authToken: string
       board: Board
       tokens: Token[]
       says: ChatSay[]

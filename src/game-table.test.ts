@@ -277,6 +277,30 @@ describe('fold — events advance the canonical state', () => {
     fold(state, seq({type: 'PlayerLeft', playerId: 'c'}, 2))
     expect(state.tokens.has('c')).toBe(false)
   })
+
+  it('removes a departing player from combat through the event fold', () => {
+    const state = {...splitState(walledBoard()), combat: readyCombat()}
+
+    fold(state, seq({type: 'PlayerLeft', playerId: 'a'}, 1))
+
+    expect(state.tokens.has('a')).toBe(false)
+    expect(state.combat?.combatants.map((entry) => entry.playerId)).toEqual(['b'])
+    expect(state.combat?.turnIndex).toBe(0)
+  })
+
+  it('ends combat through replay when the last combatant leaves', () => {
+    const state = {
+      board: walledBoard(),
+      tokens: new Map([['a', token('a', 250, 500)]]),
+      says: [],
+      combat: {round: 1, turnIndex: 0, combatants: [combatant('a', 8, 0)]}
+    } satisfies TableState
+
+    fold(state, seq({type: 'PlayerLeft', playerId: 'a'}, 1))
+
+    expect(state.tokens.size).toBe(0)
+    expect(state.combat).toBeNull()
+  })
 })
 
 describe('decide — round-trip Say through fold builds a seq-stamped id', () => {
@@ -377,6 +401,18 @@ describe('replay — a table survives a restart', () => {
     // b rolled higher, so initiative order is b then a; the log advanced to turn 1.
     expect(rebuilt.combat?.combatants.map((c) => c.playerId)).toEqual(['b', 'a'])
     expect(rebuilt.combat?.turnIndex).toBe(1)
+  })
+
+  it('restores combat after a player disconnects during combat', () => {
+    const {log, live} = buildTable()
+    const left = {...{type: 'PlayerLeft', playerId: 'a'}, seq: log.length + 1} as DomainEvent
+    log.push(left)
+    fold(live, left)
+
+    const rebuilt = replay(log)
+
+    expect(rebuilt).toEqual(live)
+    expect(rebuilt.combat?.combatants.map((combatant) => combatant.playerId)).toEqual(['b'])
   })
 
   it('an empty log replays to the seed state', () => {

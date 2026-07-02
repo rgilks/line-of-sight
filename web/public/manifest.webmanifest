@@ -2,7 +2,7 @@
   "name": "Cepheus · Line of Sight",
   "short_name": "Line of Sight",
   "description": "A Cepheus Engine tactical map table with shared line of sight, by Total Reality Engineering.",
-  "start_url": "/",
+  "start_url": "/solo",
   "scope": "/",
   "display": "standalone",
   "orientation": "any",

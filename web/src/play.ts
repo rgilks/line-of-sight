@@ -34,7 +34,7 @@ import {
   type ViewMessage
 } from '../../src/protocol'
 import {publishGeneratedDeck, randomSeed} from './host'
-import {playerPlayUrl} from './table-links'
+import {ownerKeyForTable, playerPlayUrl} from './table-links'
 import {createTweenLoop} from './viewport'
 // 3D initiative dice, shared with the solo game. The module dynamic-import()s
 // three.js on first roll, so it stays out of this page's initial bundle and only
@@ -78,7 +78,7 @@ const resolveTableId = (): string => {
   const fromUrl = params.get('table')
   if (fromUrl) return fromUrl
   if (!isHost) return 'demo'
-  const minted = crypto.randomUUID().slice(0, 8)
+  const minted = crypto.randomUUID().replaceAll('-', '').slice(0, 16)
   const url = new URL(location.href)
   url.searchParams.set('table', minted)
   history.replaceState(null, '', url)
@@ -86,6 +86,7 @@ const resolveTableId = (): string => {
 }
 
 const tableId = resolveTableId()
+const ownerKey = isHost ? ownerKeyForTable(tableId) : (params.get('gmKey') ?? '')
 // A host minted a fresh id this load ⇒ it owns the table and should publish a
 // deck. A host arriving with an id already in the URL is a reload ⇒ reconnect
 // without republishing so connected players keep the same map.
@@ -109,6 +110,7 @@ const zoom = signal(1)
 const minZoom = 0.08
 const maxZoom = 4
 let loadedMapKey = ''
+let authToken = ''
 
 // Movement animation: renderPos is each token's currently-drawn position; anim
 // holds in-flight eases. The shared tween/rAF core lives in viewport.ts; the rAF
@@ -170,16 +172,30 @@ const targetedToken = (): Token | null => {
 
 const post = (command: CommandEnvelope['command']): void => {
   const playerId = you.value
-  if (!playerId) return
+  if (!playerId || !authToken) return
   void fetch(`/api/tables/${tableId}/commands`, {
     method: 'POST',
     headers: {'content-type': 'application/json'},
-    body: JSON.stringify({playerId, command} satisfies CommandEnvelope)
+    body: JSON.stringify({playerId, authToken, command} satisfies CommandEnvelope)
   }).then(async (response) => {
     if (response.ok) return
     const body = (await response.json().catch(() => null)) as {error?: string} | null
     status.value = body?.error ?? 'Command rejected.'
   })
+}
+
+const mapAuthParams = (): URLSearchParams => {
+  const search = new URLSearchParams()
+  if (isGm && ownerKey) {
+    search.set('gmKey', ownerKey)
+    return search
+  }
+  const playerId = you.value
+  if (playerId && authToken) {
+    search.set('playerId', playerId)
+    search.set('authToken', authToken)
+  }
+  return search
 }
 
 const ensureMap = (next: Board): void => {
@@ -195,7 +211,9 @@ const ensureMap = (next: Board): void => {
   image.onload = () => {
     mapImage.value = image
   }
-  image.src = `/api/tables/${tableId}/map/${next.assetRef}?v=${next.boardSeq ?? 0}`
+  const search = mapAuthParams()
+  search.set('v', String(next.boardSeq ?? 0))
+  image.src = `/api/tables/${tableId}/map/${next.assetRef}?${search.toString()}`
 }
 
 const boardGeometryChanged = (previous: Board | null, next: Board): boolean => {
@@ -433,7 +451,10 @@ const handleWheel = (event: WheelEvent): void => {
 }
 
 const connect = (): void => {
-  const source = new EventSource(`/api/tables/${tableId}/stream${isGm ? '?gm=1' : ''}`)
+  const search = new URLSearchParams()
+  if (isGm) search.set('gm', '1')
+  if (isGm && ownerKey) search.set('gmKey', ownerKey)
+  const source = new EventSource(`/api/tables/${tableId}/stream${search.size > 0 ? `?${search.toString()}` : ''}`)
   source.onopen = () => {
     status.value = `Connected · table "${tableId}"${isGm ? ' · GM view' : ''}`
   }
@@ -442,7 +463,10 @@ const connect = (): void => {
   }
   source.onmessage = (event) => {
     const message = JSON.parse(event.data) as ViewMessage
-    if (message.type === 'snapshot') you.value = message.you
+    if (message.type === 'snapshot') {
+      you.value = message.you
+      authToken = message.authToken
+    }
     applyView(message.board, message.tokens, message.says, message.combat ?? null)
   }
   window.addEventListener('beforeunload', () => source.close())
@@ -1450,7 +1474,7 @@ const startSession = async (): Promise<void> => {
   if (hostShouldPublish) {
     status.value = 'Generating a deck…'
     try {
-      const {rooms} = await publishGeneratedDeck(tableId, randomSeed())
+      const {rooms} = await publishGeneratedDeck(tableId, randomSeed(), ownerKey)
       status.value = `Hosting · ${rooms} rooms · share the player link`
     } catch (error) {
       status.value = error instanceof Error ? error.message : 'Could not generate a deck.'
@@ -1486,7 +1510,7 @@ const wireNewMap = (): void => {
   button.addEventListener('click', () => {
     button.disabled = true
     status.value = 'Generating a new deck…'
-    void publishGeneratedDeck(tableId, randomSeed())
+    void publishGeneratedDeck(tableId, randomSeed(), ownerKey)
       .then(({rooms}) => {
         status.value = `New deck · ${rooms} rooms`
       })

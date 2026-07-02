@@ -20,13 +20,20 @@ import type {SoloEvent} from '../web/src/solo/reducer'
 import type {Action, SoloState} from '../web/src/solo/model'
 
 const encoder = new TextEncoder()
+const STREAM_HEARTBEAT_MS = 25000
+const STREAM_HEARTBEAT = encoder.encode(': keepalive\n\n')
 const EVT_PREFIX = 'evt:'
 // Zero-padded so storage.list() (lexicographic) yields events in fold order.
 const EVT_KEY = (n: number): string => `${EVT_PREFIX}${String(n).padStart(12, '0')}`
 
 // A connection: a `play` client carries its assigned seat (and folds events); a
 // controller carries its actor id (LOS-gated projection); a board has neither.
-type Connection = {writer: WritableStreamDefaultWriter<Uint8Array>; actor: string | null; seat: string | null}
+type Connection = {
+  writer: WritableStreamDefaultWriter<Uint8Array>
+  actor: string | null
+  seat: string | null
+  heartbeat: ReturnType<typeof setInterval>
+}
 
 // Actions a client may POST. System/director actions (AddWave) and seat lifecycle
 // (handled server-side on connect/disconnect) are rejected at the transport.
@@ -103,16 +110,11 @@ export class SoloRoom {
       this.apply({action: {t: 'ClaimSeat', seatId: seat, joinedAt: this.nextJoin}})
       this.nextJoin += 1
     }
-    const connection: Connection = {writer: writable.getWriter(), actor, seat}
+    const heartbeat = setInterval(() => void this.write(id, STREAM_HEARTBEAT), STREAM_HEARTBEAT_MS)
+    const connection: Connection = {writer: writable.getWriter(), actor, seat, heartbeat}
     this.connections.set(id, connection)
     void this.send(id, this.snapshotFor(connection, (this.session ?? session).state))
-    request.signal.addEventListener('abort', () => {
-      const conn = this.connections.get(id)
-      this.connections.delete(id)
-      if (conn) void conn.writer.close().catch(() => {})
-      // Releasing the seat redistributes its pieces back across the remaining seats.
-      if (conn?.seat) this.apply({action: {t: 'ReleaseSeat', seatId: conn.seat}})
-    })
+    request.signal.addEventListener('abort', () => this.closeConnection(id))
     return new Response(readable, {
       headers: {'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive'}
     })
@@ -217,12 +219,26 @@ export class SoloRoom {
   }
 
   private async send(id: string, message: unknown): Promise<void> {
+    await this.write(id, encoder.encode(`data: ${JSON.stringify(message)}\n\n`))
+  }
+
+  private async write(id: string, payload: Uint8Array): Promise<void> {
     const connection = this.connections.get(id)
     if (!connection) return
     try {
-      await connection.writer.write(encoder.encode(`data: ${JSON.stringify(message)}\n\n`))
+      await connection.writer.write(payload)
     } catch {
-      this.connections.delete(id)
+      this.closeConnection(id)
     }
+  }
+
+  private closeConnection(id: string): void {
+    const connection = this.connections.get(id)
+    if (!connection) return
+    this.connections.delete(id)
+    clearInterval(connection.heartbeat)
+    void connection.writer.close().catch(() => {})
+    // Releasing the seat redistributes its pieces back across the remaining seats.
+    if (connection.seat) this.apply({action: {t: 'ReleaseSeat', seatId: connection.seat}})
   }
 }

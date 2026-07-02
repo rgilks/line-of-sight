@@ -4,7 +4,7 @@
 // serves network-first with a cache fallback. It deliberately never caches the
 // live multiplayer API or map images — a stale board or fog would be wrong, and a
 // cached SSE stream would be catastrophic.
-const SHELL = 'los-shell-v2'
+const SHELL = 'los-shell-v3'
 
 // Precache the offline shell from the build-generated list (hashed asset names,
 // the lazy three.js dice chunk, /gltf/dice.*, and the /solo + /controller
@@ -38,6 +38,22 @@ self.addEventListener('activate', (event) => {
 })
 
 const isApi = (url) => url.pathname.startsWith('/api/')
+const isRuntimeStatic = (url) =>
+  url.pathname.startsWith('/assets/') ||
+  url.pathname.startsWith('/gltf/') ||
+  url.pathname.startsWith('/icons/') ||
+  url.pathname.startsWith('/token-portraits/') ||
+  url.pathname === '/favicon.svg' ||
+  url.pathname === '/favicon.ico' ||
+  url.pathname === '/manifest.webmanifest'
+
+const navigationFallback = async (url) => {
+  const exact = await caches.match(new Request(`${url.origin}${url.pathname}`))
+  if (exact) return exact
+  if (url.pathname.startsWith('/solo')) return caches.match('/solo')
+  if (url.pathname.startsWith('/controller')) return caches.match('/controller')
+  return caches.match('/')
+}
 
 self.addEventListener('fetch', (event) => {
   const {request} = event
@@ -53,7 +69,7 @@ self.addEventListener('fetch', (event) => {
     (async () => {
       try {
         const response = await fetch(request)
-        if (response.ok && (request.mode === 'navigate' || url.pathname.startsWith('/assets/'))) {
+        if (response.ok && (request.mode === 'navigate' || isRuntimeStatic(url))) {
           const cache = await caches.open(SHELL)
           cache.put(request, response.clone())
         }
@@ -62,7 +78,7 @@ self.addEventListener('fetch', (event) => {
         const cached = await caches.match(request)
         if (cached) return cached
         if (request.mode === 'navigate') {
-          const fallback = await caches.match('/')
+          const fallback = await navigationFallback(url)
           if (fallback) return fallback
         }
         throw new Error('offline and not cached')

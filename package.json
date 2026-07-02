@@ -1,7 +1,7 @@
 {
   "name": "line-of-sight",
   "version": "0.1.0",
-  "private": false,
+  "private": true,
   "description": "A TypeScript browser lab for map line-of-sight extraction and review.",
   "license": "MIT",
   "type": "module",

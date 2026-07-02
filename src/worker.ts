@@ -13,8 +13,8 @@ export interface Env extends SentryEnv {
   MAPS: R2Bucket
 }
 
-// Route /api/tables/<id>/(stream|commands|board) to that table's Durable Object.
-const tableRoute = /^\/api\/tables\/([^/]+)\/(stream|commands|board)$/
+// Route /api/tables/<id>/(stream|commands|board|auth) to that table's Durable Object.
+const tableRoute = /^\/api\/tables\/([^/]+)\/(stream|commands|board|auth)$/
 // Route /api/solo/<id>/(stream|commands|import) to that game's SoloRoom DO.
 const soloRoute = /^\/api\/solo\/([^/]+)\/(stream|commands|import)$/
 // GM-uploaded map storage. POST .../map uploads; GET .../map/<ref> serves.
@@ -22,6 +22,7 @@ const mapUploadRoute = /^\/api\/tables\/([^/]+)\/map$/
 const mapGetRoute = /^\/api\/tables\/([^/]+)\/map\/([^/]+)$/
 
 const MAX_MAP_BYTES = 25_000_000
+const MAP_CONTENT_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp'])
 
 const handler = {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -41,7 +42,7 @@ const handler = {
 
     const mapGet = mapGetRoute.exec(url.pathname)
     if (mapGet && request.method === 'GET') {
-      return serveMap(env, mapGet[1], mapGet[2])
+      return serveMap(request, env, mapGet[1], mapGet[2])
     }
 
     const match = tableRoute.exec(url.pathname)
@@ -63,9 +64,20 @@ const handler = {
 // Store a GM-uploaded map under an unguessable per-table key and return its ref.
 // The bucket is private; bytes are only reachable via serveMap below.
 const uploadMap = async (request: Request, env: Env, tableId: string): Promise<Response> => {
-  const contentType = request.headers.get('content-type') ?? ''
-  if (!contentType.startsWith('image/')) {
-    return Response.json({error: 'Map must be an image.'}, {status: 415})
+  const auth = await authorizeTableMap(request, env, tableId, 'map-upload')
+  if (!auth.ok) {
+    await drainRequestBody(request)
+    return auth
+  }
+
+  const contentType = (request.headers.get('content-type') ?? '').split(';', 1)[0].trim().toLowerCase()
+  if (!MAP_CONTENT_TYPES.has(contentType)) {
+    await drainRequestBody(request)
+    return Response.json({error: 'Map must be a PNG, JPEG, or WebP image.'}, {status: 415})
+  }
+  const contentLength = Number(request.headers.get('content-length') ?? Number.NaN)
+  if (Number.isFinite(contentLength) && contentLength > MAX_MAP_BYTES) {
+    return Response.json({error: 'Map too large.'}, {status: 413})
   }
 
   const bytes = await request.arrayBuffer()
@@ -98,9 +110,12 @@ const pruneOldMaps = async (env: Env, tableId: string, keepKey: string): Promise
   if (stale.length > 0) await env.MAPS.delete(stale)
 }
 
-// Stream a stored map. Private caching only; not a public/crawlable URL. Once
-// auth lands this is where game-membership gating goes.
-const serveMap = async (env: Env, tableId: string, assetRef: string): Promise<Response> => {
+// Stream a stored map only to the GM owner key or a live table connection token.
+// Private caching only; not a public/crawlable URL.
+const serveMap = async (request: Request, env: Env, tableId: string, assetRef: string): Promise<Response> => {
+  const auth = await authorizeTableMap(request, env, tableId, 'map-read')
+  if (!auth.ok) return auth
+
   const object = await env.MAPS.get(`${tableId}/${assetRef}`)
   if (!object) return new Response('Not found', {status: 404})
 
@@ -108,6 +123,30 @@ const serveMap = async (env: Env, tableId: string, assetRef: string): Promise<Re
   object.writeHttpMetadata(headers)
   headers.set('cache-control', 'private, max-age=3600')
   return new Response(object.body, {headers})
+}
+
+const authorizeTableMap = async (
+  request: Request,
+  env: Env,
+  tableId: string,
+  purpose: 'map-upload' | 'map-read'
+): Promise<Response> => {
+  const sourceUrl = new URL(request.url)
+  const url = new URL(request.url)
+  url.pathname = `/api/tables/${tableId}/auth`
+  url.searchParams.set('purpose', purpose)
+  if (purpose === 'map-read') {
+    for (const key of ['gmKey', 'playerId', 'authToken']) {
+      const value = sourceUrl.searchParams.get(key)
+      if (value) url.searchParams.set(key, value)
+    }
+  }
+  const stub = env.TABLES.get(env.TABLES.idFromName(tableId))
+  return stub.fetch(new Request(url, {method: 'POST', headers: request.headers}))
+}
+
+const drainRequestBody = async (request: Request): Promise<void> => {
+  await request.arrayBuffer().catch(() => {})
 }
 
 export default Sentry.withSentry(sentryOptions, handler)

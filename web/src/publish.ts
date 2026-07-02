@@ -14,7 +14,7 @@ import {
   sightRadius,
   tablePublished
 } from './state'
-import {gmPlayUrl, playerPlayUrl} from './table-links'
+import {gmPlayUrl, ownerHeaders, ownerKeyForTable, playerPlayUrl} from './table-links'
 import {isDoorOpen} from './visibility'
 
 const MAX_DIMENSION = 2048
@@ -87,6 +87,7 @@ export const publishToTable = async (rawTableId: string, options?: {live?: boole
   }
 
   try {
+    const ownerKey = ownerKeyForTable(tableId)
     const image = await composeMapImage()
     if (!image) {
       setStatus('Could not compose the map image.')
@@ -95,7 +96,7 @@ export const publishToTable = async (rawTableId: string, options?: {live?: boole
 
     const upload = await fetch(`/api/tables/${tableId}/map`, {
       method: 'POST',
-      headers: {'content-type': 'image/png'},
+      headers: {'content-type': 'image/png', ...ownerHeaders(ownerKey)},
       body: image
     })
     if (!upload.ok) {
@@ -106,7 +107,7 @@ export const publishToTable = async (rawTableId: string, options?: {live?: boole
 
     const published = await fetch(`/api/tables/${tableId}/board`, {
       method: 'POST',
-      headers: {'content-type': 'application/json'},
+      headers: {'content-type': 'application/json', ...ownerHeaders(ownerKey)},
       body: JSON.stringify(buildBoardPayload(assetRef))
     })
     if (published.ok) {
@@ -130,5 +131,5 @@ export const publishToTable = async (rawTableId: string, options?: {live?: boole
 
 export const playLinksFor = (rawTableId: string): {player: string; gm: string} => ({
   player: playerPlayUrl(rawTableId),
-  gm: gmPlayUrl(rawTableId)
+  gm: gmPlayUrl(rawTableId, ownerKeyForTable(rawTableId))
 })

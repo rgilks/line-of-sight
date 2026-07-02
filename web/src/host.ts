@@ -6,6 +6,7 @@
 import {generateMap} from './synth/generate-map'
 import {renderMap} from './synth/render-map'
 import {defaultSpec} from './synth/types'
+import {ownerHeaders} from './table-links'
 import type {Board} from '../../src/protocol'
 
 const SIGHT_RADIUS = 700
@@ -33,13 +34,13 @@ export type PublishedDeck = {seed: number; rooms: number}
  * Generate a deck for `seed`, upload its image, and publish the board to
  * `tableId`. Returns a small summary for status text. Throws on network failure.
  */
-export const publishGeneratedDeck = async (tableId: string, seed: number): Promise<PublishedDeck> => {
+export const publishGeneratedDeck = async (tableId: string, seed: number, ownerKey: string): Promise<PublishedDeck> => {
   const map = generateMap(defaultSpec(seed))
   const image = await renderDeckImage(map)
 
   const upload = await fetch(`/api/tables/${tableId}/map`, {
     method: 'POST',
-    headers: {'content-type': 'image/png'},
+    headers: {'content-type': 'image/png', ...ownerHeaders(ownerKey)},
     body: image
   })
   if (!upload.ok) throw new Error(`Map upload failed (${upload.status}).`)
@@ -75,7 +76,7 @@ export const publishGeneratedDeck = async (tableId: string, seed: number): Promi
 
   const published = await fetch(`/api/tables/${tableId}/board`, {
     method: 'POST',
-    headers: {'content-type': 'application/json'},
+    headers: {'content-type': 'application/json', ...ownerHeaders(ownerKey)},
     body: JSON.stringify(board)
   })
   if (!published.ok) throw new Error(`Publish failed (${published.status}).`)

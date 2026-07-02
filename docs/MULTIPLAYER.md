@@ -7,8 +7,9 @@ as we build, and the [Roadmap](#roadmap--progress) at the bottom tracks status.
 
 Status: the **core loop is built and live** — a GM hosts a generated deck, players
 join with a server-authoritative per-POV view and fog, moves are validated, doors
-re-gate sight, and GM maps are stored privately in R2. The [Roadmap](#roadmap--progress)
-tracks what's left (notably Discord auth, event-log persistence, and a lobby).
+re-gate sight, table writes are owner-key gated, and GM maps are stored privately
+in R2. The [Roadmap](#roadmap--progress) tracks what's left (notably Discord
+identity auth, stronger reconnect, and a lobby).
 It's a prototype; we favour the smallest thing that proves each idea over
 completeness.
 
@@ -276,15 +277,20 @@ stream sends a full per-player snapshot first, then deltas.
 
 ## Auth
 
-**To start: no auth at all.** A player is just a connection — the server assigns
-an ephemeral player id when they open the stream (optionally with a typed display
-name). Nothing is gated, no accounts, no login. This keeps the whole first build
-focused on the novel risk (the multiplayer-POV loop) instead of auth plumbing.
+Current lightweight auth: the host/editor mints a per-table **GM owner key** and
+keeps it in local storage. GM-only operations (`POST /map`, `POST /board`, and
+omniscient `?gm=1` streams) must present that key. Each live stream also receives
+a server-issued **session token** in its first snapshot; command POSTs and private
+map reads must present the matching player id + token.
+
+This is not account identity. A player is still just a live connection, and a
+leaked player invite still lets someone join as another participant. The point of
+this phase is to stop unauthenticated public writes, table overwrites, and raw map
+fetches without pulling Discord OAuth into the core table loop.
 
 **Later (Phase 3): Discord OAuth2** authorization-code flow on the Worker — we
 only need identity (Discord user id + display name) → map to a player; we don't
-store tokens we don't need; session via a signed cookie. Added once the core loop
-works, because auth is well-trodden and not where the risk is.
+store tokens we don't need; session via a signed cookie.
 
 ## Assets (GM-uploaded maps)
 
@@ -312,9 +318,10 @@ an R2 lifecycle rule or a delete on table teardown.
 
 Privacy, honestly stated for a prototype: the bucket is private and bytes are
 only reachable through the Worker route, so maps are not "just shared on the
-internet." With **no auth yet**, anyone who knows `tableId` + the `uuid` assetRef
-can fetch — i.e. link-private (unguessable), not access-controlled. When Discord
-auth lands, the serve route gets gated on game membership at that single point.
+internet." Reads are gated by the GM owner key or by a live player session token.
+That is access-controlled at the table/session level, not user-identity auth; a
+future Discord session can replace the connection-token membership proof at this
+single Worker/DO boundary.
 
 Responsibility: maps are user-generated content the GM chooses to upload; we
 store them privately but are not the arbiter of what a group uses for its game.
@@ -343,10 +350,12 @@ layered-separation rule intact.
   ordering.
 - **SSE + single POST**, transport-agnostic; WS+hibernation is the later upgrade
   if idle cost matters.
-- **No auth to start** — ephemeral server-assigned player ids. Discord OAuth is
-  added only after the core loop works.
+- **Lightweight table auth** — owner keys gate GM writes and omniscient views;
+  live session tokens gate player commands and map reads. Discord OAuth remains
+  the later identity layer.
 - **GM-uploaded maps stored privately in R2**, served only via the Worker
-  (private bucket, unguessable key), synced by `assetRef`. Auth-gated later.
+  (private bucket, unguessable key), synced by `assetRef`, and gated through the
+  table DO before R2 bytes are streamed.
 
 ## Open questions
 
@@ -371,8 +380,8 @@ Status keys: `[ ]` not started · `[~]` in progress · `[x]` done.
 - [x] `POST /api/tables/:id/commands` → DO applies `MoveToken`.
 - [x] `GET /api/tables/:id/stream` SSE with per-player snapshot + deltas.
 - [x] Per-player token gating via `hasLineOfSight`.
-- [x] No auth: server assigns an ephemeral player id on connect; each player
-      owns one token.
+- [x] Lightweight table auth: GM owner key plus server-issued per-connection
+      command/map-read token.
 - [x] Demo: two browsers, two POVs, each sees the other's token only when in
       view.
 
@@ -389,7 +398,7 @@ Status keys: `[ ]` not started · `[~]` in progress · `[x]` done.
 
 ### Phase 3 — Discord auth
 - [ ] OAuth2 code flow on the Worker; session cookie; player identity.
-- [ ] Gate join/commands on auth.
+- [ ] Gate joins/commands on user identity instead of only live session tokens.
 
 ### Phase 4 — Hardening (prototype-level)
 - [ ] Optimistic-UI reconciliation polish.
