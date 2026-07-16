@@ -18,8 +18,6 @@ const staticShellUrls = [
   '/icons/icon-512.png',
   '/icons/maskable-192.png',
   '/icons/maskable-512.png',
-  '/gltf/dice.gltf',
-  '/gltf/dice.bin',
   '/token-portraits/officer.webp',
   '/token-portraits/marine.webp',
   '/token-portraits/scout.webp',
@@ -35,10 +33,12 @@ const staticShellUrls = [
 ]
 
 // Emit `precache.json` (read by web/public/sw.js on install) listing the offline
-// shell for the PWA entries — the /solo and /controller navigations, the static
-// /gltf/dice.* model, and the full static+dynamic import closure of those two
-// entries (which pulls in the lazily-imported 3D-dice chunk). Hashed filenames
-// come straight from the bundle, so the list can never drift from what shipped.
+// shell for the PWA entries — the /solo and /controller navigations, the full
+// static+dynamic import closure of those two entries (which pulls in the
+// lazily-imported 3D-dice chunk), and every emitted .wasm asset (the dice engine
+// loads its wasm via `new URL(..., import.meta.url)`, which the chunk graph
+// doesn't see). Hashed filenames come straight from the bundle, so the list can
+// never drift from what shipped.
 const precacheManifest = (): Plugin => ({
   name: 'precache-manifest',
   apply: 'build',
@@ -56,6 +56,7 @@ const precacheManifest = (): Plugin => ({
       if (file.type === 'chunk' && file.isEntry && (file.name === 'solo' || file.name === 'controller')) {
         visit(file.fileName)
       }
+      if (file.type === 'asset' && file.fileName.endsWith('.wasm')) closure.add(file.fileName)
     }
     const urls = [...staticShellUrls, ...[...closure].map((f) => `/${f}`)]
     this.emitFile({type: 'asset', fileName: 'precache.json', source: JSON.stringify(urls)})
