@@ -7,7 +7,7 @@
   "type": "module",
   "scripts": {
     "build": "npm run build:web",
-    "build:web": "vite build",
+    "build:web": "vite build && node scripts/stamp-sw.mjs",
     "dev": "vite --host 127.0.0.1",
     "lint": "biome check .",
     "format": "biome format --write .",

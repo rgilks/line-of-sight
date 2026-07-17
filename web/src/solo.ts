@@ -59,14 +59,10 @@ import {
 import type {AttackFx} from './solo/model'
 import {createTweenLoop} from './viewport'
 import {installErrorReporting} from './error-reporting'
-import {registerServiceWorker} from './register-sw'
 import './solo.css'
 
 // Surface uncaught errors / rejections in the console (see error-reporting.ts).
 installErrorReporting('solo')
-// Install as an offline PWA: the SW precaches the shell + the 3D-dice chunk, so
-// after a first online visit the whole game loads and plays with no network.
-registerServiceWorker()
 
 // ---- movement animation (tween) ------------------------------------------
 // Mirrors the multiplayer client's ease so glides feel identical. The shared

@@ -4,7 +4,7 @@
 // serves network-first with a cache fallback. It deliberately never caches the
 // live multiplayer API or map images — a stale board or fog would be wrong, and a
 // cached SSE stream would be catastrophic.
-const SHELL = 'los-shell-v3'
+const SHELL = 'los-shell-__CACHE_VERSION__'
 
 // Precache the offline shell from the build-generated list (hashed asset names,
 // the lazy three.js dice chunk, /gltf/dice.*, and the /solo + /controller
@@ -23,8 +23,11 @@ const precache = async () => {
 }
 
 self.addEventListener('install', (event) => {
-  self.skipWaiting()
   event.waitUntil(precache())
+})
+
+self.addEventListener('message', (event) => {
+  if (event.data?.type === 'SKIP_WAITING') self.skipWaiting()
 })
 
 self.addEventListener('activate', (event) => {

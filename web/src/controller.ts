@@ -9,12 +9,10 @@
 // URL: /controller?table=<roomId>&actor=<characterId>[&seed=<n>]
 import './sentry'
 import {installErrorReporting} from './error-reporting'
-import {registerServiceWorker} from './register-sw'
 import type {ControllerView, FoeRow} from './solo/projection'
 import './controller.css'
 
 installErrorReporting('controller')
-registerServiceWorker()
 
 const params = new URLSearchParams(location.search)
 const room = params.get('table') ?? 'demo'

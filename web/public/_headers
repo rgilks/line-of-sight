@@ -1,0 +1,11 @@
+/*
+  Cache-Control: no-cache
+
+/sw.js
+  Cache-Control: no-store, no-cache, must-revalidate
+
+/precache.json
+  Cache-Control: no-store, no-cache, must-revalidate
+
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable

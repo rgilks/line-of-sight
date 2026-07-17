@@ -63,6 +63,25 @@ const precacheManifest = (): Plugin => ({
   }
 })
 
+// Every HTML entry gets the same update lifecycle, including the editor and
+// read-only board routes. Keeping it as a separate entry prevents route modules
+// from accidentally omitting PWA registration.
+const pwaUpdateEntry = (): Plugin => ({
+  name: 'pwa-update-entry',
+  transformIndexHtml: {
+    order: 'pre',
+    handler() {
+      return [
+        {
+          tag: 'script',
+          attrs: {type: 'module', src: '/src/pwa-update.ts'},
+          injectTo: 'head'
+        }
+      ]
+    }
+  }
+})
+
 // Minimal env read without pulling in @types/node (kept out of the typecheck).
 declare const process: {env: Record<string, string | undefined>}
 const apiTarget = (): string => process.env.LOS_API_TARGET ?? 'https://los.tre.systems'
@@ -92,7 +111,7 @@ const sentryPlugins = (): PluginOption[] => {
 
 export default defineConfig({
   root: 'web',
-  plugins: [precacheManifest(), ...sentryPlugins()],
+  plugins: [pwaUpdateEntry(), precacheManifest(), ...sentryPlugins()],
   test: {
     include: ['src/**/*.test.ts', '../src/**/*.test.ts', '../core/**/*.test.ts']
   },

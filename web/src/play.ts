@@ -41,7 +41,6 @@ import {createTweenLoop} from './viewport'
 // loads the first time a player rolls initiative.
 import {hideDice, rollDice, showDice} from './dice-overlay'
 import {installErrorReporting} from './error-reporting'
-import {registerServiceWorker} from './register-sw'
 import './play.css'
 
 // Surface uncaught errors / rejections in the console (see error-reporting.ts).
@@ -1564,10 +1563,6 @@ const setupBoardDisplay = async (): Promise<void> => {
 
 mount()
 if (isBoard) void setupBoardDisplay()
-
-// Register the service worker so the app is installable as a PWA (home-screen on
-// iOS/iPad, standalone window). The SW never caches the live game API.
-registerServiceWorker()
 
 effect(() => {
   portraitTick.value
